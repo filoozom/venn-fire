@@ -1,5 +1,9 @@
 import { databaseOverview, setNoStoreHeaders } from '../server/database.mjs'
 import { refreshAllSources } from '../server/refresh-sources.mjs'
+import {
+  activateRefreshScheduler,
+  scheduleNextRefresh,
+} from '../server/refresh-scheduler.mjs'
 
 export default async function handler(request, response) {
   setNoStoreHeaders(response)
@@ -11,13 +15,24 @@ export default async function handler(request, response) {
 
   const requestedAtMs = Date.now()
   try {
-    const sources = await refreshAllSources({ requestedAtMs })
+    const deployment = await activateRefreshScheduler()
+    const refreshPromise = refreshAllSources({ requestedAtMs })
+    let scheduler
+    try {
+      scheduler = await scheduleNextRefresh({ nowMs: requestedAtMs })
+    } catch (error) {
+      console.error('Next refresh could not be queued:', error?.message || error)
+      scheduler = { ok: false, error: 'Next refresh could not be queued' }
+    }
+    const sources = await refreshPromise
     const overview = await databaseOverview()
     const failed = sources.filter((source) => source.status === 'failed')
     return response.status(200).json({
-      ok: failed.length === 0,
+      ok: failed.length === 0 && scheduler.ok,
       generatedAt: new Date(requestedAtMs).toISOString(),
       schedulerGranularityMinutes: 5,
+      deployment,
+      scheduler,
       sources,
       database: overview,
     })

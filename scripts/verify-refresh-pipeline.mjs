@@ -5,6 +5,14 @@ import assert from 'node:assert/strict'
 import { LIVE_AIRCRAFT_PROVIDERS, normalizeAircraft } from '../api/live-situation.js'
 import { payloadHash, setNoStoreHeaders } from '../server/database.mjs'
 import { REFRESH_SOURCES } from '../server/refresh-sources.mjs'
+import {
+  nextRefreshWakeAt,
+  REFRESH_INTERVAL_MS,
+  REFRESH_OFFSET_MS,
+  REFRESH_QUEUE_TOPIC,
+  REFRESH_SCHEDULER_DATASET,
+  refreshSchedulerDeployment,
+} from '../server/refresh-scheduler.mjs'
 
 const expectedSources = [
   'aircraft',
@@ -23,6 +31,23 @@ assert.ok(REFRESH_SOURCES.every((source) => source.intervalMinutes >= 5))
 assert.ok(REFRESH_SOURCES.every((source) => source.intervalMinutes % 5 === 0))
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'aircraft').intervalMinutes, 5)
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'firms').intervalMinutes, 15)
+assert.equal(REFRESH_QUEUE_TOPIC, 'venn-fire-refresh')
+assert.equal(REFRESH_SCHEDULER_DATASET, 'refresh-scheduler')
+assert.equal(REFRESH_INTERVAL_MS, 5 * 60_000)
+assert.equal(REFRESH_OFFSET_MS, 2 * 60_000)
+assert.deepEqual(refreshSchedulerDeployment({
+  VERCEL_DEPLOYMENT_ID: 'dpl_test',
+  VERCEL_GIT_COMMIT_SHA: 'abc123',
+}), { deploymentId: 'dpl_test', gitCommitSha: 'abc123' })
+assert.throws(() => refreshSchedulerDeployment({}), /VERCEL_DEPLOYMENT_ID/)
+assert.equal(
+  new Date(nextRefreshWakeAt(Date.parse('2026-08-15T14:19:39.000Z'))).toISOString(),
+  '2026-08-15T14:22:00.000Z',
+)
+assert.equal(
+  new Date(nextRefreshWakeAt(Date.parse('2026-08-15T14:22:00.000Z'))).toISOString(),
+  '2026-08-15T14:27:00.000Z',
+)
 
 const provider = LIVE_AIRCRAFT_PROVIDERS[0]
 const normalized = normalizeAircraft({

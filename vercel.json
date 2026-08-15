@@ -3,8 +3,25 @@
   "functions": {
     "api/refresh.js": {
       "maxDuration": 60
+    },
+    "api/refresh-queue.js": {
+      "maxDuration": 60,
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "venn-fire-refresh",
+          "retryAfterSeconds": 60,
+          "initialDelaySeconds": 0
+        }
+      ]
     }
   },
+  "crons": [
+    {
+      "path": "/api/refresh",
+      "schedule": "11 3 * * *"
+    }
+  ],
   "headers": [
     {
       "source": "/api/(.*)",

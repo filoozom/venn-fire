@@ -9,13 +9,17 @@ The browser is database-only. It calls `/api/data` immediately and every five mi
 The production flow is:
 
 ```text
-GitHub schedule (every 5 min)
-  → /api/refresh Vercel Function
+Vercel Queue delayed wake-up (every 5 min)
+  → private /api/refresh-queue Vercel Function
   → per-source Postgres lease
   → fixed upstream provider
   → current dataset + historical version + refresh-run record
   → /api/data
   → five-minute browser timeline
+
+GitHub fallback schedule / deployment push
+  → public /api/refresh bootstrap and fallback
+  → the same leased refresh + next Vercel Queue wake-up
 ```
 
 The linked serverless Postgres database is addressed through `DATABASE_URL` or `POSTGRES_URL`. Tables are created idempotently by the functions:
@@ -24,7 +28,7 @@ The linked serverless Postgres database is addressed through `DATABASE_URL` or `
 - `app_dataset_versions`: immutable, content-addressed history when source content changes. Retrieval timestamps are excluded from the content hash.
 - `source_refresh_runs`: one status record for every claimed source/time bucket, including unchanged polls and errors.
 - `source_artifacts`: the migrated compressed raw audit archive. The completed migration contains 147 artifacts representing 23,679,948 original bytes.
-- `flight_import_runs` and `flight_observations`: exact, deduplicated receiver fixes with 30-day live retention.
+- `flight_import_runs` and `flight_observations`: exact, deduplicated receiver fixes retained for the incident lifetime.
 
 The repository contains no data snapshots, raw-response directory or local refresh daemon. Reviewed incident configuration and all former local snapshots were seeded into Postgres before their local removal.
 
@@ -71,7 +75,7 @@ The scheduler has five-minute granularity. A database lease makes repeated calls
 
 FIRMS is checked by every scheduler run, but its provider lease is 15 minutes to conserve the limited NASA MAP_KEY allowance. Each successful poll merges exact detections into retained history instead of replacing the previous window. Configure `FIRMS_MAP_KEY` as a sensitive Vercel production environment variable; the value is never returned to the browser or stored in a dataset.
 
-The project is currently on Vercel Hobby, whose native cron frequency is not sufficient for five-minute work. `.github/workflows/refresh.yml` therefore wakes the Vercel refresh function every five minutes. The refresh endpoint has no user-controlled URL or query target, and Postgres leases enforce the provider limits.
+The project is currently on Vercel Hobby, whose native cron frequency is not sufficient for five-minute work. A Vercel Queue message therefore wakes the private consumer at minute 02/07/12/... and schedules the next delayed message before polling providers. Queue delivery is durable and automatically retried. Push delivery is pinned to a deployment; the `refresh-scheduler` database record names the active deployment so an old chain stops after a release. `.github/workflows/refresh.yml` calls the public bootstrap endpoint on deployments and every 15 minutes as a fallback. Push runs wait until the production alias reports their exact commit before taking ownership. A once-daily native Vercel cron provides an additional recovery path allowed by Hobby. Every path activates the current deployment and schedules its next queue wake-up. The endpoint has no user-controlled URL or query target, and Postgres leases enforce the provider limits even if paths fire together.
 
 ## Local development
 

@@ -5,8 +5,8 @@ on:
     branches:
       - main
   schedule:
-    # GitHub documents heavier queueing at the start of each hour.
-    - cron: '2/5 * * * *'
+    # Durable Vercel Queue delivery is primary; this is a staggered fallback.
+    - cron: '3/15 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -19,17 +19,28 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 8
     steps:
-      - name: Run leased Vercel refresh
+      - name: Activate the deployed revision and run leased refresh
         env:
           REFRESH_URL: https://venn-fire.vercel.app/api/refresh
         run: |
           response_file="$(mktemp)"
           trap 'rm -f "$response_file"' EXIT
-          http_code="$(curl --retry 2 --retry-all-errors --max-time 90 --silent --show-error \
-            --output "$response_file" --write-out '%{http_code}' "$REFRESH_URL")"
+          for attempt in $(seq 1 24); do
+            http_code="$(curl --retry 2 --retry-all-errors --max-time 90 --silent --show-error \
+              --output "$response_file" --write-out '%{http_code}' "$REFRESH_URL")"
+            deployed_sha="$(jq --raw-output '.deployment.gitCommitSha // empty' "$response_file" 2>/dev/null || true)"
+            refresh_ok="$(jq --raw-output '.ok // false' "$response_file" 2>/dev/null || true)"
+            echo "attempt=$attempt http=$http_code deployed_sha=${deployed_sha:-none} refresh_ok=$refresh_ok"
+            if test "$http_code" -ge 200 \
+              && test "$http_code" -lt 300 \
+              && test "$refresh_ok" = true \
+              && test "$deployed_sha" = "$GITHUB_SHA"; then
+              cat "$response_file"
+              exit 0
+            fi
+            sleep 10
+          done
           cat "$response_file"
-          test "$http_code" -ge 200
-          test "$http_code" -lt 300
-          jq --exit-status '.ok == true' "$response_file" >/dev/null
+          exit 1
