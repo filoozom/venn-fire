@@ -14,7 +14,6 @@ import {
   Droplets,
   ExternalLink,
   Eye,
-  EyeOff,
   FileUp,
   Flame,
   Gauge,
@@ -53,13 +52,11 @@ import {
   flights,
   incidentAircraftMeta,
   initialLayers,
-  nearbyTrafficMeta,
-  normalizeNearbyTrafficSnapshot,
   sourceLinks,
   TIMELINE_START_MS,
 } from './data'
 import {
-  FIRMS_EXTENTS,
+  footprintOutlineRings,
   FIRMS_SENSORS,
   corroborateDetections,
   estimateFootprintArea,
@@ -73,7 +70,7 @@ const FIRMS_LAYER_KEYS = Object.fromEntries(FIRMS_SENSORS.map((sensor) => [senso
 // Independent-satellite agreement, kept separate from the published confidence
 // field. NASA's confidence value is never rewritten: a detection we cannot
 // corroborate is still exactly what NASA reported it to be.
-const FIRMS_EXTENT_KEY = 'firmsExtent'
+const FIRE_OUTLINE_KEY = 'fireOutline'
 
 const FIRMS_CONFIDENCE_LEVELS = [
   { key: 'firmsConfidence:high', level: 'high', label: 'High confidence' },
@@ -93,9 +90,10 @@ const FIRMS_LAYER_DEFAULTS = {
   'firmsConfidence:low': false,
 }
 
-// Defaults to the tightest extent: the uncorroborated fringe is the part most
-// likely to be read as fire where there was none.
-const DEFAULT_FIRMS_EXTENT = 'fireCore'
+// The best-estimate outline: two spacecraft agree on the cell and at least one
+// reported high confidence there. Drawn as a single dissolved boundary rather
+// than a mosaic of pixel rectangles.
+const BEST_ESTIMATE_RULE = '2+ satellites agree and the cell has a high-confidence detection'
 
 const DWD_WIND_LAYER_KEYS = Object.fromEntries(
   dwdWindStations.map((station) => [station.id, `dwdWind:${station.id}`]),
@@ -107,7 +105,7 @@ const INITIAL_LAYER_STATE = {
   ...initialLayers,
   ...FIRMS_LAYER_DEFAULTS,
   ...DWD_WIND_LAYER_DEFAULTS,
-  [FIRMS_EXTENT_KEY]: DEFAULT_FIRMS_EXTENT,
+  [FIRE_OUTLINE_KEY]: true,
 }
 const FIRMS_REFRESH_MS = 15 * 60 * 1000
 const LIVE_SITUATION_REFRESH_MS = 5 * 60 * 1000
@@ -178,7 +176,6 @@ function layerOptionsFor(effisArea, isCarriedForward, firmsSummaries = [], frame
     }
   }),
   { key: 'aircraft', label: 'Aircraft observations', detail: 'Exact MLAT dots + gap-limited connectors', icon: Helicopter, color: '#3a7fcc' },
-  { key: 'traffic', label: 'All nearby receiver traffic', detail: `${nearbyTrafficMeta.aircraftCount} other identifiers · optional`, icon: Radio, color: '#687e8a' },
   { key: 'wind', label: 'Drossart model wind', detail: frame?.drossartWind ? `Open-Meteo hourly grid · ${frame.drossartWind.ageMinutes} min old` : 'No model value at selected time', icon: Wind, color: '#478fc4' },
   { key: 'rmiWind', label: 'Mont Rigi station wind', detail: frame?.montRigiWind ? `RMI 10 min observation · ${frame.montRigiWind.ageMinutes} min old · awaiting validation` : 'No station observation within 20 min of selected time', icon: Wind, color: '#4f9e90' },
   ...dwdWindStations.map((station) => {
@@ -199,14 +196,6 @@ const OBSERVATION_RECENCY_MS = 5 * 60 * 1000
 function windCardinal(deg) {
   const names = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
   return names[Math.round(deg / 22.5) % 16]
-}
-
-function localClock(timestamp) {
-  return new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Europe/Brussels',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(timestamp))
 }
 
 function observationState(flight, frame) {
@@ -388,7 +377,7 @@ function Timeline({ frames, frameIndex, setFrameIndex, playing, setPlaying, play
 
       <div className="timeline-foot">
         <span><Radio size={12} /> Five-minute timeline · {visibleEvents.length} sourced updates visible</span>
-        <span className="reconstruction-note"><Info size={12} /> Paths join only adjacent, plausible source fixes; gaps stay open. The optional traffic layer never implies an incident role.</span>
+        <span className="reconstruction-note"><Info size={12} /> Paths join only adjacent, plausible source fixes; gaps stay open. Unrelated aircraft traffic is excluded.</span>
         <a className="apyos-credit" href="https://apyos.com" target="_blank" rel="noreferrer">
           Developed by <strong>Apyos</strong><ExternalLink size={11} />
         </a>
@@ -540,7 +529,7 @@ function DataModal({ open, onClose, onImportTracks, importedCount, firmsState, f
                 <article><span>02</span><div><strong>Reported area</strong><p>The line is a timestamped step series: ~60 ha at 16:00, ~100 ha at 20:00, ~850 ha at 07:00, then &gt;900 ha at 11:28. Between reports it means “last reported,” not measured growth.</p></div></article>
                 <article><span>03</span><div><strong>EFFIS daily geometry</strong><p>The 14 and 15 August VIIRS-derived polygons are separate calendar-day products. Their locally calculated geometry area is not the official affected area; EFFIS provides no within-day acquisition time for five-minute animation.</p></div></article>
                 <article><span>04</span><div><strong>Aircraft observations</strong><p>G10 and G17 are shown as individual Airplanes.live MLAT fixes. Gaps stay empty, and a marker never claims a helicopter remained airborne.</p></div></article>
-                <article><span>05</span><div><strong>Nearby traffic census</strong><p>The optional traffic layer contains every other identifier seen within 5 km in either retained replay. Exact samples extend to 10 km for path context; none is assigned an incident role.</p></div></article>
+                <article><span>05</span><div><strong>Official situation reports</strong><p>The Governor of Liège supplies the incident start and the dated 60, 100 and 850 hectare estimates. Values remain stepwise between reports and link back to the official page.</p></div></article>
               </div>
               <div className="safety-note"><ShieldAlert size={17} /><span>This viewer is informational and must not be used for evacuation or preservation-of-life decisions. Follow BE-Alert and emergency services.</span></div>
             </div>
@@ -580,9 +569,6 @@ function App() {
   const [importedTracks, setImportedTracks] = useState([])
   const [firmsData, setFirmsData] = useState(EMPTY_FIRMS_DATA)
   const [firmsState, setFirmsState] = useState({ status: 'checking', generatedAt: null })
-  const [nearbyTraffic, setNearbyTraffic] = useState([])
-  const [trafficLoadStatus, setTrafficLoadStatus] = useState('idle')
-  const [trafficLoadError, setTrafficLoadError] = useState('')
   const [liveAircraftObservations, setLiveAircraftObservations] = useState([])
   const [syncState, setSyncState] = useState({ status: 'loading', generatedAt: null, weatherOk: false, aircraftOk: false })
   const frame = frames[Math.min(frameIndex, frames.length - 1)]
@@ -741,20 +727,6 @@ function App() {
   }, [playing, playbackRate, frames.length])
 
   useEffect(() => {
-    if ((!layers.traffic && inspectorTab !== 'traffic') || trafficLoadStatus !== 'idle') return
-    setTrafficLoadStatus('loading')
-    import('./nearbyTrafficSnapshot.json')
-      .then((module) => {
-        setNearbyTraffic(normalizeNearbyTrafficSnapshot(module.default))
-        setTrafficLoadStatus('loaded')
-      })
-      .catch((error) => {
-        setTrafficLoadError(error.message)
-        setTrafficLoadStatus('error')
-      })
-  }, [layers.traffic, inspectorTab])
-
-  useEffect(() => {
     const onKeyDown = (event) => {
       if (dataOpen || ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return
       if (event.key === 'ArrowLeft') setFrameIndex((value) => Math.max(0, value - 1))
@@ -803,22 +775,6 @@ function App() {
     [displayFlights, frame],
   )
 
-  const activeNearbyTraffic = useMemo(
-    () => nearbyTraffic
-      .filter((flight) => observationState(flight, frame).key === 'recent')
-      .sort((left, right) => (
-        (left.classification === 'low-level' ? 0 : 1) - (right.classification === 'low-level' ? 0 : 1)
-        || (observationState(right, frame).latest?.altitudeFt ?? Number.POSITIVE_INFINITY)
-          - (observationState(left, frame).latest?.altitudeFt ?? Number.POSITIVE_INFINITY)
-      )),
-    [frame, nearbyTraffic],
-  )
-
-  const observedNearbyTrafficCount = useMemo(
-    () => nearbyTraffic.filter((flight) => flight.observations[0]?.timestampMs <= frame.timestampMs).length,
-    [frame, nearbyTraffic],
-  )
-
   // Bundled and live FIRMS detections, placed on the five-minute timeline by their exact
   // acquisition time. A detection appears from its overpass onward; it is never
   // back-dated and never interpolated between overpasses.
@@ -843,21 +799,41 @@ function App() {
     [firmsDetections, frameIndex],
   )
 
-  const activeExtent = useMemo(
-    () => FIRMS_EXTENTS.find((extent) => extent.key === layers[FIRMS_EXTENT_KEY]) ?? FIRMS_EXTENTS[0],
-    [layers],
+  // Detections meeting the best-estimate rule, at the selected time. The outline
+  // follows the fire rather than the viewer's confidence filter, so hiding a
+  // confidence level restyles the detections without moving the boundary.
+  const bestEstimateDetections = useMemo(
+    () => firmsDetectionsAtTime.filter((detection) => detection.isFireCore),
+    [firmsDetectionsAtTime],
+  )
+
+  const fireOutlineRings = useMemo(
+    () => footprintOutlineRings(bestEstimateDetections, {
+      gridCellM: 50,
+      origin: {
+        latitude: firmsData.locationReference.latitude,
+        longitude: firmsData.locationReference.longitude,
+      },
+    }),
+    [bestEstimateDetections, firmsData.locationReference],
   )
 
   const visibleFirmsDetections = useMemo(() => firmsDetectionsAtTime.filter((detection) => (
     layers[FIRMS_LAYER_KEYS[detection.sensorKey]]
       && activeConfidenceLevels.includes(detection.confidence.label)
-      && activeExtent.test(detection)
-  )), [firmsDetectionsAtTime, layers, activeConfidenceLevels, activeExtent])
+  )), [firmsDetectionsAtTime, layers, activeConfidenceLevels])
 
   // The estimate is recomputed here from the checked sensors and checked
   // confidence levels rather than read from a stored figure, so what is shown
   // always matches what is drawn. Sensors are estimated separately and never
   // summed: the same ground seen by two satellites is two observations.
+  const bestEstimateAreaHa = useMemo(() => estimateFootprintArea(bestEstimateDetections, {
+    origin: {
+      latitude: firmsData.locationReference.latitude,
+      longitude: firmsData.locationReference.longitude,
+    },
+  }).unionHa, [bestEstimateDetections, firmsData.locationReference])
+
   const firmsAreaEstimates = useMemo(() => FIRMS_SENSORS
     .filter((sensor) => AREA_CAPABLE_SENSORS.has(sensor.key) && layers[FIRMS_LAYER_KEYS[sensor.key]])
     .map((sensor) => {
@@ -940,32 +916,27 @@ function App() {
               {/* The best estimate sits beside the reported figure. EFFIS keeps its
                   own card below: at roughly five times the reported area it is an
                   envelope, and giving it headline position overstated the burn. */}
-              <div><strong>{firmsAreaRange ? (firmsAreaRange.sensorCount > 1 ? `${Math.round(firmsAreaRange.min).toLocaleString('en-GB')}–${Math.round(firmsAreaRange.max).toLocaleString('en-GB')}` : Math.round(firmsAreaRange.max).toLocaleString('en-GB')) : '—'}</strong><span>satellite estimate ha</span><small>{firmsAreaRange ? `${activeExtent.label.toLowerCase()} · ${firmsAreaRange.sensorCount} sensors agree · derived` : 'no detections at the selected extent'}</small></div>
+              <div><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}</strong><span>best estimate ha</span><small>{bestEstimateDetections.length ? `${BEST_ESTIMATE_RULE} · derived` : 'no qualifying detections yet'}</small></div>
             </div>
           </div>
 
           <div className="sidebar-section layers-section">
-            <div className="section-heading"><span>FIRE EXTENT</span></div>
+            <div className="section-heading"><span>FIRE OUTLINE</span></div>
             <div className="layer-checkboxes">
-              {FIRMS_EXTENTS.map((extent) => (
-                <label className="layer-checkbox" key={extent.key} title={extent.detail}>
-                  <input
-                    type="radio"
-                    name="firms-extent"
-                    checked={activeExtent.key === extent.key}
-                    onChange={() => setLayers((value) => ({ ...value, [FIRMS_EXTENT_KEY]: extent.key }))}
-                  />
-                  <span>{extent.label}</span>
-                  <em>{firmsDetections.filter(extent.test).length}</em>
-                </label>
-              ))}
+              <label className="layer-checkbox" title={BEST_ESTIMATE_RULE}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(layers[FIRE_OUTLINE_KEY])}
+                  onChange={() => setLayers((value) => ({ ...value, [FIRE_OUTLINE_KEY]: !value[FIRE_OUTLINE_KEY] }))}
+                />
+                <span>Best estimate outline</span>
+                <em>{bestEstimateDetections.length ? `${Math.round(bestEstimateAreaHa).toLocaleString('en-GB')} ha` : '—'}</em>
+              </label>
             </div>
             <p className="layer-note">
-              {firmsAreaRange
-                ? (firmsAreaRange.sensorCount > 1
-                  ? `Detection-footprint estimate ${Math.round(firmsAreaRange.min).toLocaleString('en-GB')}–${Math.round(firmsAreaRange.max).toLocaleString('en-GB')} ha across ${firmsAreaRange.sensorCount} sensors, at the selected confidence levels${activeExtent.key === 'all' ? '' : `, ${activeExtent.detail.toLowerCase()}`}. Not a burned area.`
-                  : `Detection-footprint estimate ${Math.round(firmsAreaRange.max).toLocaleString('en-GB')} ha at the selected confidence levels${activeExtent.key === 'all' ? '' : `, ${activeExtent.detail.toLowerCase()}`}. Not a burned area.`)
-                : 'No FIRMS detections at the selected sensors, confidence levels and time.'}
+              {bestEstimateDetections.length
+                ? `One dissolved boundary around detections where ${BEST_ESTIMATE_RULE}. Enclosed unburned ground is left open rather than filled. Derived estimate, not a burned area.`
+                : 'No detections meet the best-estimate rule at this time.'}
             </p>
           </div>
 
@@ -1022,12 +993,6 @@ function App() {
             </button>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
               <SourceMark tone="adsb" /><span><strong>Aircraft</strong><small>{displayFlights.length} sourced set{importedTracks.length ? ` · ${importedTracks.length} static import` : ''}</small></span><em className="health-dot" /></button>
-            <button className="source-health-row" onClick={() => {
-              setInspectorTab('traffic')
-              setLayers((current) => ({ ...current, traffic: true }))
-            }} type="button">
-              <SourceMark tone="adsb" /><span><strong>Area traffic</strong><small>{nearbyTrafficMeta.aircraftCount} other identifiers · 2 replays</small></span><em className="health-dot" />
-            </button>
           </div>
 
           <div className="emergency-note">
@@ -1048,7 +1013,7 @@ function App() {
             onMapReady={setMapActions}
             importedTracks={importedTracks}
             firmsDetections={visibleFirmsDetections}
-            nearbyTraffic={nearbyTraffic}
+            fireOutlineRings={layers[FIRE_OUTLINE_KEY] ? fireOutlineRings : []}
           />
 
           <div className="map-topbar">
@@ -1092,10 +1057,6 @@ function App() {
           <div className="inspector-tabs">
             <button className={inspectorTab === 'situation' ? 'is-active' : ''} onClick={() => setInspectorTab('situation')} type="button">Situation</button>
             <button className={inspectorTab === 'air' ? 'is-active' : ''} onClick={() => setInspectorTab('air')} type="button">Air ops <span>{displayFlights.length + importedTracks.length}</span></button>
-            <button className={inspectorTab === 'traffic' ? 'is-active' : ''} onClick={() => {
-              setInspectorTab('traffic')
-              setLayers((current) => ({ ...current, traffic: true }))
-            }} type="button">Traffic <span>{nearbyTrafficMeta.aircraftCount}</span></button>
           </div>
 
           {inspectorTab === 'situation' ? (
@@ -1108,11 +1069,10 @@ function App() {
 
               <div className="snapshot-grid">
                 <article className="snapshot-card snapshot-card--fire"><span><Flame size={15} /> REPORTED AREA</span><strong>{reportedAreaText}<small>{frame.reportedHa == null ? '' : 'ha'}</small></strong><p>{frame.areaLabel}</p></article>
-                <article className="snapshot-card snapshot-card--estimate"><span><Flame size={15} /> FIRE EXTENT</span><strong>{firmsAreaRange ? (firmsAreaRange.sensorCount > 1 ? `${Math.round(firmsAreaRange.min).toLocaleString('en-GB')}–${Math.round(firmsAreaRange.max).toLocaleString('en-GB')}` : Math.round(firmsAreaRange.max).toLocaleString('en-GB')) : '—'}<small>{firmsAreaRange ? 'ha' : ''}</small></strong><p>{firmsAreaRange ? `${activeExtent.label.toLowerCase()} · ${firmsAreaRange.sensorCount} sensors agree · derived estimate` : 'no detections at the selected extent'}</p></article>
+                <article className="snapshot-card snapshot-card--estimate"><span><Flame size={15} /> BEST ESTIMATE</span><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}<small>{bestEstimateDetections.length ? 'ha' : ''}</small></strong><p>{bestEstimateDetections.length ? `${bestEstimateDetections.length} detections · 2+ satellites agree · derived estimate` : 'no qualifying detections yet'}</p></article>
                 <article className="snapshot-card snapshot-card--effis"><span><Layers3 size={15} /> EFFIS DAILY GEOMETRY</span><strong>{currentEffisArea ? Math.round(currentEffisArea.areaHa).toLocaleString('en-GB') : '—'}<small>{currentEffisArea ? 'ha' : ''}</small></strong><p>{currentEffisArea ? `${currentEffisArea.productDate}${effisCarriedForward ? ' carried forward until replacement' : ''} · envelope containing fire activity, not burned area` : 'no EFFIS product available at selected time'}</p></article>
-                <article className="snapshot-card"><span><Satellite size={15} /> HOTSPOTS</span><strong>{visibleFirmsDetections.length}<small>px</small></strong><p>{`${activeExtent.label.toLowerCase()} · exact NASA FIRMS detections`}</p></article>
+                <article className="snapshot-card"><span><Satellite size={15} /> HOTSPOTS</span><strong>{visibleFirmsDetections.length}<small>px</small></strong><p>shaded by confidence · exact NASA FIRMS detections</p></article>
                 <article className="snapshot-card"><span><Helicopter size={15} /> AIR OPS</span><strong>{activeFlights.length}<small>recent</small></strong><p>{activeFlights.length ? 'fix within previous 5 min' : 'no recent observation'}</p></article>
-                <article className="snapshot-card snapshot-card--traffic"><span><Radio size={15} /> OTHER TRAFFIC</span><strong>{trafficLoadStatus === 'loaded' ? activeNearbyTraffic.length : '—'}<small>{trafficLoadStatus === 'loaded' ? 'recent' : ''}</small></strong><p>{trafficLoadStatus === 'loaded' ? `${observedNearbyTrafficCount}/${nearbyTrafficMeta.aircraftCount} identifiers seen by this time` : 'optional replay layer not loaded'}</p></article>
                 <article className="snapshot-card snapshot-card--wind"><span><Wind size={15} /> WIND FROM</span><strong>{windCardinal(frame.windDirection)}<small>{frame.windDirection.toFixed(0)}°</small></strong><p>{frame.windSpeed.toFixed(1)} km/h · gust {frame.gust.toFixed(0)} · {frame.weatherSourceKind === 'station-observation' ? 'station obs.' : 'model'}</p></article>
               </div>
 
@@ -1200,65 +1160,7 @@ function App() {
               <div className="coverage-note"><Radio size={15} /><p><strong>Dots are observations; dashed lines are not flight paths.</strong><span>Airplanes.live supplied 30-second MLAT replay samples for G10 and G17 on 15 August. Straight connectors appear only across gaps ≤2 minutes and plausible speed. G12 remains photo-only near this incident.</span></p></div>
               <div className="coverage-note"><Info size={15} /><p><strong>Wide-area checks separate this incident from nearby activity.</strong><span>{incidentAircraftMeta.negativeFindings[0]} {incidentAircraftMeta.negativeFindings[1]} The known Aachen/Walheim MLAT artifact is excluded.</span></p></div>
             </div>
-          ) : (
-            <div className="inspector-scroll traffic-panel">
-              <div className="traffic-summary">
-                <span className="kicker">RECEIVER CENSUS · 5 KM</span>
-                <h2>Nearby traffic</h2>
-                <p>Every other identifier observed within 5 km of Drossart in either retained replay. Paths use exact samples out to 10 km for context. None is classified as an incident aircraft.</p>
-                <button type="button" onClick={() => setLayers((current) => ({ ...current, traffic: !current.traffic }))}>
-                  {layers.traffic ? <EyeOff size={14} /> : <Eye size={14} />}
-                  {layers.traffic ? 'Hide traffic layer' : 'Show traffic layer'}
-                </button>
-                <div className="traffic-metrics">
-                  <span><strong>{nearbyTrafficMeta.aircraftCount}</strong><small>IDENTIFIERS</small></span>
-                  <span><strong>{nearbyTrafficMeta.lowLevelAircraftCount}</strong><small>LOW-LEVEL</small></span>
-                  <span><strong>{nearbyTrafficMeta.observationCount}</strong><small>SOURCE FIXES</small></span>
-                </div>
-              </div>
-
-              {trafficLoadStatus === 'loading' && <div className="traffic-load-state"><Activity size={16} /><span>Loading the checked-in replay snapshot…</span></div>}
-              {trafficLoadStatus === 'error' && <div className="traffic-load-state is-error"><BadgeAlert size={16} /><span>{trafficLoadError || 'The replay snapshot could not be loaded.'}</span></div>}
-
-              {trafficLoadStatus === 'loaded' && <>
-              <section className="recent-traffic">
-                <div className="section-heading"><span>AT SELECTED TIME</span><small>{activeNearbyTraffic.length} seen in prior 5 min</small></div>
-                {activeNearbyTraffic.length ? (
-                  <div className="recent-traffic-list">
-                    {activeNearbyTraffic.slice(0, 16).map((flight) => {
-                      const latest = observationState(flight, frame).latest
-                      return (
-                        <article key={flight.id}>
-                          <i style={{ '--traffic-color': flight.color }} />
-                          <span><strong>{flight.callSign || flight.registration || flight.icao24}</strong><small>{flight.classification === 'low-level' ? 'had a ≤5,000 ft sample in the scan' : 'high-altitude overflight'} · no incident role</small></span>
-                          <span><strong>{latest?.altitudeFt ?? '—'} ft</strong><small>{latest ? localClock(latest.observedAt) : '—'} CEST</small></span>
-                        </article>
-                      )
-                    })}
-                    {activeNearbyTraffic.length > 16 && <p>+{activeNearbyTraffic.length - 16} more recently observed identifiers on the map.</p>}
-                  </div>
-                ) : (
-                  <p className="traffic-empty">No retained receiver observation falls within the previous five minutes.</p>
-                )}
-              </section>
-
-              <section className="low-level-ledger">
-                <div className="section-heading"><span>LOW-LEVEL REVIEW SET</span><small>≤5,000 ft filter</small></div>
-                <div className="traffic-ledger-list">
-                  {nearbyTraffic.filter((flight) => flight.classification === 'low-level').map((flight) => (
-                    <article key={flight.id}>
-                      <div><strong>{flight.callSign || flight.registration || flight.icao24}</strong><small>{flight.registration || flight.icao24}</small></div>
-                      <p>{flight.label}<small>{localClock(flight.firstObservedAt)}–{localClock(flight.lastObservedAt)} CEST · {flight.source}</small></p>
-                      <span><strong>{flight.nearestDrossartKm.toFixed(1)} km</strong><small>closest</small></span>
-                    </article>
-                  ))}
-                </div>
-              </section>
-
-              <div className="coverage-note"><Info size={15} /><p><strong>Low altitude is a review filter, not a mission label.</strong><span>The two Cessna 208s are known parachuting aircraft; the other five have no sourced firefighting role. High-altitude traffic remains available on the map but is visually subdued.</span></p></div>
-              </>}
-            </div>
-          )}
+          ) : null}
         </aside>
       </div>
 

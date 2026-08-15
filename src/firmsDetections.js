@@ -141,29 +141,6 @@ export function corroborateDetections(detections, options = {}) {
   })
 }
 
-// The three extents the interface can draw, tightest first. Each is a stateable
-// rule over published values, not a tuned threshold.
-export const FIRMS_EXTENTS = [
-  {
-    key: 'fireCore',
-    label: 'Best estimate',
-    detail: '2+ satellites agree and the cell has a high-confidence detection',
-    test: (detection) => detection.isFireCore,
-  },
-  {
-    key: 'corroborated',
-    label: 'Corroborated',
-    detail: '2+ satellites observed the cell',
-    test: (detection) => detection.isCorroborated,
-  },
-  {
-    key: 'all',
-    label: 'All detections',
-    detail: 'Every detection as published, including uncorroborated single passes',
-    test: () => true,
-  },
-]
-
 export const FOOTPRINT_ESTIMATE_CAVEATS = [
   'A detection marks a pixel that was radiating at the moment of the overpass. The published footprint is the whole sensor pixel, so a fire front far smaller than the pixel still marks the entire footprint. The estimate therefore overstates area for narrow or broken fire fronts.',
   'Only ground that was actively flaming during an overpass can be detected. Ground that ignited and burned out between overpasses is never counted, and smoke or cloud removes further detections. The estimate therefore understates area for a fast-moving fire between passes.',
@@ -172,6 +149,12 @@ export const FOOTPRINT_ESTIMATE_CAVEATS = [
   'Each sensor is estimated independently. Figures from different sensors must not be added together; the same ground observed twice is two observations, not twice the area.',
   'Corroboration records that two spacecraft observed the same cell. It raises confidence that something was burning there; it does not measure how much of the cell burned, and an uncorroborated detection is not thereby proven false.',
 ]
+
+// Footprints from one scan line abut exactly, so the half-open cell test has to
+// tolerate floating-point error on the shared edge. Without this, two touching
+// pixels leave an empty one-cell seam between them: the area is understated and
+// the outline is cut by spurious slits.
+const CELL_EDGE_EPSILON_M = 1e-6
 
 // WGS84 local scale, so the grid union is computed in metres rather than in
 // degrees. Both formulas are the standard truncated series.
@@ -368,10 +351,10 @@ export function estimateFootprintArea(detections, { gridCellM = 25, origin } = {
     // whole number of cells.
     for (let cellY = Math.floor(south / gridCellM); cellY <= Math.ceil(north / gridCellM); cellY += 1) {
       const centreOfCellY = (cellY + 0.5) * gridCellM
-      if (centreOfCellY < south || centreOfCellY >= north) continue
+      if (centreOfCellY < south - CELL_EDGE_EPSILON_M || centreOfCellY >= north - CELL_EDGE_EPSILON_M) continue
       for (let cellX = Math.floor(west / gridCellM); cellX <= Math.ceil(east / gridCellM); cellX += 1) {
         const centreOfCellX = (cellX + 0.5) * gridCellM
-        if (centreOfCellX < west || centreOfCellX >= east) continue
+        if (centreOfCellX < west - CELL_EDGE_EPSILON_M || centreOfCellX >= east - CELL_EDGE_EPSILON_M) continue
         occupied.add(`${cellX}:${cellY}`)
       }
     }
@@ -505,4 +488,107 @@ export function firmsSourceEntry(summaries) {
     url: FIRMS_SOURCE_URL,
     tone: 'nasa',
   }
+}
+
+/**
+ * Trace one coherent boundary around a set of detection footprints.
+ *
+ * The map otherwise draws hundreds of separate pixel rectangles, which reads as
+ * texture rather than as a fire. This rasterises the same footprints used for the
+ * area figure, then walks the edges of the occupied region to produce closed
+ * rings that can be drawn as a single outline.
+ *
+ * Interior holes are returned as their own rings and are NOT filled in. That is
+ * the difference between this outline and the EFFIS envelope: unburned ground
+ * enclosed by detections stays visibly unburned.
+ */
+export function footprintOutlineRings(detections, { gridCellM = 50, origin } = {}) {
+  if (!detections.length) return []
+
+  const anchorLat = origin?.latitude ?? detections[0].latitude
+  const anchorLon = origin?.longitude ?? detections[0].longitude
+  const mPerLat = metresPerDegreeLatitude(anchorLat)
+  const mPerLon = metresPerDegreeLongitude(anchorLat)
+
+  // Same occupancy test as estimateFootprintArea, so the outline and the hectare
+  // figure always describe the same ground.
+  const occupied = new Set()
+  for (const detection of detections) {
+    const halfHeight = detection.trackKm * 1000 / 2
+    const halfWidth = detection.scanKm * 1000 / 2
+    const centreY = (detection.latitude - anchorLat) * mPerLat
+    const centreX = (detection.longitude - anchorLon) * mPerLon
+    const south = centreY - halfHeight
+    const north = centreY + halfHeight
+    const west = centreX - halfWidth
+    const east = centreX + halfWidth
+
+    for (let cellY = Math.floor(south / gridCellM); cellY <= Math.ceil(north / gridCellM); cellY += 1) {
+      const centreOfCellY = (cellY + 0.5) * gridCellM
+      if (centreOfCellY < south - CELL_EDGE_EPSILON_M || centreOfCellY >= north - CELL_EDGE_EPSILON_M) continue
+      for (let cellX = Math.floor(west / gridCellM); cellX <= Math.ceil(east / gridCellM); cellX += 1) {
+        const centreOfCellX = (cellX + 0.5) * gridCellM
+        if (centreOfCellX < west - CELL_EDGE_EPSILON_M || centreOfCellX >= east - CELL_EDGE_EPSILON_M) continue
+        occupied.add(`${cellX}:${cellY}`)
+      }
+    }
+  }
+
+  // A cell side is on the boundary when the neighbour across it is empty. Each
+  // side is emitted with the occupied cell on its left, so following edges
+  // head-to-tail traces a closed loop without needing any orientation test.
+  const edges = new Map()
+  const addEdge = (fromX, fromY, toX, toY) => {
+    const key = `${fromX}:${fromY}`
+    if (!edges.has(key)) edges.set(key, [])
+    edges.get(key).push([toX, toY])
+  }
+  for (const cell of occupied) {
+    const [x, y] = cell.split(':').map(Number)
+    if (!occupied.has(`${x}:${y - 1}`)) addEdge(x, y, x + 1, y)
+    if (!occupied.has(`${x + 1}:${y}`)) addEdge(x + 1, y, x + 1, y + 1)
+    if (!occupied.has(`${x}:${y + 1}`)) addEdge(x + 1, y + 1, x, y + 1)
+    if (!occupied.has(`${x - 1}:${y}`)) addEdge(x, y + 1, x, y)
+  }
+
+  const toLatLon = ([x, y]) => [
+    anchorLat + (y * gridCellM) / mPerLat,
+    anchorLon + (x * gridCellM) / mPerLon,
+  ]
+
+  // Grid-aligned rings run in long straight stretches, so dropping collinear
+  // vertices is lossless and removes most of the points.
+  const dropCollinear = (points) => points.filter((point, index) => {
+    const previous = points[(index - 1 + points.length) % points.length]
+    const next = points[(index + 1) % points.length]
+    const crossProduct = (point[0] - previous[0]) * (next[1] - previous[1])
+      - (point[1] - previous[1]) * (next[0] - previous[0])
+    return crossProduct !== 0
+  })
+
+  const rings = []
+  while (edges.size) {
+    const [startKey] = edges.keys()
+    const start = startKey.split(':').map(Number)
+    const ring = []
+    let current = start
+    while (true) {
+      const key = `${current[0]}:${current[1]}`
+      const outgoing = edges.get(key)
+      if (!outgoing?.length) break
+      const next = outgoing.pop()
+      if (!outgoing.length) edges.delete(key)
+      ring.push(current)
+      current = next
+      if (current[0] === start[0] && current[1] === start[1]) break
+    }
+    // A ring needs three distinct corners to enclose anything.
+    if (ring.length >= 4) {
+      const simplified = dropCollinear(ring)
+      rings.push([...simplified.map(toLatLon), toLatLon(simplified[0])])
+    }
+  }
+
+  // Largest first, so a renderer drawing in order puts the main burn underneath.
+  return rings.sort((left, right) => right.length - left.length)
 }

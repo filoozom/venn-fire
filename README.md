@@ -9,9 +9,8 @@ An evidence-first, time-based incident viewer for the 14 August 2026 fire near D
 - A timestamped, stepwise reported-area series: `~60 ha` at 14 August 16:00, `~100 ha` at 20:00 and `~850 ha` at 15 August 07:00 from the Governor of Liège, then `>900 ha` at 11:28 from BRF. Between reports the UI means “last reported”; it never invents intermediate growth or a shape.
 - Separate Copernicus EFFIS daily VIIRS-derived polygons for 14 and 15 August. Their locally calculated geometry areas are approximately `501 ha` and `4,857 ha`. The latter sharply conflicts with field reporting and is labelled as an algorithmic geometry, never as 4,857 burned hectares. EFFIS supplies no within-day acquisition timestamp, so the last daily product is carried forward until the next retrieved product replaces it.
 - Thirty-two exact Airplanes.live MLAT fixes for Federal Police helicopter G10 (`44c1e5`): 21 from the audited 14 August daily trace and 11 from 15 August 30-second replay snapshots. Nineteen 15 August replay fixes are bundled for G17 (`44c1ea`). Dashed straight connectors appear only between consecutive fixes at most two minutes apart and implying at most 160 knots; every other gap stays open.
-- Photo identification of both reported helicopters: a BRF incident image visibly shows G10 airborne at 15:37:08 CEST, and another visibly shows G12 landed at 16:30:54 CEST. The times come from intact image EXIF. The G12 map marker uses the photographer's embedded GPS position and is labelled as a photo location, not an aircraft fix.
-- An optional census of every other transponder identifier observed within 5 km of Drossart in either of two retained receiver replays. It contains 116 identifiers and 1,372 exact source fixes within a 10 km context radius. Seven identifiers met a broad low-altitude review threshold; 109 were high-altitude overflights. No traffic entry is labelled as an incident aircraft.
-- 142 exact ten-minute wind, gust, temperature and humidity observations from RMI automatic weather station MONT RIGI (`6494`), 4.2 km from Drossart, covering 14 August 13:00 through 15 August 12:30 CEST. RMI had not yet quality-validated any selected field in this near-real-time window, so every use is visibly labelled “awaiting validation.” Hourly Open-Meteo grid values remain a clearly identified fallback outside station coverage.
+- Photo identification of both reported helicopters: a BRF incident image visibly shows G10 airborne at 15:37:08 CEST, and another visibly shows G12 landed at 16:30:54 CEST. The times come from intact image EXIF. G12 remains photo evidence in the audit record but has no map marker.
+- Exact ten-minute wind, gust, temperature and humidity observations from RMI automatic weather station MONT RIGI (`6494`), 4.2 km from Drossart. RMI had not yet quality-validated the selected near-real-time fields, so every use is visibly labelled “awaiting validation.” Hourly Open-Meteo grid values remain a clearly identified fallback outside station coverage.
 - An audited NASA FIRMS snapshot with 694 exact detections within 15 km of Drossart: 36 acquired on 14 August and 658 on 15 August across VIIRS Suomi-NPP, VIIRS NOAA-20, VIIRS NOAA-21 and MODIS. Each sensor is a separate time-linked pixel-footprint layer. VIIRS footprint unions recompute from the sensor and confidence checkboxes; the UI shows a per-sensor range, never a sum or average. MODIS has no hectare display because its pixels are too coarse at this incident scale.
 - Static GeoJSON/CSV import for additional tracks. Untimed imports are explicitly static and do not create aircraft status.
 
@@ -45,6 +44,8 @@ pnpm import:effis -- --date 2026-08-15 --output .local-data/effis/2026-08-15
 ```
 
 The importer queries the EFFIS WFS, retains the closest feature within 10 km of Drossart, calculates its geometry area and writes the source response, selected GeoJSON and manifest beneath the chosen `.local-data/effis/<date>/` directory. Those audit files are ignored by Git. Reviewed 14 and 15 August geometries are bundled in the application; updating a local import does not silently replace production data. The 15 August response contained geometry only and calculated to `4,857.041 ha`; because that conflicts with the official/reporting series, the viewer explicitly treats it as an overinclusive algorithmic geometry rather than affected-area truth.
+
+The linked EFFIS Current Situation Viewer is also exposed in the source list and the geometry popup. Its `t=sentinel2` parameter selects EOX's “Sentinel-2 Cloudless 2020” background map; it is not a 2026 acquisition or a fire perimeter. The incident layer used here is the separate official EFFIS `nrt.ba` WFS product above.
 
 ## NASA FIRMS detection import
 
@@ -186,9 +187,9 @@ The widened scans also establish two useful negatives. No incident-area aircraft
 
 Airplanes.live's free interface is documented for non-commercial use. Confirm permission before republishing raw data in another context, retain attribution, and do not treat coverage as complete.
 
-## Nearby receiver-traffic snapshot
+## Excluded receiver-traffic audit
 
-Build the optional all-traffic layer from the two retained scans with:
+The unrelated-aircraft census is retained only as an offline audit and is not loaded, rendered or offered by the viewer. Rebuild it from the two retained scans with:
 
 ```bash
 pnpm build:traffic-snapshot
@@ -202,11 +203,11 @@ pnpm verify:traffic-snapshot
 
 The verifier recomputes the selected identifier union and confirms that every published timestamp, coordinate and altitude exactly matches a retained provider observation. It also checks the selected geometry source, altitude classification and aggregate counts. The ignored `.local-data` source documents must be present to run either command.
 
-The selection contains every identifier seen within 5 km of the Drossart locality by Airplanes.live or ADSB.lol between 11:00 and 22:00 UTC. G10 is then excluded because its incident representation is maintained separately. The resulting optional layer contains 116 other identifiers; 107 were independently observed inside the selection radius by both provider replays. For each identifier, the provider with more observations inside a 10 km context radius supplies the displayed geometry, avoiding duplicate or averaged positions.
+The selection contains every identifier seen within 5 km of the Drossart locality by Airplanes.live or ADSB.lol between 11:00 and 22:00 UTC. G10 is excluded because its incident representation is maintained separately. The audit contains 116 other identifiers; 107 were independently observed inside the selection radius by both provider replays.
 
 The seven low-altitude review entries are Cessna 208s OO-SPA and F-HSVS, Diamond DA20 D-ELZB, Cessna 150s OO-ALD and OO-FUN, Cessna 152 OO-APV, and unidentified hex `449932` with observed callsign `OOFIR`. The Cessna 208s are known parachuting aircraft. None has a sourced firefighting role. “Low altitude” means only that at least one retained observation was at or below 5,000 ft.
 
-Map points are exact observations and are never interpolated. Straight connectors are drawn only between adjacent fixes no more than 90 seconds apart and with an implied speed no greater than 250 knots for low-level traffic or 700 knots for high-altitude traffic. All other gaps stay open. A marker appears only when a source fix exists within the preceding five minutes; it does not assert that the aircraft remained airborne. The layer is off by default because most entries are unrelated overflights.
+None of these unrelated identifiers is available as a map layer or inspector view. Only evidence-backed incident aircraft are passed to the application.
 
 ## Other public providers tested
 
@@ -244,6 +245,7 @@ No provider failure is interpreted as proof that an aircraft did not fly. It mea
 - [Vedia incident report](https://www.vedia.be/info/incendie-dans-les-fagnes-de-100-hectares-detruits-la-phase-provinciale-declenchee/213726)
 - [NASA FIRMS](https://firms.modaps.eosdis.nasa.gov/)
 - [RMI Belgium open data](https://opendata.meteo.be/)
+- [EFFIS Current Situation Viewer at the incident](https://forest-fire.emergency.copernicus.eu/apps/effis.csv/?c=629562.19,6608535.18&z=8.544845581054688&t=sentinel2)
 - [Copernicus EFFIS rapid damage assessment](https://forest-fire.emergency.copernicus.eu/about-effis/technical-background/rapid-damage-assessment)
 - [Copernicus EFFIS data and services](https://forest-fire.emergency.copernicus.eu/applications/data-and-services)
 - [Open-Meteo](https://open-meteo.com/)

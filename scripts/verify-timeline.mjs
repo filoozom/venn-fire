@@ -9,6 +9,27 @@ page.on('pageerror', (error) => errors.push(error.message))
 await page.goto(testUrl, { waitUntil: 'domcontentloaded' })
 await page.waitForSelector('.timeline-range')
 
+// Unrelated receiver traffic is an offline audit only. It must not have a
+// layer toggle, inspector entry or situation card that could expose it again.
+const unrelatedTrafficControls = await page.getByRole('button', { name: /^Traffic\b/i }).count()
+  + await page.getByText('All nearby receiver traffic', { exact: true }).count()
+  + await page.locator('.snapshot-card--traffic').count()
+if (unrelatedTrafficControls !== 0) {
+  throw new Error(`Unrelated traffic is still exposed by ${unrelatedTrafficControls} UI control(s)`)
+}
+
+await page.locator('.data-button').click()
+await page.getByRole('button', { name: 'Source directory' }).click()
+const officialSourceLinks = {
+  governor: await page.locator('a.directory-row').filter({ hasText: 'Governor of Liège' }).count(),
+  effisViewer: await page.locator('a.directory-row').filter({ hasText: 'EFFIS Current Situation Viewer' }).count(),
+  effisWfs: await page.locator('a.directory-row').filter({ hasText: 'EFFIS 15 Aug WFS response' }).count(),
+}
+if (Object.values(officialSourceLinks).some((count) => count !== 1)) {
+  throw new Error(`Official Governor/EFFIS sources are not exposed exactly once: ${JSON.stringify(officialSourceLinks)}`)
+}
+await page.getByRole('button', { name: 'Close data workspace' }).click()
+
 const startMs = Date.parse('2026-08-14T13:00:00+02:00')
 const fiveMinutesMs = 5 * 60 * 1000
 
@@ -78,5 +99,5 @@ if (chartBounds.y < 0 || chartBounds.y + chartBounds.height > 44.01) {
 }
 if (errors.length) throw new Error(`Browser errors: ${errors.join(' | ')}`)
 
-console.log(JSON.stringify({ states, effisOn14August, effisOn15August, chartBounds }, null, 2))
+console.log(JSON.stringify({ states, effisOn14August, effisOn15August, unrelatedTrafficControls, officialSourceLinks, chartBounds }, null, 2))
 await browser.close()

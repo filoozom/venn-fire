@@ -9,6 +9,16 @@ import {
   protectedArea,
 } from './data'
 
+// Detections are shaded by NASA's published confidence rather than by satellite:
+// what matters when reading the map is how sure the observation is, not which
+// spacecraft made it. Lower confidence is paler and more transparent.
+const FIRMS_CONFIDENCE_STYLE = {
+  high: { color: '#c2321f', weight: 0.9, opacity: 0.80, fillOpacity: 0.30 },
+  nominal: { color: '#e07a4b', weight: 0.7, opacity: 0.45, fillOpacity: 0.15 },
+  low: { color: '#e8b48c', weight: 0.6, opacity: 0.28, fillOpacity: 0.07 },
+  unknown: { color: '#c9b8a8', weight: 0.5, opacity: 0.22, fillOpacity: 0.05 },
+}
+
 const OBSERVATION_RECENCY_MS = 5 * 60 * 1000
 const INCIDENT_MAP_BOUNDS = [[50.49, 5.975], [50.575, 6.145]]
 const INCIDENT_MAP_PADDING = {
@@ -130,6 +140,7 @@ export default function MapView({
   onMapReady,
   importedTracks = [],
   firmsDetections = [],
+  fireOutlineRings = [],
 }) {
   const nodeRef = useRef(null)
   const mapRef = useRef(null)
@@ -248,34 +259,50 @@ export default function MapView({
         fillOpacity: 0.07,
         dashArray: '8 5',
       })
-        .bindPopup(`<div class="map-popup"><span class="eyebrow">COPERNICUS EFFIS · VIIRS NRT</span><strong>${Math.round(effisArea.areaHa).toLocaleString('en-GB')} ha algorithmic geometry</strong><small>${effisArea.productLabel}${effisCarriedForward ? ' · carried forward as last available product' : ''} · ${effisArea.nominalResolutionM} m nominal sensor pixels</small><small>An <strong>envelope containing fire activity</strong>, not a burned area. EFFIS dissolves VIIRS detection pixels into one polygon, so unburned ground between detections is enclosed. EFFIS does not use this product for burned-area statistics.</small><small>Calculated from the WFS polygon; not field-confirmed and not synchronized within the day.</small><small>Separate reporting at this selected time: ${frame.reportedAreaText} ha (${frame.areaLabel}).</small><a href="${effisArea.sourceRequestUrl}" target="_blank" rel="noreferrer">Open source WFS GeoJSON</a></div>`)
+        .bindPopup(`<div class="map-popup"><span class="eyebrow">COPERNICUS EFFIS · VIIRS NRT</span><strong>${Math.round(effisArea.areaHa).toLocaleString('en-GB')} ha algorithmic geometry</strong><small>${effisArea.productLabel}${effisCarriedForward ? ' · carried forward as last available product' : ''} · ${effisArea.nominalResolutionM} m nominal sensor pixels</small><small>An <strong>envelope containing fire activity</strong>, not a burned area. EFFIS dissolves VIIRS detection pixels into one polygon, so unburned ground between detections is enclosed. EFFIS does not use this product for burned-area statistics.</small><small>Calculated from the WFS polygon; not field-confirmed and not synchronized within the day.</small><small>Separate reporting at this selected time: ${frame.reportedAreaText} ha (${frame.areaLabel}).</small><a href="${effisArea.sourceRequestUrl}" target="_blank" rel="noreferrer">Open source WFS GeoJSON</a><a href="https://forest-fire.emergency.copernicus.eu/apps/effis.csv/?c=629562.19,6608535.18&amp;z=8.544845581054688&amp;t=sentinel2" target="_blank" rel="noreferrer">Open EFFIS viewer</a></div>`)
         .bindTooltip(`<strong>EFFIS VIIRS-derived daily geometry</strong><br>${Math.round(effisArea.areaHa).toLocaleString('en-GB')} ha calculated polygon area · ${effisArea.productLabel}<br><small>Algorithmic envelope, not the official affected-area estimate</small>`, { sticky: true })
         .addTo(group)
 
     }
 
-    // Sensor pixel footprints, drawn at their true published size rather than as
-    // dots. The blockiness is the point: it shows the resolution the estimate is
-    // built from, so no false precision can be read off the map.
+    // Sensor pixel footprints at their true published size, shaded by confidence.
+    // The blockiness is the point: it shows the resolution the estimate is built
+    // from, so no false precision can be read off the map.
     firmsDetections.forEach((detection) => {
+      const style = FIRMS_CONFIDENCE_STYLE[detection.confidence.label] ?? FIRMS_CONFIDENCE_STYLE.unknown
       const age = frameIndex - detection.frame
       L.polygon(detection.footprint, {
-        color: detection.sensorColor,
-        weight: 1,
-        opacity: Math.max(0.35, 0.9 - age * 0.05),
-        fillColor: detection.sensorColor,
-        fillOpacity: Math.max(0.06, 0.28 - age * 0.02),
+        color: style.color,
+        weight: style.weight,
+        opacity: style.opacity,
+        fillColor: style.color,
+        fillOpacity: Math.max(style.fillOpacity * 0.4, style.fillOpacity - age * 0.004),
       })
         .bindTooltip(
-          `<strong>${detection.sensorName}</strong><br>`
-          + `${detection.confidence.label} confidence · ${detection.frpMw ?? '—'} MW FRP<br>`
+          `<strong>${detection.confidence.label} confidence</strong><br>`
+          + `${detection.sensorName} · ${detection.frpMw ?? '—'} MW FRP<br>`
           + `${Math.round(detection.scanKm * detection.trackKm * 100)} ha sensor pixel`
+          + `${detection.corroboratingSensors > 1 ? `<br>${detection.corroboratingSensors} satellites saw this cell` : ''}`
           + `<br><small>NASA FIRMS · ${detection.acquiredAt.replace('T', ' ').slice(0, 16)} UTC</small>`
           + '<br><small>Thermal anomaly, not a burned-area polygon</small>',
           { direction: 'top' },
         )
         .addTo(group)
     })
+
+    // One dissolved boundary around the best-estimate detections, drawn after the
+    // footprints so it reads above them. Holes stay open: ground enclosed by
+    // detections but never detected itself is not filled in.
+    if (fireOutlineRings.length) {
+      L.polygon(fireOutlineRings, {
+        color: '#ff2f26',
+        weight: 2.4,
+        opacity: 0.95,
+        fill: false,
+        interactive: false,
+        className: 'fire-outline',
+      }).addTo(group)
+    }
 
     if (layers.aircraft) {
       ;[...flights, ...importedTracks].forEach((flight) => {

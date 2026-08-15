@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-15T11:52:20.039Z",
+  "generatedAt": "2026-08-15T12:07:43.826Z",
   "source": {
     "name": "Royal Meteorological Institute of Belgium (RMI) open data",
     "url": "https://opendata.meteo.be/",
     "endpoint": "https://opendata.meteo.be/service/ows",
     "featureType": "aws:aws_10min",
-    "requestUrl": "https://opendata.meteo.be/service/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=aws%3Aaws_10min&outputFormat=application%2Fjson&count=1000&sortBy=timestamp&CQL_FILTER=code%3D6494+AND+timestamp+DURING+2026-08-14T11%3A00%3A00Z%2F2026-08-15T11%3A52%3A20.038Z"
+    "requestUrl": "https://opendata.meteo.be/service/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=aws%3Aaws_10min&outputFormat=application%2Fjson&count=1000&sortBy=timestamp&CQL_FILTER=code%3D6494+AND+timestamp+DURING+2026-08-14T11%3A00%3A00Z%2F2026-08-15T12%3A07%3A43.825Z"
   },
   "station": {
     "code": 6494,
@@ -2596,6 +2596,40 @@
       "precip_quantity_validated": false,
       "wind_speed_10m_kmh": 10.028484,
       "wind_gusts_speed_kmh": 18.1487268
+    },
+    {
+      "observedAt": "2026-08-15T11:50:00Z",
+      "wind_speed_10m": 2.812884,
+      "wind_speed_10m_validated": false,
+      "wind_direction": 309.613153,
+      "wind_direction_validated": false,
+      "wind_gusts_speed": 5.399918,
+      "wind_gusts_speed_validated": false,
+      "humidity_rel_shelter_avg": 47.841117,
+      "humidity_rel_shelter_avg_validated": false,
+      "temp_dry_shelter_avg": 24.743388,
+      "temp_dry_shelter_avg_validated": false,
+      "precip_quantity": 0,
+      "precip_quantity_validated": false,
+      "wind_speed_10m_kmh": 10.1263824,
+      "wind_gusts_speed_kmh": 19.4397048
+    },
+    {
+      "observedAt": "2026-08-15T12:00:00Z",
+      "wind_speed_10m": 2.779414,
+      "wind_speed_10m_validated": false,
+      "wind_direction": 291.642787,
+      "wind_direction_validated": false,
+      "wind_gusts_speed": 5.997593,
+      "wind_gusts_speed_validated": false,
+      "humidity_rel_shelter_avg": 50.123262,
+      "humidity_rel_shelter_avg_validated": false,
+      "temp_dry_shelter_avg": 24.450068,
+      "temp_dry_shelter_avg_validated": false,
+      "precip_quantity": 0,
+      "precip_quantity_validated": false,
+      "wind_speed_10m_kmh": 10.0058904,
+      "wind_gusts_speed_kmh": 21.591334800000002
     }
   ]
 }

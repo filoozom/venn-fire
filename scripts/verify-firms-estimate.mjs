@@ -7,7 +7,7 @@
 import {
   FIRMS_SENSORS,
   buildFirmsRequests,
-  FIRMS_EXTENTS,
+  footprintOutlineRings,
   corroborateDetections,
   detectionFootprint,
   estimateFootprintArea,
@@ -219,8 +219,30 @@ check('...but it is still corroborated', unanchored.every((d) => d.isCorroborate
 const loneHigh = corroborateDetections([high(50.5400, 6.0000, 'viirsNoaa20')])
 check('high confidence from one satellite is not fire core', loneHigh[0].isFireCore, false)
 
-check('fire core is the tightest extent', FIRMS_EXTENTS[0].key, 'fireCore')
-check('every extent states its rule', FIRMS_EXTENTS.every((e) => e.detail?.length > 0), true)
+// --- outline ----------------------------------------------------------------
+
+const origin = { latitude: 50.54, longitude: 6.08 }
+const oneRing = footprintOutlineRings([at(50.5400, 6.0800, 'viirsSnpp')], { origin, gridCellM: 25 })
+check('a single footprint traces one ring', oneRing.length, 1)
+check('the ring is closed', JSON.stringify(oneRing[0][0]), JSON.stringify(oneRing[0].at(-1)))
+check('a rectangle needs only its corners', oneRing[0].length, 5)
+
+// Two touching footprints must dissolve into one boundary, not two.
+const mPerLon = 111412.84 * Math.cos(50.54 * Math.PI / 180) - 93.5 * Math.cos(3 * 50.54 * Math.PI / 180)
+const merged = footprintOutlineRings([
+  at(50.5400, 6.0800, 'viirsSnpp'),
+  at(50.5400, 6.0800 + 375 / mPerLon, 'viirsSnpp'),
+], { origin, gridCellM: 25 })
+check('touching footprints dissolve into one ring', merged.length, 1)
+
+// A ring around a gap must be reported separately rather than filled in.
+const far = footprintOutlineRings([
+  at(50.5400, 6.0800, 'viirsSnpp'),
+  at(50.5400, 6.1200, 'viirsSnpp'),
+], { origin, gridCellM: 25 })
+check('separate patches stay separate', far.length, 2)
+
+check('no detections yields no rings', footprintOutlineRings([], { origin }).length, 0)
 
 if (failures) {
   console.error(`\n${failures} check(s) failed`)

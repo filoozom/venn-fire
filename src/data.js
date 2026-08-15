@@ -1,4 +1,3 @@
-import nearbyTrafficSummary from './nearbyTrafficSummary.json'
 import incidentAircraftSnapshot from './incidentAircraftSnapshot.json'
 import montRigiSnapshot from './montRigiObservations.json'
 import dwdWindSnapshot from './dwdWindObservations.json'
@@ -278,50 +277,6 @@ function frameAt(isoTimestamp) {
   ))
 }
 
-export const nearbyTrafficMeta = {
-  schemaVersion: nearbyTrafficSummary.schemaVersion,
-  generatedAt: nearbyTrafficSummary.generatedAt,
-  incidentDate: nearbyTrafficSummary.incidentDate,
-  selection: nearbyTrafficSummary.selection,
-  sources: nearbyTrafficSummary.sources,
-  aircraftCount: nearbyTrafficSummary.aircraftCount,
-  lowLevelAircraftCount: nearbyTrafficSummary.lowLevelAircraftCount,
-  overflightAircraftCount: nearbyTrafficSummary.overflightAircraftCount,
-  observationCount: nearbyTrafficSummary.observationCount,
-  interpretation: nearbyTrafficSummary.interpretation,
-}
-
-// Union of every non-incident identifier observed within 5 km of Drossart in
-// either retained receiver replay. Geometry is kept to exact source samples
-// within 10 km for entry/exit context. G10 is excluded because its more strongly
-// sourced incident representation is maintained separately below.
-export function normalizeNearbyTrafficSnapshot(snapshot) {
-  const trafficSourceById = Object.fromEntries(snapshot.sources.map((source) => [source.id, source]))
-  return snapshot.aircraft.map((aircraft) => {
-    const source = trafficSourceById[aircraft.geometrySource]
-    return {
-      ...aircraft,
-      label: aircraft.description || aircraft.aircraftType || 'Unclassified receiver-observed aircraft',
-      type: 'traffic',
-      color: aircraft.classification === 'low-level' ? '#9b6b20' : '#657b88',
-      status: `${aircraft.missionStatus}; ${aircraft.classification === 'low-level' ? 'altitude-filtered nearby traffic' : 'high-altitude overflight'}`,
-      source: source?.name || aircraft.geometrySource,
-      sourceUrl: source?.website || null,
-      pathMethod: aircraft.classification === 'low-level'
-        ? 'Exact replay samples; links require ≤90 s gap and ≤250 kt implied speed'
-        : 'Exact replay samples; links require ≤90 s gap and ≤700 kt implied speed',
-      observations: aircraft.observations.map((observation) => ({
-        observedAt: observation.observedAt,
-        timestampMs: Date.parse(observation.observedAt),
-        position: [observation.latitude, observation.longitude],
-        altitudeFt: observation.altitudeFt,
-        distanceDrossartKm: observation.distanceDrossartKm,
-        updateType: 'receiver replay snapshot',
-      })),
-    }
-  })
-}
-
 // Exact Airplanes.live MLAT observations from the checked-in provenance
 // snapshot. They are points, not an interpolated path. The map may join two
 // consecutive points only when the gap and implied speed pass the published
@@ -590,6 +545,13 @@ export const sourceLinks = [
     tone: 'effis',
   },
   {
+    name: 'EFFIS Current Situation Viewer',
+    detail: 'Official map context; its sentinel2 URL parameter selects the Sentinel-2 Cloudless 2020 basemap, not an incident perimeter',
+    cadence: 'Viewer reference',
+    url: 'https://forest-fire.emergency.copernicus.eu/apps/effis.csv/?c=629562.19,6608535.18&z=8.544845581054688&t=sentinel2',
+    tone: 'effis',
+  },
+  {
     name: 'Airplanes.live',
     detail: 'Historical ADS-B / MLAT observations for G10 and G17',
     cadence: '30 s replay slices; reception varies',
@@ -612,7 +574,7 @@ export const sourceLinks = [
   },
   {
     name: 'Governor of Liège',
-    detail: 'Official incident updates: ~60, ~100 and ~850 ha',
+    detail: 'Official 13:06 incident start and dated ~60, ~100 and ~850 ha situation reports',
     cadence: 'Official situation reports',
     url: 'https://gouverneur.provincedeliege.be/fr/node/7923',
     tone: 'official',
@@ -664,7 +626,6 @@ export const sourceLinks = [
 export const initialLayers = {
   perimeter: true,
   aircraft: true,
-  traffic: false,
   wind: true,
   rmiWind: true,
   protected: false,
