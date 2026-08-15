@@ -93,27 +93,28 @@ export const FIRMS_SENSORS = [
     // Off by default. A detection locates the fire only to within its pixel, and
     // that pixel is larger than the fire was for most of the incident.
     defaultVisible: false,
-    // Drawn at its true computed extent, not as a point. A dot would imply a
-    // precision this sensor does not have; the rectangle is the honest picture.
+    // Drawn at its computed approximate extent, not as a point. A dot would imply a
+    // precision this sensor does not have. The rectangle is an explicitly
+    // approximate projection of the native pixel onto the incident area.
     displayMode: 'footprint',
     name: 'Meteosat (geostationary)',
     platform: 'Met12 / Met10 / Met9',
     instrument: 'GEO',
-    // Nominal at nadir. At 50.5 N the pixel is foreshortened to roughly 3x6 km,
-    // which is why this sensor never yields an area figure.
+    // Nominal thermal-channel sampling at nadir. Ground sampling grows sharply
+    // at this latitude, which is why this sensor never yields an area figure.
     nominalResolutionM: 3000,
     providesArea: false,
-    // Computed from the viewing geometry, not assumed: at 58.2 deg viewing zenith
-    // one MSG pixel is 3.2 x 6.1 km, about 1,970 ha. That is more ground than the
-    // whole fire was reported to cover on the morning of 15 August.
-    pixelSizeLabel: '3.2 × 6.1 km (~1,970 ha) per MSG pixel · 2.1 × 4.1 km (~880 ha) for MTG',
-    areaExclusionReason: 'A Meteosat pixel covers around 1,970 ha at this latitude, so a detection locates the fire only to within an area larger than the fire itself. FIRMS publishes no scan/track dimensions for it.',
+    // Computed from each spacecraft's native sampling, 14-15 August 2026 orbit
+    // position and local viewing geometry. Met9 is over the Indian Ocean at
+    // 45.5 E, so it is materially coarser here than the two 0-degree platforms.
+    pixelSizeLabel: 'computed footprint: Met12 ~2.1 × 4.1 km; Met10 ~3.2 × 6.1 km; Met9 ~3.3 × 9.1 km',
+    areaExclusionReason: 'A computed Meteosat ground pixel covers roughly 880-3,010 ha here, depending on the spacecraft. GOES_NRT does not publish physical pixel dimensions, so these are viewing-geometry approximations and are never used as fire-area figures.',
     // FIRMS rejects a longer window for this product.
     maxDayRange: 2,
     color: '#7f9bb5',
     tone: 'nasa',
-    cadence: 'Continuous; about one scan every 10 minutes',
-    retirementNote: 'Pixels are roughly 3x6 km at this latitude. Detections and FRP only; no area is derived from them.',
+    cadence: 'Met12 every 10 minutes; MSG platforms every 15 minutes',
+    retirementNote: 'Ground pixels span roughly 2.1 x 4.1 km to 3.3 x 9.1 km here. Detections and FRP only; no area is derived from them.',
   },
 ]
 
@@ -202,27 +203,58 @@ const CELL_EDGE_EPSILON_M = 1e-6
 
 // Geostationary ground-pixel geometry.
 //
-// FIRMS reports scan and track as 0 for the geostationary product, so the true
-// footprint has to be computed. It is not the nadir figure: from Belgium the
-// viewing zenith angle is about 58 degrees, which stretches the pixel along the
-// line of sight to roughly double its width.
+// GOES_NRT does not publish physical pixel dimensions in scan/track (Met12 uses
+// zeroes; MSG rows carry image-grid coordinates), so an approximate ground
+// footprint has to be computed. It is not the nadir figure: the large viewing
+// zenith angle stretches the pixel along the line of sight.
 //
 // The result is the single most important thing to show about this sensor. One
-// MSG pixel covers around 1,970 ha -- more than the whole fire was reported to
-// be on the morning of 15 August -- so a detection locates the fire only to
-// within an area of that size.
+// MSG pixel covers around 1,970 ha from the 0-degree service and around 3,010 ha
+// from Met9 at 45.5 E -- more than the whole fire was reported to be on the
+// morning of 15 August. This is a local tangent-plane approximation, not a
+// pixel polygon published by FIRMS or EUMETSAT.
 const EARTH_RADIUS_KM = 6378.137
 const GEOSTATIONARY_ALTITUDE_KM = 35786.0
 
 // Nadir instantaneous field of view by spacecraft generation.
 const GEOSTATIONARY_NADIR_KM = { mtg: 2, msg: 3 }
 
-function geostationaryGeneration(satellite) {
-  // Met11 onward is MTG; Met8 to Met10 are MSG.
-  return /^met1[1-9]|mtg/i.test(String(satellite ?? '')) ? 'mtg' : 'msg'
+// Operational positions during this incident, sourced from EUMETSAT's service
+// history. Met9 is the Indian Ocean service, Met10 is the secondary 0-degree
+// full-disc service, Met11 is the 9.5 E rapid-scan MSG, and Met12 is MTG-I1.
+// Meteosat-11 is MSG-4; treating every "Met11+" platform as MTG is incorrect.
+const GEOSTATIONARY_PLATFORMS = new Map([
+  ['met9', { generation: 'msg', subSatelliteLongitude: 45.5 }],
+  ['met10', { generation: 'msg', subSatelliteLongitude: 0 }],
+  ['met11', { generation: 'msg', subSatelliteLongitude: 9.5 }],
+  ['met12', { generation: 'mtg', subSatelliteLongitude: 0 }],
+])
+
+function normalizedGeostationaryName(satellite) {
+  return String(satellite ?? '').trim().toLowerCase().replace(/^meteosat[- _]?/, 'met')
 }
 
-export function geostationaryPixelKm(satellite, latitude, longitude, subSatelliteLongitude = 0) {
+function geostationaryPlatform(satellite) {
+  const normalized = normalizedGeostationaryName(satellite)
+  if (/^mtg(?:-i)?1$/i.test(normalized)) return GEOSTATIONARY_PLATFORMS.get('met12')
+  return GEOSTATIONARY_PLATFORMS.get(normalized) ?? null
+}
+
+function bearingToSubSatellitePoint(latitude, longitude, subSatelliteLongitude) {
+  const radians = Math.PI / 180
+  const phi = latitude * radians
+  const deltaLongitude = (subSatelliteLongitude - longitude) * radians
+  const y = Math.sin(deltaLongitude)
+  const x = -Math.sin(phi) * Math.cos(deltaLongitude)
+  return (Math.atan2(y, x) / radians + 360) % 360
+}
+
+export function geostationaryPixelKm(satellite, latitude, longitude, subSatelliteLongitudeOverride) {
+  const platform = geostationaryPlatform(satellite)
+  if (!platform) return null
+  const subSatelliteLongitude = Number.isFinite(subSatelliteLongitudeOverride)
+    ? subSatelliteLongitudeOverride
+    : platform.subSatelliteLongitude
   const radians = Math.PI / 180
   const cosPsi = Math.cos(latitude * radians) * Math.cos((longitude - subSatelliteLongitude) * radians)
   const psi = Math.acos(Math.min(1, Math.max(-1, cosPsi)))
@@ -231,7 +263,7 @@ export function geostationaryPixelKm(satellite, latitude, longitude, subSatellit
     EARTH_RADIUS_KM ** 2 + orbitRadiusKm ** 2 - 2 * EARTH_RADIUS_KM * orbitRadiusKm * cosPsi,
   )
   const viewingZenith = Math.asin(Math.min(1, (orbitRadiusKm / slantRangeKm) * Math.sin(psi)))
-  const nadirKm = GEOSTATIONARY_NADIR_KM[geostationaryGeneration(satellite)]
+  const nadirKm = GEOSTATIONARY_NADIR_KM[platform.generation]
   const angularIfov = nadirKm / GEOSTATIONARY_ALTITUDE_KM
 
   // Across the line of sight the pixel only grows with slant range. Along it, the
@@ -239,14 +271,14 @@ export function geostationaryPixelKm(satellite, latitude, longitude, subSatellit
   const acrossKm = angularIfov * slantRangeKm
   const alongKm = acrossKm / Math.cos(viewingZenith)
 
-  // The sub-satellite point sits almost due south of the incident, so the
-  // stretched axis is close to north-south. Treating it as exactly north-south
-  // is an approximation, and one that understates nothing.
   return {
     scanKm: acrossKm,
     trackKm: alongKm,
     viewingZenithDeg: viewingZenith / radians,
     areaHa: acrossKm * alongKm * 100,
+    footprintBearingDeg: bearingToSubSatellitePoint(latitude, longitude, subSatelliteLongitude),
+    generation: platform.generation,
+    subSatelliteLongitude,
   }
 }
 
@@ -309,7 +341,7 @@ function normaliseConfidence(rawValue, instrument, satellite) {
     // MSG satellite would otherwise be read as total certainty.
     const number = Number(value)
     if (!Number.isFinite(number)) return { label: 'unknown', rank: 0, raw: rawValue }
-    const isFractionalScale = /^met1[1-9]|mtg/i.test(String(satellite ?? ''))
+    const isFractionalScale = geostationaryPlatform(satellite)?.generation === 'mtg'
     return labelForPercent(isFractionalScale ? number * 100 : number, number)
   }
 
@@ -377,17 +409,18 @@ export function parseFirmsCsv(csvText, sensor) {
       continue
     }
 
-    // scan and track are the published pixel dimensions in kilometres. Without
-    // them a footprint cannot be drawn, so fall back to the nominal square
-    // rather than inventing a size, and record which was used.
+    // Polar products publish scan/track dimensions in kilometres. GOES_NRT
+    // reuses those columns for geostationary image-grid coordinates (or zero),
+    // so they must never be interpreted as kilometres for a GEO row.
     const scanKm = Number(cells[scanIndex])
     const trackKm = Number(cells[trackIndex])
     const nominalKm = sensor.nominalResolutionM / 1000
-    const hasPublishedFootprint = Number.isFinite(scanKm) && Number.isFinite(trackKm) && scanKm > 0 && trackKm > 0
-    // The geostationary product publishes zeros, so its true ground pixel is
-    // computed from the viewing geometry rather than assumed to be the nadir
-    // square, which would understate the area it covers by about half.
-    const geostationaryPixel = !hasPublishedFootprint && sensor.instrument === 'GEO'
+    const isGeostationary = sensor.instrument === 'GEO'
+    const hasPublishedFootprint = !isGeostationary
+      && Number.isFinite(scanKm) && Number.isFinite(trackKm) && scanKm > 0 && trackKm > 0
+    // A GEO footprint is always computed from the spacecraft/service geometry;
+    // raw scan/track values remain separately retained for audit.
+    const geostationaryPixel = isGeostationary
       ? geostationaryPixelKm(cells[satelliteIndex], latitude, longitude)
       : null
 
@@ -396,9 +429,19 @@ export function parseFirmsCsv(csvText, sensor) {
       longitude,
       scanKm: hasPublishedFootprint ? scanKm : (geostationaryPixel?.scanKm ?? nominalKm),
       trackKm: hasPublishedFootprint ? trackKm : (geostationaryPixel?.trackKm ?? nominalKm),
+      sourceScan: Number.isFinite(scanKm) ? scanKm : null,
+      sourceTrack: Number.isFinite(trackKm) ? trackKm : null,
+      sourceScanTrackMeaning: isGeostationary ? 'GOES_NRT image-grid fields; not kilometre dimensions' : 'published kilometre dimensions',
       footprintSource: hasPublishedFootprint
         ? 'published'
         : (geostationaryPixel ? 'computed-geostationary' : 'nominal'),
+      displayMode: geostationaryPixel || sensor.instrument !== 'GEO' ? 'footprint' : 'centroid',
+      footprintBearingDeg: geostationaryPixel?.footprintBearingDeg ?? null,
+      viewingZenithDeg: geostationaryPixel?.viewingZenithDeg ?? null,
+      subSatelliteLongitude: geostationaryPixel?.subSatelliteLongitude ?? null,
+      footprintMethod: geostationaryPixel
+        ? 'Approximate local tangent-plane projection from native nadir sampling, spacecraft service longitude and viewing geometry'
+        : null,
       acquiredAt: toIsoTimestamp(cells[dateIndex], cells[timeIndex]),
       confidence: normaliseConfidence(cells[confidenceIndex], sensor.instrument, cells[satelliteIndex]),
       frpMw: Number.isFinite(Number(cells[frpIndex])) ? Number(cells[frpIndex]) : null,
@@ -417,6 +460,33 @@ export function parseFirmsCsv(csvText, sensor) {
  * order, matching the convention used by the bundled EFFIS geometry.
  */
 export function detectionFootprint(detection) {
+  if (!Number.isFinite(detection.scanKm) || !Number.isFinite(detection.trackKm)
+    || detection.scanKm <= 0 || detection.trackKm <= 0) return null
+
+  if (Number.isFinite(detection.footprintBearingDeg)) {
+    const radians = Math.PI / 180
+    const bearing = detection.footprintBearingDeg * radians
+    const along = detection.trackKm * 1000 / 2
+    const across = detection.scanKm * 1000 / 2
+    const alongEast = Math.sin(bearing) * along
+    const alongNorth = Math.cos(bearing) * along
+    const acrossEast = Math.sin(bearing + Math.PI / 2) * across
+    const acrossNorth = Math.cos(bearing + Math.PI / 2) * across
+    const metresLatitude = metresPerDegreeLatitude(detection.latitude)
+    const metresLongitude = metresPerDegreeLongitude(detection.latitude)
+    const point = (east, north) => [
+      detection.latitude + north / metresLatitude,
+      detection.longitude + east / metresLongitude,
+    ]
+    const ring = [
+      point(-alongEast - acrossEast, -alongNorth - acrossNorth),
+      point(-alongEast + acrossEast, -alongNorth + acrossNorth),
+      point(alongEast + acrossEast, alongNorth + acrossNorth),
+      point(alongEast - acrossEast, alongNorth - acrossNorth),
+    ]
+    return [...ring, ring[0]]
+  }
+
   const halfLat = detection.trackKm * 1000 / 2 / metresPerDegreeLatitude(detection.latitude)
   const halfLon = detection.scanKm * 1000 / 2 / metresPerDegreeLongitude(detection.latitude)
   const south = detection.latitude - halfLat
@@ -507,6 +577,21 @@ export function estimateFootprintArea(detections, { gridCellM = 25, origin } = {
  * hectare estimate inseparable from the method and source that produced it.
  */
 const CONFIDENCE_RANKS = { low: 1, nominal: 2, high: 3 }
+export const GEOSTATIONARY_DISPLAY_WINDOW_MS = 15 * 60 * 1000
+
+/**
+ * Polar detections remain as historical evidence after an overpass. A
+ * geostationary detection is an instantaneous heat observation, so keeping it
+ * forever would turn repeated coarse pixels into a false burned-area layer.
+ */
+export function firmsDetectionVisibleAt(detection, selectedTimestampMs) {
+  const acquiredAtMs = Number.isFinite(detection.timestampMs)
+    ? detection.timestampMs
+    : Date.parse(detection.acquiredAt)
+  if (!Number.isFinite(acquiredAtMs) || acquiredAtMs > selectedTimestampMs) return false
+  return detection.sensorKey !== 'meteosat'
+    || selectedTimestampMs - acquiredAtMs < GEOSTATIONARY_DISPLAY_WINDOW_MS
+}
 
 /**
  * Whether a detection clears a confidence threshold. Exported so that a stored
@@ -628,7 +713,7 @@ export function firmsSourceEntry(summaries) {
     detail: plotted
       ? `${plotted} detections from ${connected.length} sensor${connected.length === 1 ? '' : 's'}; area is derived only for ${areaCapable.length} VIIRS product${areaCapable.length === 1 ? '' : 's'}`
       : 'No detections in the selected snapshot or server response',
-    cadence: 'Polar overpasses plus roughly ten-minute geostationary scans; provider latency varies',
+    cadence: 'Polar overpasses plus 10-minute MTG and 15-minute MSG scans; provider latency varies',
     url: FIRMS_SOURCE_URL,
     tone: 'nasa',
   }

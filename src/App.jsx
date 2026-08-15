@@ -58,6 +58,7 @@ import {
   FIRMS_SENSORS,
   corroborateDetections,
   estimateFootprintArea,
+  firmsDetectionVisibleAt,
 } from './firmsDetections'
 
 // Each sensor is its own layer and each confidence level its own filter, so the
@@ -123,7 +124,7 @@ function layerOptionsFor(effisArea, isCarriedForward, firmsSummaries = [], frame
       detail: summary
         ? sensor.providesArea
           ? `${summary.detectionCount} detections · ${pixel ? `${Math.round(pixel)} ha mean pixel` : `${sensor.nominalResolutionM} m nominal`}`
-          : `${summary.detectionCount} detections · ${sensor.pixelSizeLabel ?? `${sensor.nominalResolutionM} m nominal pixel`} · detections only, no area`
+          : `${summary.detectionCount} detections · ${sensor.pixelSizeLabel ?? `${sensor.nominalResolutionM} m nominal pixel`} · detections only, no area${sensor.instrument === 'GEO' ? ' · shown for 15 min around each scan' : ''}`
         : 'No detections in the database',
       icon: Satellite,
       color: sensor.color,
@@ -718,9 +719,10 @@ function FireViewer({ runtime, databaseError }) {
     [displayFlights, frame],
   )
 
-  // Database-retained FIRMS detections, placed on the five-minute timeline by their exact
-  // acquisition time. A detection appears from its overpass onward; it is never
-  // back-dated and never interpolated between overpasses.
+  // Database-retained FIRMS detections, placed on the five-minute timeline by
+  // exact acquisition time. Polar detections remain as historical evidence;
+  // Meteosat is an instantaneous heat observation and is shown for 15 minutes
+  // rather than accumulated into a false burned-area layer.
   const firmsDetections = useMemo(() => corroborateDetections(firmsData.detections).map((detection) => {
     const sensor = FIRMS_SENSORS.find((entry) => entry.key === detection.sensorKey)
     return {
@@ -728,10 +730,11 @@ function FireViewer({ runtime, databaseError }) {
       sensorName: sensor?.name ?? detection.sensorKey,
       sensorColor: sensor?.color ?? '#efaa3c',
       providesArea: sensor?.providesArea === true,
-      displayMode: sensor?.displayMode ?? detection.displayMode ?? 'footprint',
+      displayMode: detection.displayMode ?? sensor?.displayMode ?? 'footprint',
       pixelSizeLabel: sensor?.pixelSizeLabel ?? detection.pixelSizeLabel ?? `${detection.scanKm} × ${detection.trackKm} km pixel`,
       areaExclusionReason: sensor?.areaExclusionReason ?? detection.areaExclusionReason ?? null,
       position: [detection.latitude, detection.longitude],
+      timestampMs: Date.parse(detection.acquiredAt),
       frame: Math.max(0, Math.ceil((Date.parse(detection.acquiredAt) - runtime.timelineStartMs) / FIVE_MINUTES_MS)),
     }
   }), [firmsData.detections, runtime.timelineStartMs])
@@ -742,8 +745,8 @@ function FireViewer({ runtime, databaseError }) {
   )
 
   const firmsDetectionsAtTime = useMemo(
-    () => firmsDetections.filter((detection) => detection.frame <= frameIndex),
-    [firmsDetections, frameIndex],
+    () => firmsDetections.filter((detection) => firmsDetectionVisibleAt(detection, frame.timestampMs)),
+    [firmsDetections, frame.timestampMs],
   )
 
   // Detections meeting the best-estimate rule, at the selected time. The outline

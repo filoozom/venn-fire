@@ -1000,7 +1000,7 @@ export const REFRESH_SOURCES = [
   {
     key: 'firms', label: 'NASA FIRMS detections', intervalMinutes: 15, run: refreshFirms,
     providerUrl: 'https://firms.modaps.eosdis.nasa.gov/',
-    coverage: 'Exact VIIRS and MODIS thermal detections plus GOES_NRT Meteosat scan centroids from five products',
+    coverage: 'Exact VIIRS and MODIS thermal detections plus GOES_NRT Meteosat detections with approximate viewing-geometry ground footprints from five products',
   },
   {
     key: 'effis', label: 'Copernicus EFFIS daily geometry', intervalMinutes: 360, run: refreshEffis,

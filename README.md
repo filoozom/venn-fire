@@ -77,12 +77,12 @@ The scheduler has five-minute granularity. A database lease makes repeated calls
 | Public-operations adapter | Sanitized dispatch, water pickup/drop, closure, evacuation and aggregate-compliance events | 5 min |
 | RMI Mont Rigi WFS | Ten-minute station temperature, humidity, precipitation, wind, gust and validation flags | 10 min |
 | DWD CDC | Ten-minute wind observations and quality level from three nearby stations | 10 min |
-| NASA FIRMS, five products | Exact VIIRS Suomi-NPP, VIIRS NOAA-20, VIIRS NOAA-21 and MODIS detections, plus GOES_NRT Meteosat scan centroids | 15 min |
+| NASA FIRMS, five products | Exact VIIRS Suomi-NPP, VIIRS NOAA-20 and VIIRS NOAA-21 footprints, MODIS detections, plus GOES_NRT Meteosat detections with approximate viewing-geometry ground footprints | 15 min |
 | Copernicus EMS | Rapid Mapping activation catalogue and any incident match details | 60 min |
 | Copernicus Data Space | Sentinel-2 L2A catalogue metadata and public JPEG quicklook pixels archived as Postgres artifacts | 60 min |
 | Copernicus EFFIS WFS | Daily algorithmic VIIRS geometry nearest the incident | 6 h |
 
-FIRMS is checked by every scheduler run, but its provider lease is 15 minutes to conserve the limited NASA MAP_KEY allowance. Each successful poll merges exact detections into retained history instead of replacing the previous window and archives five raw product CSV responses in Postgres. The dataset reports both `generatedAt` (when FIRMS was queried) and `latestAcquiredAt` (the newest satellite scan or overpass returned). GOES_NRT is capped to a two-day request and returns Met12/Met10/Met9 over Belgium; its zero scan/track dimensions are rendered as centroids and never used for hectares. Configure `FIRMS_MAP_KEY` as a sensitive Vercel production environment variable; stored request URLs replace it with `MAP_KEY`, and the secret is never returned to the browser or written to the database.
+FIRMS is checked by every scheduler run, but its provider lease is 15 minutes to conserve the limited NASA MAP_KEY allowance. Each successful poll merges exact detections into retained history instead of replacing the previous window and archives five raw product CSV responses in Postgres. The dataset reports both `generatedAt` (when FIRMS was queried) and `latestAcquiredAt` (the newest satellite scan or overpass returned). GOES_NRT is capped to a two-day request and returns Met12/Met10/Met9 over Belgium. Its `scan`/`track` columns are not physical kilometre dimensions: Met12 supplies zeroes while the MSG rows carry image-grid coordinates. The raw values are retained for provenance and ignored for footprint sizing. The map instead computes an explicitly approximate local ground footprint from the spacecraft generation, its EUMETSAT service longitude during this incident and the viewing geometry. Met12 and Met10 are at 0°; Met9 is at 45.5°E and therefore has a much larger, rotated footprint here. These rectangles communicate detection uncertainty and are never used for hectares. Configure `FIRMS_MAP_KEY` as a sensitive Vercel production environment variable; stored request URLs replace it with `MAP_KEY`, and the secret is never returned to the browser or written to the database.
 
 Aircraft discovery does not add provider calls: the former fixed-hex request is replaced by one point request covering the incident. Exact Mode-S identities already verified for the incident remain accepted even when no callsign is broadcast; a previously unseen aircraft is accepted only when it broadcasts the conservative `GRZLY##` incident callsign pattern inside the radius. Once accepted, its identity is retained in Postgres and included in current- and previous-day trace reconciliation. Other nearby traffic remains archived in the raw provider artifact but is not normalized onto the incident map.
 
@@ -99,7 +99,11 @@ pnpm install
 pnpm dev
 ```
 
-Local UI development still requires access to a deployed `/api/data` route or a local Vercel environment with a database connection. There is intentionally no static fallback.
+Vite proxies only the read-only `/api/data` request to `https://venn-fire.vercel.app` by default, so local UI development works without a production database credential or bundled snapshot. Provider refresh and ingestion routes are not proxied. To read from another deployed/local API origin instead:
+
+```bash
+VENN_FIRE_DEV_DATA_ORIGIN=http://127.0.0.1:3000 pnpm dev
+```
 
 Run the deterministic checks with:
 

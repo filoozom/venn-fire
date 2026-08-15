@@ -115,10 +115,10 @@ export async function loadFirms({ mapKey, requestedAtMs, includeRaw = false, fet
     sensors.push({ ...summary, excludedOutsideRadius })
     detections.push(...inRadius.map((detection) => ({
       ...detection,
-      footprint: detectionFootprint(detection),
+      footprint: detection.displayMode === 'centroid' ? null : detectionFootprint(detection),
       meetsMinimumConfidence: meetsConfidence(detection, MINIMUM_CONFIDENCE),
       providesArea: request.sensor.providesArea === true,
-      displayMode: request.sensor.displayMode ?? 'footprint',
+      displayMode: detection.displayMode ?? request.sensor.displayMode ?? 'footprint',
       pixelSizeLabel: request.sensor.pixelSizeLabel ?? `${request.sensor.nominalResolutionM} m nominal pixel`,
       areaExclusionReason: request.sensor.areaExclusionReason ?? null,
     })))
@@ -181,7 +181,7 @@ export async function loadFirms({ mapKey, requestedAtMs, includeRaw = false, fet
       'A detection is a thermal anomaly at the moment of a polar overpass or geostationary scan, not a burned-area polygon.',
       'Per-sensor hectare values are footprint-union estimates and must never be added together.',
       'Only sensors with providesArea=true may expose a hectare estimate. MODIS and Meteosat are detections-only.',
-      'Meteosat scan and track are zero in FIRMS. It is rendered as an exact centroid, not as a guessed footprint.',
+      'GOES_NRT scan and track fields are not physical kilometre dimensions: Met12 supplies zeroes while MSG rows carry image-grid coordinates. Known platforms use an explicitly approximate ground footprint computed from native sampling, EUMETSAT service longitude and local viewing geometry; unknown platforms remain centroids.',
       ...FOOTPRINT_ESTIMATE_CAVEATS,
     ],
   }

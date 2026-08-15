@@ -276,15 +276,18 @@ export default function MapView({
 
     }
 
-    // Sensor pixel footprints at their true published size, shaded by confidence.
-    // The blockiness is the point: it shows the resolution the estimate is built
-    // from, so no false precision can be read off the map.
+    // Sensor pixels shaded by confidence. Polar footprints use FIRMS' published
+    // dimensions; Meteosat rectangles are labelled viewing-geometry
+    // approximations because GOES_NRT does not publish physical dimensions.
     firmsDetections.forEach((detection) => {
       const style = FIRMS_CONFIDENCE_STYLE[detection.confidence.label] ?? FIRMS_CONFIDENCE_STYLE.unknown
       const age = frameIndex - detection.frame
-      const fillOpacity = Math.max(style.fillOpacity * 0.4, style.fillOpacity - age * 0.004)
+      const computedGeostationary = detection.footprintSource === 'computed-geostationary'
+      const historicalFillOpacity = Math.max(style.fillOpacity * 0.4, style.fillOpacity - age * 0.004)
+      const fillOpacity = computedGeostationary ? Math.min(0.035, historicalFillOpacity) : historicalFillOpacity
       const layer = detection.displayMode === 'centroid'
         ? L.circleMarker(detection.position, {
+            className: `firms-detection firms-detection--${detection.sensorKey} firms-detection--centroid`,
             color: style.color,
             weight: style.weight + 0.5,
             opacity: style.opacity,
@@ -293,22 +296,31 @@ export default function MapView({
             radius: 4 + Math.max(0, detection.confidence.rank ?? 0),
           })
         : L.polygon(detection.footprint, {
+            className: `firms-detection firms-detection--${detection.sensorKey}${computedGeostationary ? ' firms-detection--computed' : ''}`,
             color: style.color,
             weight: style.weight,
             opacity: style.opacity,
             fillColor: style.color,
             fillOpacity,
+            dashArray: computedGeostationary ? '6 5' : null,
           })
-      const pixelDetail = detection.providesArea
-        ? `${Math.round(detection.scanKm * detection.trackKm * 100)} ha sensor pixel`
-        : `${detection.pixelSizeLabel} · detections only, no area derived`
+      const pixelDetail = computedGeostationary
+        ? `${detection.scanKm.toFixed(1)} × ${detection.trackKm.toFixed(1)} km computed footprint (~${Math.round(detection.scanKm * detection.trackKm * 100).toLocaleString('en-GB')} ha pixel coverage; not fire area)`
+        : detection.providesArea
+          ? `${Math.round(detection.scanKm * detection.trackKm * 100)} ha sensor pixel`
+          : `${detection.pixelSizeLabel} · detections only, no area derived`
+      const footprintDetail = detection.displayMode === 'centroid'
+        ? 'Exact detection centroid; no defensible footprint geometry available'
+        : computedGeostationary
+          ? `Approximate projection from native sampling and ${detection.subSatelliteLongitude ?? 'unknown'}° service longitude; FIRMS publishes no pixel polygon`
+          : 'Thermal anomaly, not a burned-area polygon'
       layer.bindTooltip(
         `<strong>${detection.confidence.label} confidence</strong><br>`
         + `${detection.sensorName}${detection.satellite ? ` · ${detection.satellite}` : ''} · ${detection.frpMw ?? '—'} MW FRP<br>`
         + pixelDetail
         + `${detection.corroboratingSensors > 1 ? `<br>${detection.corroboratingSensors} satellites saw this cell` : ''}`
         + `<br><small>NASA FIRMS · ${detection.acquiredAt.replace('T', ' ').slice(0, 16)} UTC</small>`
-        + `<br><small>${detection.displayMode === 'centroid' ? 'Exact detection centroid; no scan/track footprint published' : 'Thermal anomaly, not a burned-area polygon'}</small>`,
+        + `<br><small>${footprintDetail}</small>`,
         { direction: 'top' },
       ).addTo(group)
     })
