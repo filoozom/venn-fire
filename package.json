@@ -11,6 +11,7 @@
     "verify:refresh": "node scripts/verify-refresh-pipeline.mjs",
     "verify:flight-history": "node scripts/verify-flight-history.mjs",
     "verify:aircraft-fire-edge": "node scripts/verify-aircraft-fire-edge.mjs",
+    "verify:modis-fire-extent": "node scripts/verify-modis-fire-extent.mjs",
     "verify:firms-sensors": "node scripts/verify-firms-sensors.mjs",
     "verify:live-reports": "node scripts/verify-live-reports.mjs",
     "verify:timeline": "node scripts/verify-timeline.mjs",

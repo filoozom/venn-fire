@@ -60,6 +60,12 @@ import {
   estimateFootprintArea,
   firmsDetectionVisibleAt,
 } from './firmsDetections'
+import {
+  MODIS_EXTENT_GRID_CELL_M,
+  MODIS_EXTENT_RULE,
+  MODIS_EXTENT_TIME_BUCKET_MS,
+  deriveModisSupportedExtent,
+} from './modisFireEstimate'
 
 // Each sensor is its own layer and each confidence level its own filter, so the
 // viewer chooses the configuration rather than inheriting a threshold we picked.
@@ -778,6 +784,16 @@ function FireViewer({ runtime, databaseError }) {
     timeBucketMs: AIRCRAFT_EDGE_TIME_BUCKET_MS,
   }), [displayFlights, bestEstimateDetections, fireOutlineRings, frame.timestampMs, firmsData.locationReference])
 
+  const modisSupportedExtent = useMemo(() => deriveModisSupportedExtent({
+    detections: firmsDetectionsAtTime,
+    coreDetections: bestEstimateDetections,
+    aircraftEdgeCandidates: aircraftSupportedEdge.candidates,
+    frameTimestampMs: frame.timestampMs,
+    origin: firmsData.locationReference,
+    gridCellM: MODIS_EXTENT_GRID_CELL_M,
+    timeBucketMs: MODIS_EXTENT_TIME_BUCKET_MS,
+  }), [firmsDetectionsAtTime, bestEstimateDetections, aircraftSupportedEdge.candidates, frame.timestampMs, firmsData.locationReference])
+
   const visibleFirmsDetections = useMemo(() => firmsDetectionsAtTime.filter((detection) => (
     layers[FIRMS_LAYER_KEYS[detection.sensorKey]]
       && activeConfidenceLevels.includes(detection.confidence.label)
@@ -876,7 +892,7 @@ function FireViewer({ runtime, databaseError }) {
               {/* The best estimate sits beside the reported figure. EFFIS keeps its
                   own card below: at roughly five times the reported area it is an
                   envelope, and giving it headline position overstated the burn. */}
-              <div><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}</strong><span>satellite-core ha</span><small>{bestEstimateDetections.length ? `${BEST_ESTIMATE_RULE} · ${aircraftSupportedEdge.candidates.length ? `+ ${aircraftSupportedEdge.candidates.length} aircraft edge cells · ` : ''}derived` : 'no qualifying detections yet'}</small></div>
+              <div><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}</strong><span>satellite-core ha</span><small>{bestEstimateDetections.length ? `${BEST_ESTIMATE_RULE} · ${modisSupportedExtent.detections.length ? `+ ${modisSupportedExtent.detections.length} MODIS support px · ` : ''}${aircraftSupportedEdge.candidates.length ? `+ ${aircraftSupportedEdge.candidates.length} aircraft edge cells · ` : ''}derived` : 'no qualifying detections yet'}</small></div>
             </div>
           </div>
 
@@ -895,11 +911,12 @@ function FireViewer({ runtime, databaseError }) {
             </div>
             <div className="outline-method-key" aria-label="Best estimate outline methods">
               <span><i className="is-satellite" /> Satellite core</span>
+              {modisSupportedExtent.detections.length ? <span><i className="is-modis" /> MODIS-supported extent</span> : null}
               {aircraftSupportedEdge.candidates.length ? <span><i className="is-aircraft" /> Aircraft-supported edge</span> : null}
             </div>
             <p className="layer-note">
               {bestEstimateDetections.length
-                ? `Solid boundary: detections where ${BEST_ESTIMATE_RULE}. ${aircraftSupportedEdge.candidates.length ? `Dashed extension: ${aircraftSupportedEdge.candidates.length} ${aircraftSupportedEdge.callSigns.join(', ')} cells derived from ${AIRCRAFT_EDGE_RULE}, binned at 5 minutes and snapped to the same 50 m grid. ` : ''}The hectare figure remains satellite-only; neither line is a confirmed burned-area perimeter.`
+                ? `Solid boundary: detections where ${BEST_ESTIMATE_RULE}. ${modisSupportedExtent.detections.length ? `Violet dotted extent: ${modisSupportedExtent.detections.length} coarse pixel${modisSupportedExtent.detections.length === 1 ? '' : 's'} from the ${modisSupportedExtent.satellites.join('/')} pass, selected by ${MODIS_EXTENT_RULE} and dissolved on the same 50 m grid. ` : ''}${aircraftSupportedEdge.candidates.length ? `Amber dashed edge: ${aircraftSupportedEdge.candidates.length} ${aircraftSupportedEdge.callSigns.join(', ')} cells derived from ${AIRCRAFT_EDGE_RULE}, binned at 5 minutes and snapped to the same 50 m grid. ` : ''}Only the solid VIIRS core contributes to hectares; these are evidence outlines, not a confirmed burned-area perimeter.`
                 : 'No detections meet the best-estimate rule at this time.'}
             </p>
           </div>
@@ -978,6 +995,7 @@ function FireViewer({ runtime, databaseError }) {
             importedTracks={importedTracks}
             firmsDetections={visibleFirmsDetections}
             fireOutlineRings={layers[FIRE_OUTLINE_KEY] ? fireOutlineRings : []}
+            modisFireExtent={layers[FIRE_OUTLINE_KEY] ? modisSupportedExtent : null}
             aircraftFireEdge={layers[FIRE_OUTLINE_KEY] ? aircraftSupportedEdge : null}
             mapLabels={runtime.mapLabels}
             protectedArea={runtime.protectedArea}
@@ -1038,7 +1056,7 @@ function FireViewer({ runtime, databaseError }) {
 
               <div className="snapshot-grid">
                 <article className="snapshot-card snapshot-card--fire"><span><Flame size={15} /> REPORTED AREA</span><strong>{reportedAreaText}<small>{frame.reportedHa == null ? '' : 'ha'}</small></strong><p>{frame.areaLabel}</p></article>
-                <article className="snapshot-card snapshot-card--estimate"><span><Flame size={15} /> BEST ESTIMATE</span><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}<small>{bestEstimateDetections.length ? 'ha' : ''}</small></strong><p>{bestEstimateDetections.length ? `satellite-only area · ${bestEstimateDetections.length} detections · 2+ satellites agree${aircraftSupportedEdge.candidates.length ? ` · ${aircraftSupportedEdge.candidates.length} aircraft edge cells` : ''}` : 'no qualifying detections yet'}</p></article>
+                <article className="snapshot-card snapshot-card--estimate"><span><Flame size={15} /> BEST ESTIMATE</span><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}<small>{bestEstimateDetections.length ? 'ha' : ''}</small></strong><p>{bestEstimateDetections.length ? `VIIRS-core area · ${bestEstimateDetections.length} corroborated detections${modisSupportedExtent.detections.length ? ` · ${modisSupportedExtent.detections.length} MODIS support pixels` : ''}${aircraftSupportedEdge.candidates.length ? ` · ${aircraftSupportedEdge.candidates.length} aircraft edge cells` : ''}` : 'no qualifying detections yet'}</p></article>
                 <article className="snapshot-card snapshot-card--effis"><span><Layers3 size={15} /> EFFIS DAILY GEOMETRY</span><strong>{currentEffisArea ? Math.round(currentEffisArea.areaHa).toLocaleString('en-GB') : '—'}<small>{currentEffisArea ? 'ha' : ''}</small></strong><p>{currentEffisArea ? `${currentEffisArea.productDate}${effisCarriedForward ? ' carried forward until replacement' : ''} · envelope containing fire activity, not burned area` : 'no EFFIS product available at selected time'}</p></article>
                 <article className="snapshot-card"><span><Satellite size={15} /> HOTSPOTS</span><strong>{visibleFirmsDetections.length}<small>px</small></strong><p>shaded by confidence · exact NASA FIRMS detections</p></article>
                 <article className="snapshot-card"><span><Helicopter size={15} /> AIR OPS</span><strong>{activeFlights.length}<small>recent</small></strong><p>{activeFlights.length ? 'fix within previous 5 min' : 'no recent observation'}</p></article>

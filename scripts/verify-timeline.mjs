@@ -145,6 +145,25 @@ if (!edgeAfterRepeat.includes('Aircraft-supported edge') || !edgeNoteAfterRepeat
   throw new Error(`Aircraft edge did not enter on the expected five-minute frame: ${edgeAfterRepeat} / ${edgeNoteAfterRepeat}`)
 }
 
+// The 19:13 UTC Terra pass becomes available at the 19:15 UTC frame. It must
+// replace, rather than accumulate with, the earlier Aqua support, and it must
+// leave the VIIRS-only hectare figure untouched.
+await selectTime('2026-08-15T21:10:00+02:00')
+const modisBeforeTerra = await page.locator('.layer-note').first().innerText()
+const areaBeforeTerra = await page.locator('.snapshot-card--estimate strong').innerText()
+await selectTime('2026-08-15T21:15:00+02:00')
+const modisAfterTerra = await page.locator('.layer-note').first().innerText()
+const areaAfterTerra = await page.locator('.snapshot-card--estimate strong').innerText()
+const modisLegendCount = await page.getByText('MODIS-supported extent', { exact: true }).count()
+if (!modisBeforeTerra.includes('Aqua pass')
+  || !modisAfterTerra.includes('13 coarse pixels from the Terra pass')
+  || modisLegendCount !== 1) {
+  throw new Error(`MODIS support did not switch on the expected five-minute frame: ${modisBeforeTerra} / ${modisAfterTerra}`)
+}
+if (areaBeforeTerra.replace(/\s+/gu, '') !== areaAfterTerra.replace(/\s+/gu, '')) {
+  throw new Error(`MODIS changed the VIIRS-only hectare figure: ${areaBeforeTerra} -> ${areaAfterTerra}`)
+}
+
 await selectTime('2026-08-15T14:30:00+02:00')
 const bundledLatestAreaLogEntries = await page.getByText('>1,500 ha reported affected', { exact: true }).count()
 if (bundledLatestAreaLogEntries !== 1) {
@@ -221,5 +240,5 @@ if (databaseReportUpdate.logEntries !== 1) {
 if (liveErrors.length) throw new Error(`Live-report browser errors: ${liveErrors.join(' | ')}`)
 if (errors.length) throw new Error(`Browser errors: ${errors.join(' | ')}`)
 
-console.log(JSON.stringify({ asyncShell, mobileAsyncShell, states, aircraftEdgeTimeline: { edgeBeforeRepeat, edgeAfterRepeat, edgeNoteAfterRepeat }, bundledLatestAreaLogEntries, effisOn14August, effisOn15August, unrelatedTrafficControls, officialSourceLinks, chartBounds, databaseReportUpdate }, null, 2))
+console.log(JSON.stringify({ asyncShell, mobileAsyncShell, states, aircraftEdgeTimeline: { edgeBeforeRepeat, edgeAfterRepeat, edgeNoteAfterRepeat }, modisExtentTimeline: { modisBeforeTerra, modisAfterTerra, areaBeforeTerra, areaAfterTerra, modisLegendCount }, bundledLatestAreaLogEntries, effisOn14August, effisOn15August, unrelatedTrafficControls, officialSourceLinks, chartBounds, databaseReportUpdate }, null, 2))
 await browser.close()

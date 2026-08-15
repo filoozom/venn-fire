@@ -138,6 +138,7 @@ export default function MapView({
   importedTracks = [],
   firmsDetections = [],
   fireOutlineRings = [],
+  modisFireExtent = null,
   aircraftFireEdge = null,
   mapLabels = [],
   protectedArea = [],
@@ -325,9 +326,45 @@ export default function MapView({
       ).addTo(group)
     })
 
-    // One dissolved boundary around the best-estimate detections, drawn after the
-    // footprints so it reads above them. Holes stay open: ground enclosed by
-    // detections but never detected itself is not filled in.
+    // The latest supported MODIS pass expands the visual estimate at its honest
+    // 1 km source resolution. It is drawn underneath the VIIRS core so the solid
+    // higher-resolution evidence remains dominant, and it never contributes to
+    // the hectare figure.
+    if (modisFireExtent?.outlineRings?.length) {
+      const platforms = modisFireExtent.satellites.map(escapeHtml).join('/') || 'Terra/Aqua'
+      L.polygon(modisFireExtent.outlineRings, {
+        color: '#f4e9ff',
+        weight: 6,
+        opacity: 0.68,
+        fill: false,
+        dashArray: '3 7',
+        lineCap: 'round',
+        lineJoin: 'round',
+        interactive: false,
+      }).addTo(group)
+      L.polygon(modisFireExtent.outlineRings, {
+        color: '#9e5db0',
+        weight: 3.2,
+        opacity: 0.98,
+        fill: false,
+        dashArray: '3 7',
+        lineCap: 'round',
+        lineJoin: 'round',
+        className: 'modis-fire-extent',
+      })
+        .bindTooltip(
+          '<strong>MODIS-supported coarse extent</strong><br>'
+          + `${modisFireExtent.detections.length} high-confidence ${platforms} 1 km pixels · ${localObservationTime(modisFireExtent.passAcquiredAt)} CEST<br>`
+          + `<small>Newest pass at this 5-minute frame · within ${modisFireExtent.maxSupportGapM} m of VIIRS/aircraft evidence · ${modisFireExtent.gridCellM} m display grid</small><br>`
+          + '<small>Active-fire pixels, not a burned-area perimeter; excluded from hectares.</small>',
+          { sticky: true },
+        )
+        .addTo(group)
+    }
+
+    // One dissolved boundary around the best-estimate VIIRS detections, drawn
+    // after the coarse extension so it reads above it. Holes stay open: ground
+    // enclosed by detections but never detected itself is not filled in.
     if (fireOutlineRings.length) {
       L.polygon(fireOutlineRings, {
         color: '#ff2f26',
@@ -493,7 +530,7 @@ export default function MapView({
         }), { direction: 'top', offset: [0, -18] })
         .addTo(group)
     })
-  }, [frameIndex, frame, flights, effisArea, effisCarriedForward, layers, importedTracks, firmsDetections, fireOutlineRings, aircraftFireEdge, protectedArea, officialPerimeter])
+  }, [frameIndex, frame, flights, effisArea, effisCarriedForward, layers, importedTracks, firmsDetections, fireOutlineRings, modisFireExtent, aircraftFireEdge, protectedArea, officialPerimeter])
 
   return (
     <div className="map-surface" aria-label="Interactive fire situation map">
