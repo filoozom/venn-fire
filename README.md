@@ -81,6 +81,8 @@ The scheduler has five-minute granularity. A database lease makes repeated calls
 
 FIRMS is checked by every scheduler run, but its provider lease is 15 minutes to conserve the limited NASA MAP_KEY allowance. Each successful poll merges exact detections into retained history instead of replacing the previous window. Configure `FIRMS_MAP_KEY` as a sensitive Vercel production environment variable; the value is never returned to the browser or stored in a dataset.
 
+Bütgenbach's Cloudflare policy blocks requests from the Node.js function network. Its official sitemap and article pages are therefore read through `/api/butgenbach-source`, a no-store Vercel Edge function that accepts only short-lived HMAC-signed requests for allow-listed paths on `butgenbach.be`. It is not an open proxy; the Node.js refresh worker still validates, parses and archives every official response in Postgres.
+
 The project is currently on Vercel Hobby, whose native cron frequency is not sufficient for five-minute work. A Vercel Queue message therefore wakes the private consumer at minute 02/07/12/... and schedules the next delayed message before polling providers. Queue delivery is durable and automatically retried. Push delivery is pinned to a deployment; the `refresh-scheduler` database record names the active deployment so an old chain stops after a release. `.github/workflows/refresh.yml` calls the public bootstrap endpoint on deployments and every 15 minutes as a fallback. Push runs wait until the production alias reports their exact commit before taking ownership. A once-daily native Vercel cron provides an additional recovery path allowed by Hobby. Every path activates the current deployment and schedules its next queue wake-up. The endpoint has no user-controlled URL or query target, and Postgres leases enforce the provider limits even if paths fire together.
 
 ## Local development
@@ -121,6 +123,7 @@ Required production variables:
 
 - `DATABASE_URL` or `POSTGRES_URL`
 - `FIRMS_MAP_KEY`
+- `INTERNAL_SOURCE_TOKEN` (sensitive; authenticates the fixed-host Bütgenbach Edge fetcher)
 
 Optional controlled-source variables:
 

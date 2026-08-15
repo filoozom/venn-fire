@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
 import assert from 'node:assert/strict'
+import { createHmac } from 'node:crypto'
 
+import butgenbachSourceHandler, { config as butgenbachSourceConfig } from '../api/butgenbach-source.js'
 import { LIVE_AIRCRAFT_PROVIDERS, normalizeAircraft } from '../api/live-situation.js'
 import { payloadHash, setNoStoreHeaders } from '../server/database.mjs'
 import {
@@ -334,5 +336,52 @@ const [preparationEvent] = buildEvents({
   frameCount: 400,
 })
 assert.equal(preparationEvent.type, 'alert', 'evacuation preparation must not be presented as an evacuation order')
+
+assert.equal(butgenbachSourceConfig.runtime, 'edge')
+const proxyPath = '/wp-sitemap-posts-post-1.xml'
+const proxyTimestamp = Math.floor(Date.now() / (5 * 60 * 1000))
+const proxyToken = 'deterministic-test-token'
+const proxySignature = createHmac('sha256', proxyToken)
+  .update(`${proxyTimestamp}\n${proxyPath}`)
+  .digest('hex')
+const previousProxyToken = process.env.INTERNAL_SOURCE_TOKEN
+const previousFetch = globalThis.fetch
+let proxiedUrl = null
+try {
+  process.env.INTERNAL_SOURCE_TOKEN = proxyToken
+  globalThis.fetch = async (url) => {
+    proxiedUrl = String(url)
+    return new Response('<urlset />', { status: 200, headers: { 'Content-Type': 'application/xml' } })
+  }
+  const proxyResponse = await butgenbachSourceHandler(new Request(
+    `https://venn-fire.vercel.app/api/butgenbach-source?path=${encodeURIComponent(proxyPath)}`,
+    {
+      headers: {
+        'X-Venn-Timestamp': String(proxyTimestamp),
+        'X-Venn-Signature': proxySignature,
+      },
+    },
+  ))
+  assert.equal(proxyResponse.status, 200)
+  assert.equal(proxiedUrl, `https://butgenbach.be${proxyPath}`)
+  assert.match(proxyResponse.headers.get('cache-control'), /no-store/)
+
+  proxiedUrl = null
+  const rejectedProxyResponse = await butgenbachSourceHandler(new Request(
+    'https://venn-fire.vercel.app/api/butgenbach-source?path=https%3A%2F%2Fexample.test%2F',
+    {
+      headers: {
+        'X-Venn-Timestamp': String(proxyTimestamp),
+        'X-Venn-Signature': proxySignature,
+      },
+    },
+  ))
+  assert.equal(rejectedProxyResponse.status, 401)
+  assert.equal(proxiedUrl, null, 'the signed source route must never become an open proxy')
+} finally {
+  globalThis.fetch = previousFetch
+  if (previousProxyToken == null) delete process.env.INTERNAL_SOURCE_TOKEN
+  else process.env.INTERNAL_SOURCE_TOKEN = previousProxyToken
+}
 
 console.log('refresh pipeline verified: 15 leased sources, local-authority/public/controlled adapters, five-minute grid, semantic history, no-store APIs')

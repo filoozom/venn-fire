@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, createHmac } from 'node:crypto'
 
 import { loadDataset, saveArtifact, saveDataset } from './database.mjs'
 
@@ -418,9 +418,9 @@ export function normalizeHlzNotice(item, html, provider, retrievedAt) {
   return notice.id && notice.title && notice.url && isIncidentMunicipalNotice(notice) ? notice : null
 }
 
-async function fetchBody(url, { accept = REQUEST_HEADERS.Accept } = {}) {
+async function fetchBody(url, { accept = REQUEST_HEADERS.Accept, headers = {} } = {}) {
   const response = await fetch(url, {
-    headers: { ...REQUEST_HEADERS, Accept: accept },
+    headers: { ...REQUEST_HEADERS, ...headers, Accept: accept },
     signal: AbortSignal.timeout(25_000),
   })
   const body = await response.text()
@@ -429,6 +429,30 @@ async function fetchBody(url, { accept = REQUEST_HEADERS.Accept } = {}) {
     body,
     contentType: response.headers.get('content-type')?.split(';')[0] || 'application/octet-stream',
   }
+}
+
+async function fetchButgenbachBody(url, { accept }) {
+  const token = process.env.INTERNAL_SOURCE_TOKEN?.trim()
+  if (!process.env.VERCEL || !token) return fetchBody(url, { accept })
+
+  const officialUrl = new URL(url)
+  if (officialUrl.protocol !== 'https:' || officialUrl.hostname !== 'butgenbach.be' || officialUrl.search) {
+    throw new Error('Bütgenbach source URL is not eligible for the internal fetcher')
+  }
+  const timestampBucket = Math.floor(Date.now() / (5 * 60 * 1000))
+  const signature = createHmac('sha256', token)
+    .update(`${timestampBucket}\n${officialUrl.pathname}`)
+    .digest('hex')
+  const productionHost = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim() || 'venn-fire.vercel.app'
+  const proxyUrl = new URL('/api/butgenbach-source', `https://${productionHost}`)
+  proxyUrl.searchParams.set('path', officialUrl.pathname)
+  return fetchBody(proxyUrl.href, {
+    accept,
+    headers: {
+      'X-Venn-Timestamp': String(timestampBucket),
+      'X-Venn-Signature': signature,
+    },
+  })
 }
 
 async function archiveBody({ providerId, url, body, contentType, retrievedAt }, query) {
@@ -599,7 +623,7 @@ function butgenbachCandidate(item) {
 }
 
 async function refreshButgenbach(provider, retrievedAt, query, previousProvider = null) {
-  const response = await fetchBody(provider.endpoint, { accept: 'application/xml, text/xml' })
+  const response = await fetchButgenbachBody(provider.endpoint, { accept: 'application/xml, text/xml' })
   await archiveBody({ providerId: provider.id, url: provider.endpoint, ...response, retrievedAt }, query)
   const items = parseButgenbachSitemap(response.body)
   if (!items.length) throw new Error('Bütgenbach sitemap returned no post URLs')
@@ -616,7 +640,7 @@ async function refreshButgenbach(provider, retrievedAt, query, previousProvider 
   const details = await Promise.allSettled(candidates.map(async (item) => {
     const url = trustedArticleUrl(item?.url, provider)
     if (!url) throw new Error('Bütgenbach sitemap returned an untrusted article URL')
-    const article = await fetchBody(url, { accept: 'text/html' })
+    const article = await fetchButgenbachBody(url, { accept: 'text/html' })
     await archiveBody({ providerId: provider.id, url, ...article, retrievedAt }, query)
     return normalizeButgenbachNotice(item, article.body, provider, retrievedAt)
   }))
