@@ -22,6 +22,12 @@ export const LIVE_AIRCRAFT_PROVIDERS = [
     website: 'https://www.adsb.lol/',
     endpoint: `https://api.adsb.lol/v2/point/${INCIDENT.latitude}/${INCIDENT.longitude}/25`,
   },
+  {
+    id: 'airplanes-live',
+    name: 'Airplanes.live',
+    website: 'https://airplanes.live/',
+    endpoint: `https://api.airplanes.live/v2/point/${INCIDENT.latitude}/${INCIDENT.longitude}/25`,
+  },
 ]
 
 function haversineKm(latitude, longitude) {
@@ -53,7 +59,7 @@ function finiteNumber(value) {
 }
 
 export function normalizeAircraft(payload, provider, requestedAtMs) {
-  // Both providers publish the epoch represented by `seen_pos`. Using it keeps
+  // These providers publish the epoch represented by `seen_pos`. Using it keeps
   // an observation's timestamp stable when two consecutive imports receive the
   // same fix; falling back to our request time preserves compatibility with
   // provider responses that omit `now`.

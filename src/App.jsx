@@ -94,14 +94,22 @@ function dwdWindLayerKey(stationId) {
 function initialLayerState(runtime) {
   return {
     ...runtime.initialLayers,
+    officialPerimeter: Boolean(runtime.officialPerimeter?.current?.features?.length),
     ...FIRMS_LAYER_DEFAULTS,
     ...Object.fromEntries(runtime.dwdWindStations.map((station) => [dwdWindLayerKey(station.id), true])),
     [FIRE_OUTLINE_KEY]: true,
   }
 }
 
-function layerOptionsFor(effisArea, isCarriedForward, firmsSummaries = [], frame = null, dwdWindStations = []) {
+function layerOptionsFor(effisArea, isCarriedForward, firmsSummaries = [], frame = null, dwdWindStations = [], officialPerimeter = null) {
   return [
+  ...(officialPerimeter?.features?.length ? [{
+    key: 'officialPerimeter',
+    label: 'Field-confirmed perimeter',
+    detail: `${officialPerimeter.features.length} agency GeoJSON feature${officialPerimeter.features.length === 1 ? '' : 's'}`,
+    icon: LocateFixed,
+    color: '#ff4f45',
+  }] : []),
   { key: 'perimeter', label: 'EFFIS daily geometry', detail: effisArea ? `${effisArea.productDate}${isCarriedForward ? ' carried forward' : ''} · ${Math.round(effisArea.areaHa).toLocaleString('en-GB')} ha polygon` : 'No product available at selected time', icon: Layers3, color: '#e96838' },
   ...FIRMS_SENSORS.map((sensor) => {
     const summary = firmsSummaries.find((entry) => entry.sensorKey === sensor.key)
@@ -338,11 +346,25 @@ function SourceMark({ tone }) {
   return <span className="source-monogram source-monogram--adsb"><Airplay size={17} /></span>
 }
 
-function DataModal({ open, onClose, onImportTracks, importedCount, firmsState, firmsDetectionCount, sourceLinks }) {
+function DataModal({
+  open,
+  onClose,
+  onImportTracks,
+  importedCount,
+  firmsState,
+  firmsDetectionCount,
+  sourceLinks,
+  activeSources = [],
+  coverageGaps = [],
+  sourceRuns = [],
+  sentinel2 = { scenes: [] },
+}) {
   const [tab, setTab] = useState('connections')
   const [status, setStatus] = useState('idle')
   const [message, setMessage] = useState('')
   const inputRef = useRef(null)
+  const latestQuicklook = (sentinel2.scenes ?? []).filter((scene) => scene.quicklook?.stored).at(-1)
+  const sourceRunByKey = new Map(sourceRuns.map((run) => [run.sourceKey, run]))
 
   useEffect(() => {
     if (!open) return undefined
@@ -449,6 +471,21 @@ function DataModal({ open, onClose, onImportTracks, importedCount, firmsState, f
                     <span className="connection-meta">Official RMI station observations · Open-Meteo hourly model fallback</span>
                   </span>
                 </div>
+
+                <div className="connection-card connection-card--sentinel">
+                  {latestQuicklook ? (
+                    <img
+                      className="sentinel-preview"
+                      src={latestQuicklook.quicklook.databaseUrl}
+                      alt={`Sentinel-2 quicklook acquired ${latestQuicklook.acquiredAt}`}
+                    />
+                  ) : <span className="connection-icon"><Satellite size={20} /></span>}
+                  <span className="connection-copy">
+                    <span className="connection-title"><strong>Sentinel-2 pixels</strong><span className="status-pill">{sentinel2.storedQuicklookCount ?? 0} STORED</span></span>
+                    <p>{latestQuicklook ? `Latest retained quicklook: ${latestQuicklook.name}.` : 'The catalogue is synchronized; no public quicklook has been stored yet.'} Full multispectral processing remains a separate credentialed product.</p>
+                    <span className="connection-meta">Public JPEG quicklooks · Postgres artifact bytes · hourly catalogue lease</span>
+                  </span>
+                </div>
               </div>
 
               {message && (
@@ -479,6 +516,50 @@ function DataModal({ open, onClose, onImportTracks, importedCount, firmsState, f
 
           {tab === 'sources' && (
             <div className="source-directory">
+              <div className="directory-section-title">
+                <strong>Continuous database synchronizers</strong>
+                <small>{activeSources.filter((source) => source.access?.configured !== false).length}/{activeSources.length} connected or push-ready</small>
+              </div>
+              {activeSources.map((source) => {
+                const run = sourceRunByKey.get(source.key)
+                const state = source.access?.configured === false
+                  ? 'AWAITING ACCESS'
+                  : run?.status === 'failed' ? 'FAILED'
+                    : run?.status === 'running' ? 'SYNCING'
+                      : run?.metadata?.failedProviders?.length ? 'PARTIAL'
+                        : `${source.intervalMinutes} MIN`
+                const content = (
+                  <>
+                    <SourceMark tone={source.key === 'firms' ? 'nasa' : source.key === 'effis' || source.key === 'ems' || source.key === 'sentinel2' ? 'effis' : source.key.includes('meteo') || source.key === 'dwd' ? 'weather' : source.key === 'reports' || source.key === 'vedia' ? 'report' : source.access?.kind === 'controlled' ? 'official' : 'adsb'} />
+                    <span><strong>{source.label}</strong><small>{source.coverage}</small></span>
+                    <em>{state}</em>
+                    {source.providerUrl ? <ExternalLink size={15} /> : <CircleHelp size={15} />}
+                  </>
+                )
+                return source.providerUrl ? (
+                  <a key={source.key} href={source.providerUrl} target="_blank" rel="noreferrer" className="directory-row">{content}</a>
+                ) : <div key={source.key} className="directory-row directory-row--inactive">{content}</div>
+              })}
+              {coverageGaps.length ? (
+                <>
+                  <div className="directory-section-title directory-section-title--references">
+                    <strong>Known limits that are not synchronized</strong>
+                    <small>Access, privacy or source-history constraints</small>
+                  </div>
+                  {coverageGaps.map((gap) => (
+                    <div key={gap.key} className="directory-row directory-row--gap">
+                      <SourceMark tone="official" />
+                      <span><strong>{gap.key.replaceAll('-', ' ')}</strong><small>{gap.detail}</small></span>
+                      <em>{gap.status.replaceAll('-', ' ')}</em>
+                      <CircleHelp size={15} />
+                    </div>
+                  ))}
+                </>
+              ) : null}
+              <div className="directory-section-title directory-section-title--references">
+                <strong>Historical and methodological references</strong>
+                <small>Linked evidence retained with the incident record</small>
+              </div>
               {sourceLinks.map((source) => (
                 <a key={source.name} href={source.url} target="_blank" rel="noreferrer" className="directory-row">
                   <SourceMark tone={source.tone} />
@@ -519,8 +600,9 @@ function FireViewer({ runtime, databaseError }) {
   const liveAircraftObservations = runtime.aircraft.observations ?? []
   const sourceRuns = runtime.database?.sources ?? []
   const hasFailedSource = sourceRuns.some((source) => source.status === 'failed')
+  const hasPartialSource = sourceRuns.some((source) => source.metadata?.failedProviders?.length)
   const syncState = {
-    status: databaseError ? 'stale' : hasFailedSource ? 'partial' : 'live',
+    status: databaseError ? 'stale' : hasFailedSource || hasPartialSource ? 'partial' : 'live',
     generatedAt: runtime.generatedAt,
     weatherOk: true,
     aircraftOk: sourceRuns.find((source) => source.sourceKey === 'aircraft')?.status === 'ok',
@@ -534,8 +616,8 @@ function FireViewer({ runtime, databaseError }) {
   const effisCarriedForward = effisProductIsCarriedForward(currentEffisArea, frame.timestampMs)
     && frame.timestampMs >= Date.parse('2026-08-15T00:00:00+02:00')
   const layerOptions = useMemo(
-    () => layerOptionsFor(currentEffisArea, effisCarriedForward, firmsData.sensors, frame, runtime.dwdWindStations),
-    [currentEffisArea, effisCarriedForward, firmsData.sensors, frame, runtime.dwdWindStations],
+    () => layerOptionsFor(currentEffisArea, effisCarriedForward, firmsData.sensors, frame, runtime.dwdWindStations, runtime.officialPerimeter.current),
+    [currentEffisArea, effisCarriedForward, firmsData.sensors, frame, runtime.dwdWindStations, runtime.officialPerimeter.current],
   )
   const reportedAreaText = frame.reportedAreaText
 
@@ -887,6 +969,7 @@ function FireViewer({ runtime, databaseError }) {
             fireOutlineRings={layers[FIRE_OUTLINE_KEY] ? fireOutlineRings : []}
             mapLabels={runtime.mapLabels}
             protectedArea={runtime.protectedArea}
+            officialPerimeter={runtime.officialPerimeter.current}
           />
 
           <div className="map-topbar">
@@ -1064,6 +1147,10 @@ function FireViewer({ runtime, databaseError }) {
         firmsState={firmsState}
         firmsDetectionCount={firmsData.detections.length}
         sourceLinks={runtime.sourceLinks}
+        activeSources={runtime.sourceRegistry.sources}
+        coverageGaps={runtime.sourceRegistry.coverageGaps}
+        sourceRuns={sourceRuns}
+        sentinel2={runtime.sentinel2}
       />
     </div>
   )

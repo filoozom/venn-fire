@@ -339,6 +339,13 @@ export function runtimeDataFromResponse(response) {
   const effis = requiredPayload(datasets, 'effis')
   const publicAlerts = optionalPayload(datasets, 'public-alerts', { alerts: [] })
   const aircraft = optionalPayload(datasets, 'aircraft', { observations: [], sources: [] })
+  const mediaReports = optionalPayload(datasets, 'media-reports', { articles: [], events: [] })
+  const publicOperations = optionalPayload(datasets, 'public-operations', { events: [] })
+  const roadEvents = optionalPayload(datasets, 'road-events', { events: [] })
+  const officialPerimeter = optionalPayload(datasets, 'official-perimeter', { current: null, snapshots: [] })
+  const sentinel2 = optionalPayload(datasets, 'sentinel2', { scenes: [] })
+  const ems = optionalPayload(datasets, 'ems', { activations: [], matches: [] })
+  const sourceRegistry = optionalPayload(datasets, 'source-registry', { sources: [], coverageGaps: [] })
   const timelineStartMs = Number(incident.timelineStartMs)
   if (!Number.isFinite(timelineStartMs)) throw new Error('Database incident timeline start is invalid')
   const generatedAtMs = Date.parse(response.generatedAt)
@@ -365,6 +372,25 @@ export function runtimeDataFromResponse(response) {
     baseEvents: [
       ...(incident.events ?? []),
       ...(reportsPayload.events ?? []),
+      ...(mediaReports.events ?? []),
+      ...(publicOperations.events ?? []).map((event) => ({
+        ...event,
+        sourceName: 'Agency-approved public operations feed',
+      })),
+      ...(roadEvents.events ?? []).filter((event) => (
+        (event.distanceKmFromDrossart != null && event.distanceKmFromDrossart <= 40)
+        || /baelen|jalhay|waimes|malmedy|sourbrodt|butgenbach|eupen|fagnes/iu.test(
+          `${event.roadName || ''} ${event.description || ''}`,
+        )
+      )).map((event) => ({
+        id: `road:${event.id}`,
+        observedAt: event.observedAt,
+        title: [event.recordType, event.roadName].filter(Boolean).join(' · ') || 'Walloon road event',
+        detail: event.description || 'Official DATEX II road event',
+        type: 'closure',
+        sourceName: 'Walloon DATEX II road events',
+        sourceUrl: roadEvents.source?.registryUrl,
+      })),
     ],
     alerts: publicAlerts.alerts ?? [],
     timelineStartMs,
@@ -389,5 +415,12 @@ export function runtimeDataFromResponse(response) {
     firms,
     aircraft,
     reports: reportsPayload,
+    mediaReports,
+    publicOperations,
+    roadEvents,
+    officialPerimeter,
+    sentinel2,
+    ems,
+    sourceRegistry,
   }
 }

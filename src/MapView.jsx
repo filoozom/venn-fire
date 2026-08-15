@@ -140,6 +140,7 @@ export default function MapView({
   fireOutlineRings = [],
   mapLabels = [],
   protectedArea = [],
+  officialPerimeter = null,
 }) {
   const nodeRef = useRef(null)
   const mapRef = useRef(null)
@@ -229,6 +230,21 @@ export default function MapView({
         interactive: true,
       })
         .bindTooltip('<strong>High Fens protected area</strong><br><span>Indicative northern reserve extent</span>', { direction: 'top' })
+        .addTo(group)
+    }
+
+    if (layers.officialPerimeter && officialPerimeter?.features?.length) {
+      L.geoJSON(officialPerimeter, {
+        style: {
+          color: '#ff4f45',
+          fillColor: '#ff4f45',
+          weight: 3,
+          opacity: 0.95,
+          fillOpacity: 0.08,
+        },
+      })
+        .bindPopup('<div class="map-popup"><span class="eyebrow">FIELD-CONFIRMED GEOMETRY</span><strong>Agency perimeter feed</strong><small>Stored from the controlled GeoJSON source with every changed revision retained in Postgres.</small></div>')
+        .bindTooltip('<strong>Field-confirmed incident perimeter</strong><br><small>Agency GeoJSON feed</small>', { sticky: true })
         .addTo(group)
     }
 
@@ -394,7 +410,7 @@ export default function MapView({
         }), { direction: 'top', offset: [0, -18] })
         .addTo(group)
     })
-  }, [frameIndex, frame, flights, effisArea, effisCarriedForward, layers, importedTracks, firmsDetections, fireOutlineRings, protectedArea])
+  }, [frameIndex, frame, flights, effisArea, effisCarriedForward, layers, importedTracks, firmsDetections, fireOutlineRings, protectedArea, officialPerimeter])
 
   return (
     <div className="map-surface" aria-label="Interactive fire situation map">

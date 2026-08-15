@@ -298,6 +298,29 @@ export async function saveArtifact({
   return { artifactKey }
 }
 
+export async function loadArtifact(artifactKey, query = databaseQuery()) {
+  await ensureDatabaseSchema(query)
+  const rows = await query(`
+    SELECT artifact_key, source_key, original_path, content_type,
+           content_encoding, original_size, sha256, captured_at,
+           encode(content, 'base64') AS content_base64
+    FROM source_artifacts
+    WHERE artifact_key = $1
+  `, [artifactKey])
+  if (!rows[0]) return null
+  return {
+    artifactKey: rows[0].artifact_key,
+    sourceKey: rows[0].source_key,
+    originalPath: rows[0].original_path,
+    contentType: rows[0].content_type,
+    contentEncoding: rows[0].content_encoding,
+    originalSize: Number(rows[0].original_size),
+    sha256: rows[0].sha256,
+    capturedAt: rows[0].captured_at == null ? null : new Date(rows[0].captured_at).toISOString(),
+    contentBase64: rows[0].content_base64,
+  }
+}
+
 export async function databaseOverview(query = databaseQuery()) {
   await ensureDatabaseSchema(query)
   const [datasets, versions, artifacts, artifactBytes, sources] = await Promise.all([

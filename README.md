@@ -63,15 +63,19 @@ The scheduler has five-minute granularity. A database lease makes repeated calls
 
 | Source | Dataset | Provider interval |
 | --- | --- | ---: |
-| adsb.fi + ADSB.lol | Exact receiver observations for the configured incident aircraft inside 10 km | 5 min |
+| adsb.fi + ADSB.lol + Airplanes.live | Exact receiver observations for the configured incident aircraft inside 10 km; providers are health-reported independently | 5 min |
 | Open-Meteo | Hourly model-grid temperature, humidity, wind and gust rows | 5 min |
 | Governor of Liège + BRF | Strictly parsed, timestamped affected-area reports and official incident events | 5 min |
+| Vedia JSON:API | Incident-filtered article metadata, source summaries, revision timestamps and raw API audit artifacts, always labelled local media | 5 min |
 | BE-Alert CAP gateway | CAP alerts accumulated from the live feed, including records retained after expiry | 5 min |
+| Walloon DATEX II adapter | Contract-gated road incidents, congestion, works and closures by credentialed pull or authenticated push | 5 min |
+| Official-perimeter adapter | Agency GeoJSON perimeter snapshots by credentialed pull or authenticated push | 5 min |
+| Public-operations adapter | Sanitized dispatch, water pickup/drop, closure, evacuation and aggregate-compliance events | 5 min |
 | RMI Mont Rigi WFS | Ten-minute station temperature, humidity, precipitation, wind, gust and validation flags | 10 min |
 | DWD CDC | Ten-minute wind observations and quality level from three nearby stations | 10 min |
 | NASA FIRMS, four sensors | Exact VIIRS Suomi-NPP, VIIRS NOAA-20, VIIRS NOAA-21 and MODIS thermal detections | 15 min |
 | Copernicus EMS | Rapid Mapping activation catalogue and any incident match details | 60 min |
-| Copernicus Data Space | Sentinel-2 L2A catalogue metadata; no image pixels are downloaded | 60 min |
+| Copernicus Data Space | Sentinel-2 L2A catalogue metadata and public JPEG quicklook pixels archived as Postgres artifacts | 60 min |
 | Copernicus EFFIS WFS | Daily algorithmic VIIRS geometry nearest the incident | 6 h |
 
 FIRMS is checked by every scheduler run, but its provider lease is 15 minutes to conserve the limited NASA MAP_KEY allowance. Each successful poll merges exact detections into retained history instead of replacing the previous window. Configure `FIRMS_MAP_KEY` as a sensitive Vercel production environment variable; the value is never returned to the browser or stored in a dataset.
@@ -116,6 +120,17 @@ Required production variables:
 
 - `DATABASE_URL` or `POSTGRES_URL`
 - `FIRMS_MAP_KEY`
+
+Optional controlled-source variables:
+
+- Walloon road pull: `WALLONIA_DATEX_URL` plus either `WALLONIA_DATEX_USERNAME`/`WALLONIA_DATEX_PASSWORD` or `WALLONIA_DATEX_AUTHORIZATION`.
+- Field perimeter pull: `INCIDENT_PERIMETER_URL` and optional `INCIDENT_PERIMETER_AUTHORIZATION`.
+- Sanitized operations pull: `PUBLIC_OPERATIONS_URL` and optional `PUBLIC_OPERATIONS_AUTHORIZATION`.
+- Provider/agency push: `CONTROLLED_SOURCE_INGEST_TOKEN`. Providers POST with `Authorization: Bearer …` to `/api/ingest-controlled?source=road-events`, `official-perimeter` or `public-operations`.
+
+The source registry exposes only whether each adapter is configured; URLs issued privately by agencies, usernames, passwords, authorization headers and the ingestion token are never returned to the browser. Road pushes accept DATEX II XML, perimeter pushes accept WGS84 GeoJSON Polygon/MultiPolygon features, and operations pushes accept a publishable JSON `events` array. Raw CAD/radio traffic and personal evacuation-compliance records must not be sent; only agency-approved sanitized events and aggregate counts are accepted.
+
+Known source limits are stored in `source-registry` and shown in the Data & Sources modal: BE-Alert records that expired before collection cannot be reconstructed without an archive; analysis-ready Sentinel multispectral processing needs Copernicus OAuth credentials; raw CAD/radio is non-public and potentially sensitive; and personal-level evacuation compliance is intentionally excluded.
 
 Do not add a CDN cache in front of `/api/data`, `/api/live-reports`, `/api/live-situation`, `/api/firms-situation` or `/api/refresh`.
 

@@ -4,6 +4,12 @@ import assert from 'node:assert/strict'
 
 import { LIVE_AIRCRAFT_PROVIDERS, normalizeAircraft } from '../api/live-situation.js'
 import { payloadHash, setNoStoreHeaders } from '../server/database.mjs'
+import {
+  normalizeDatexRoadEvents,
+  normalizeIncidentPerimeter,
+  normalizePublicOperations,
+} from '../server/controlled-sources.mjs'
+import { normalizeVediaArticle } from '../server/media-sources.mjs'
 import { REFRESH_SOURCES } from '../server/refresh-sources.mjs'
 import {
   nextRefreshWakeAt,
@@ -18,7 +24,11 @@ const expectedSources = [
   'aircraft',
   'open-meteo',
   'reports',
+  'vedia',
   'public-alerts',
+  'road-events',
+  'official-perimeter',
+  'public-operations',
   'rmi',
   'dwd',
   'firms',
@@ -31,6 +41,8 @@ assert.ok(REFRESH_SOURCES.every((source) => source.intervalMinutes >= 5))
 assert.ok(REFRESH_SOURCES.every((source) => source.intervalMinutes % 5 === 0))
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'aircraft').intervalMinutes, 5)
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'firms').intervalMinutes, 15)
+assert.equal(LIVE_AIRCRAFT_PROVIDERS.length, 3)
+assert.equal(LIVE_AIRCRAFT_PROVIDERS.at(-1).id, 'airplanes-live')
 assert.equal(REFRESH_QUEUE_TOPIC, 'venn-fire-refresh')
 assert.equal(REFRESH_SCHEDULER_DATASET, 'refresh-scheduler')
 assert.equal(REFRESH_INTERVAL_MS, 5 * 60_000)
@@ -79,4 +91,49 @@ assert.equal(headers.get('Cache-Control'), 'no-store, max-age=0')
 assert.equal(headers.get('CDN-Cache-Control'), 'no-store')
 assert.equal(headers.get('Vercel-CDN-Cache-Control'), 'no-store')
 
-console.log('refresh pipeline verified: 10 leased sources, five-minute grid, semantic history, no-store APIs')
+const datexEvents = normalizeDatexRoadEvents(`
+  <d2:situationRecord xmlns:d2="urn:datex" id="road-1" xsi:type="RoadOrCarriagewayOrLaneManagement">
+    <d2:situationRecordCreationTime>2026-08-15T15:00:00Z</d2:situationRecordCreationTime>
+    <d2:roadName>E42</d2:roadName>
+    <d2:generalPublicComment><d2:value>Closed near Malmedy</d2:value></d2:generalPublicComment>
+    <d2:locationForDisplay><d2:latitude>50.43</d2:latitude><d2:longitude>6.03</d2:longitude></d2:locationForDisplay>
+  </d2:situationRecord>
+`, '2026-08-15T15:05:00.000Z')
+assert.equal(datexEvents.length, 1)
+assert.equal(datexEvents[0].id, 'road-1')
+assert.equal(datexEvents[0].roadName, 'E42')
+assert.ok(datexEvents[0].distanceKmFromDrossart < 20)
+
+const perimeter = normalizeIncidentPerimeter({
+  type: 'FeatureCollection',
+  features: [{
+    type: 'Feature',
+    properties: { authority: 'fixture' },
+    geometry: { type: 'Polygon', coordinates: [[[6.05, 50.54], [6.07, 50.54], [6.07, 50.56], [6.05, 50.54]]] },
+  }],
+})
+assert.equal(perimeter.features.length, 1)
+
+const operations = normalizePublicOperations({ events: [{
+  id: 'drop-1',
+  observedAt: '2026-08-15T15:00:00Z',
+  type: 'water-drop',
+  title: 'Published water-drop event',
+  position: [50.55, 6.06],
+}] }, '2026-08-15T15:05:00.000Z')
+assert.equal(operations[0].type, 'water-drop')
+
+const media = normalizeVediaArticle({
+  id: 'fixture-article',
+  attributes: {
+    title: 'Incendie dans les Fagnes : fixture',
+    created: '2026-08-15T14:00:00Z',
+    changed: '2026-08-15T14:01:00Z',
+    path: { alias: '/info/fixture/123' },
+    field_content_main_content: { summary: 'Le feu progresse près de Drossart.', value: '<p>Incendie à Baelen.</p>' },
+  },
+}, '2026-08-15T14:05:00Z')
+assert.equal(media.publisherKind, 'local-media')
+assert.equal(media.url, 'https://www.vedia.be/info/fixture/123')
+
+console.log('refresh pipeline verified: 14 leased sources, five-minute grid, public and controlled adapters, semantic history, no-store APIs')

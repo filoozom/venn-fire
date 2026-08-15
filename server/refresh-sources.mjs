@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import { strFromU8, unzipSync } from 'fflate'
 
 import { loadFirms } from '../api/firms-situation.js'
@@ -10,9 +12,18 @@ import {
   databaseQuery,
   failSourceRefresh,
   loadDataset,
+  saveArtifact,
   saveDataset,
 } from './database.mjs'
+import {
+  controlledSourceAccess,
+  refreshIncidentPerimeter,
+  refreshPublicOperations,
+  refreshRoadEvents,
+  ROAD_SOURCE_URL,
+} from './controlled-sources.mjs'
 import { persistFlightPoll } from './flight-history.mjs'
+import { refreshVedia } from './media-sources.mjs'
 
 const INCIDENT = { latitude: 50.54762, longitude: 6.05757 }
 const INCIDENT_START = '2026-08-14T11:00:00.000Z'
@@ -78,7 +89,14 @@ async function refreshAircraft({ requestedAtMs, query }) {
     retentionPolicy: 'incident lifetime',
   }
   const stored = await saveDataset({ key: 'aircraft', payload }, query)
-  return { itemCount: history.observations.length, metadata: { changed: stored.changed } }
+  return {
+    itemCount: history.observations.length,
+    metadata: {
+      changed: stored.changed,
+      healthyProviders: result.sources.filter((source) => source.ok).map((source) => source.id),
+      failedProviders: result.sources.filter((source) => !source.ok).map((source) => source.id),
+    },
+  }
 }
 
 async function refreshOpenMeteo({ requestedAtMs, query }) {
@@ -661,17 +679,62 @@ async function refreshSentinel2({ requestedAtMs, query }) {
     $filter: filter,
     $orderby: 'ContentDate/Start desc',
     $top: '50',
+    $expand: 'Assets',
   })}`
   const [response, previous] = await Promise.all([
     fetchJson(requestUrl, { timeoutMs: 45_000 }),
     previousPayload('sentinel2', query, { scenes: [] }),
   ])
-  const incoming = (response.value ?? []).map((product) => ({
-    name: product.Name,
-    acquiredAt: product.ContentDate.Start,
-    relativeOrbit: /_R(\d+)_/.exec(product.Name)?.[1] ?? null,
-    platform: product.Name.slice(0, 3),
-    isPostFire: Date.parse(product.ContentDate.Start) > Date.parse(IGNITION_ISO),
+  const previousScenes = new Map((previous.scenes ?? []).map((scene) => [scene.name, scene]))
+  const incoming = await Promise.all((response.value ?? []).map(async (product) => {
+    const old = previousScenes.get(product.Name)
+    const asset = (product.Assets ?? []).find((candidate) => candidate.Type === 'QUICKLOOK')
+    let quicklook = old?.quicklook ?? null
+    if (asset && (quicklook?.assetId !== asset.Id || !quicklook?.stored)) {
+      const artifactKey = `sentinel2-quicklook-${asset.Id}`
+      try {
+        const bytes = await fetchBytes(asset.DownloadLink, 35_000)
+        const buffer = Buffer.from(bytes)
+        const sha256 = createHash('sha256').update(buffer).digest('hex')
+        await saveArtifact({
+          artifactKey,
+          sourceKey: 'sentinel2',
+          originalPath: asset.DownloadLink,
+          contentType: 'image/jpeg',
+          contentEncoding: 'identity',
+          originalSize: buffer.byteLength,
+          sha256,
+          capturedAt: product.ContentDate.Start,
+          contentBase64: buffer.toString('base64'),
+        }, query)
+        quicklook = {
+          assetId: asset.Id,
+          artifactKey,
+          contentType: 'image/jpeg',
+          byteLength: buffer.byteLength,
+          sha256,
+          stored: true,
+          databaseUrl: `/api/sentinel-quicklook?id=${encodeURIComponent(asset.Id)}`,
+          providerUrl: asset.DownloadLink,
+        }
+      } catch (error) {
+        quicklook = {
+          assetId: asset.Id,
+          stored: false,
+          providerUrl: asset.DownloadLink,
+          error: String(error?.message || error),
+        }
+      }
+    }
+    return {
+      productId: product.Id,
+      name: product.Name,
+      acquiredAt: product.ContentDate.Start,
+      relativeOrbit: /_R(\d+)_/.exec(product.Name)?.[1] ?? null,
+      platform: product.Name.slice(0, 3),
+      isPostFire: Date.parse(product.ContentDate.Start) > Date.parse(IGNITION_ISO),
+      quicklook,
+    }
   }))
   const scenes = mergeRows(
     previous.scenes,
@@ -692,6 +755,8 @@ async function refreshSentinel2({ requestedAtMs, query }) {
     ignitionReportedAt: IGNITION_ISO,
     sceneCount: scenes.length,
     postFireSceneCount: postFire.length,
+    storedQuicklookCount: scenes.filter((scene) => scene.quicklook?.stored).length,
+    failedQuicklookCount: scenes.filter((scene) => scene.quicklook && !scene.quicklook.stored).length,
     lastPreFireScene: preFire.at(-1) ?? null,
     firstPostFireScene: postFire[0] ?? null,
     scenes,
@@ -699,20 +764,132 @@ async function refreshSentinel2({ requestedAtMs, query }) {
     interpretation: previous.interpretation || [],
   }
   const stored = await saveDataset({ key: 'sentinel2', payload }, query)
-  return { itemCount: scenes.length, metadata: { changed: stored.changed, postFireScenes: postFire.length } }
+  return {
+    itemCount: scenes.length,
+    metadata: {
+      changed: stored.changed,
+      postFireScenes: postFire.length,
+      storedQuicklooks: payload.storedQuicklookCount,
+      failedQuicklooks: payload.failedQuicklookCount,
+    },
+  }
 }
 
 export const REFRESH_SOURCES = [
-  { key: 'aircraft', label: 'Live incident aircraft', intervalMinutes: 5, run: refreshAircraft },
-  { key: 'open-meteo', label: 'Open-Meteo model weather', intervalMinutes: 5, run: refreshOpenMeteo },
-  { key: 'reports', label: 'Governor and BRF reports', intervalMinutes: 5, run: refreshReports },
-  { key: 'public-alerts', label: 'BE-Alert CAP feed', intervalMinutes: 5, run: refreshAlerts },
-  { key: 'rmi', label: 'RMI Mont Rigi observations', intervalMinutes: 10, run: refreshRmi },
-  { key: 'dwd', label: 'DWD nearby wind stations', intervalMinutes: 10, run: refreshDwd },
-  { key: 'firms', label: 'NASA FIRMS detections', intervalMinutes: 15, run: refreshFirms },
-  { key: 'effis', label: 'Copernicus EFFIS daily geometry', intervalMinutes: 360, run: refreshEffis },
-  { key: 'ems', label: 'Copernicus EMS activations', intervalMinutes: 60, run: refreshEms },
-  { key: 'sentinel2', label: 'Sentinel-2 catalogue', intervalMinutes: 60, run: refreshSentinel2 },
+  {
+    key: 'aircraft', label: 'Live incident aircraft', intervalMinutes: 5, run: refreshAircraft,
+    providerUrl: 'https://airplanes.live/api-guide/',
+    coverage: 'adsb.fi, ADSB.lol and Airplanes.live receiver fixes for the three identified police helicopters inside 10 km',
+  },
+  {
+    key: 'open-meteo', label: 'Open-Meteo model weather', intervalMinutes: 5, run: refreshOpenMeteo,
+    providerUrl: 'https://open-meteo.com/',
+    coverage: 'Hourly model-grid temperature, humidity, wind and gust, retained on the five-minute timeline',
+  },
+  {
+    key: 'reports', label: 'Governor and BRF reports', intervalMinutes: 5, run: refreshReports,
+    providerUrl: 'https://gouverneur.provincedeliege.be/actualites/incendie-dans-les-hautes-fagnes-la-phase-provinciale-declenchee',
+    coverage: 'Strict official/local affected-area reports and explicitly timestamped incident notices',
+  },
+  {
+    key: 'vedia', label: 'Vedia incident reporting', intervalMinutes: 5, run: refreshVedia,
+    providerUrl: 'https://www.vedia.be/jsonapi/node/content',
+    coverage: 'New and revised incident articles, source summaries and publication timestamps; always labelled local media',
+  },
+  {
+    key: 'public-alerts', label: 'BE-Alert CAP feed', intervalMinutes: 5, run: refreshAlerts,
+    providerUrl: ALERT_PORTAL_URL,
+    coverage: 'Current CAP warnings plus every alert accumulated since collection began',
+  },
+  {
+    key: 'road-events', label: 'Walloon DATEX II road events', intervalMinutes: 5, run: refreshRoadEvents,
+    providerUrl: ROAD_SOURCE_URL,
+    coverage: 'Incidents, congestion, works and closures from the official Walloon real-time road feed',
+    accessKey: 'roadEvents',
+  },
+  {
+    key: 'official-perimeter', label: 'Field-confirmed perimeter', intervalMinutes: 5, run: refreshIncidentPerimeter,
+    providerUrl: null,
+    coverage: 'Agency-issued GeoJSON perimeter snapshots and their raw source revisions',
+    accessKey: 'officialPerimeter',
+  },
+  {
+    key: 'public-operations', label: 'Sanitized incident operations', intervalMinutes: 5, run: refreshPublicOperations,
+    providerUrl: null,
+    coverage: 'Publishable dispatch, water pickup/drop, closure, evacuation and aggregate-compliance events',
+    accessKey: 'publicOperations',
+  },
+  {
+    key: 'rmi', label: 'RMI Mont Rigi observations', intervalMinutes: 10, run: refreshRmi,
+    providerUrl: 'https://opendata.meteo.be/',
+    coverage: 'Ten-minute official station temperature, humidity, precipitation, wind, gust and validation flags',
+  },
+  {
+    key: 'dwd', label: 'DWD nearby wind stations', intervalMinutes: 10, run: refreshDwd,
+    providerUrl: DWD_ROOT,
+    coverage: 'Ten-minute wind and quality levels from three nearby German stations',
+  },
+  {
+    key: 'firms', label: 'NASA FIRMS detections', intervalMinutes: 15, run: refreshFirms,
+    providerUrl: 'https://firms.modaps.eosdis.nasa.gov/',
+    coverage: 'Exact VIIRS and MODIS thermal detections from four satellite products',
+  },
+  {
+    key: 'effis', label: 'Copernicus EFFIS daily geometry', intervalMinutes: 360, run: refreshEffis,
+    providerUrl: EFFIS_SOURCE.documentation,
+    coverage: 'Nearest daily VIIRS-derived algorithmic geometry; distinct from a field perimeter',
+  },
+  {
+    key: 'ems', label: 'Copernicus EMS activations', intervalMinutes: 60, run: refreshEms,
+    providerUrl: 'https://mapping.emergency.copernicus.eu/activations/',
+    coverage: 'Rapid Mapping activation catalogue and full match details when an activation appears',
+  },
+  {
+    key: 'sentinel2', label: 'Sentinel-2 catalogue and quicklooks', intervalMinutes: 60, run: refreshSentinel2,
+    providerUrl: 'https://dataspace.copernicus.eu/',
+    coverage: 'L2A scene metadata plus public JPEG quicklook pixels archived in Postgres',
+  },
+]
+
+function registrySources(environment = process.env) {
+  const controlled = controlledSourceAccess(environment)
+  return REFRESH_SOURCES.map(({ run, accessKey, ...source }) => {
+    const access = accessKey ? controlled[accessKey] : null
+    return {
+      ...source,
+      access: access
+        ? {
+            kind: 'controlled',
+            configured: access.pullConfigured || access.pushReady,
+            pullConfigured: access.pullConfigured,
+            pushEndpointReady: access.pushReady,
+          }
+        : { kind: 'public', configured: true },
+    }
+  })
+}
+
+const COVERAGE_GAPS = [
+  {
+    key: 'historical-be-alert-before-collection',
+    status: 'not-reconstructable-from-live-feed',
+    detail: 'Alerts that expired before collection began are absent unless an external archive is supplied.',
+  },
+  {
+    key: 'sentinel-analysis-ready-imagery',
+    status: 'credentials-required',
+    detail: 'Public quicklooks are retained; clipped multispectral bands and derived burn products require Copernicus Data Space OAuth credentials.',
+  },
+  {
+    key: 'raw-cad-and-radio',
+    status: 'not-public-and-potentially-sensitive',
+    detail: 'Raw dispatch/CAD and tactical radio traffic are not published. Only an agency-approved sanitized export will be ingested.',
+  },
+  {
+    key: 'evacuation-compliance-identities',
+    status: 'intentionally-excluded',
+    detail: 'Personal-level compliance data must not be exposed; the adapter accepts agency-approved aggregate counts only.',
+  },
 ]
 
 export async function refreshAllSources({ requestedAtMs = Date.now() } = {}) {
@@ -722,7 +899,8 @@ export async function refreshAllSources({ requestedAtMs = Date.now() } = {}) {
     payload: {
       schemaVersion: 1,
       schedulerGranularityMinutes: 5,
-      sources: REFRESH_SOURCES.map(({ key, label, intervalMinutes }) => ({ key, label, intervalMinutes })),
+      sources: registrySources(),
+      coverageGaps: COVERAGE_GAPS,
     },
     sourceUpdatedAt: null,
   }, query)
