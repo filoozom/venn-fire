@@ -28,6 +28,30 @@ The linked serverless Postgres database is addressed through `DATABASE_URL` or `
 
 The repository contains no data snapshots, raw-response directory or local refresh daemon. Reviewed incident configuration and all former local snapshots were seeded into Postgres before their local removal.
 
+### Retained public-alert lookup
+
+`/api/live-reports` returns the accumulated affected-area reports and BE-Alert CAP records, including alerts that have expired and disappeared from the live feed. Its optional `q` parameter searches the retained title, description, headline and area fields without changing the source data:
+
+```bash
+curl -fsSL 'https://venn-fire.vercel.app/api/live-reports?q=Ovifat' \
+  | jq '.publicAlerts | {databaseRefreshedAt, currentlyInForce, totalAlertCount, matchCount, alerts}'
+```
+
+The equivalent read-only Postgres query is:
+
+```sql
+SELECT alert
+FROM app_datasets AS dataset
+CROSS JOIN LATERAL jsonb_array_elements(dataset.payload->'alerts') AS alert
+WHERE dataset.dataset_key = 'public-alerts'
+  AND concat_ws(' ',
+    alert->>'title', alert->>'description', alert->>'headline',
+    alert->>'capDescription', alert->>'areaDesc'
+  ) ILIKE '%Ovifat%';
+```
+
+An empty result means no matching alert was accumulated; it does not prove that no alert was issued before collection began.
+
 ## Refresh sources
 
 The scheduler has five-minute granularity. A database lease makes repeated calls in the same bucket no-ops, so website traffic or retrying automation cannot multiply upstream API usage.
@@ -88,7 +112,7 @@ Required production variables:
 - `DATABASE_URL` or `POSTGRES_URL`
 - `FIRMS_MAP_KEY`
 
-Do not add a CDN cache in front of `/api/data`, `/api/live-situation`, `/api/firms-situation` or `/api/refresh`.
+Do not add a CDN cache in front of `/api/data`, `/api/live-reports`, `/api/live-situation`, `/api/firms-situation` or `/api/refresh`.
 
 ## Interpretation limits
 

@@ -1,4 +1,6 @@
-import {
+import liveReportsHandler, {
+  buildLiveReportsResponse,
+  filterPublicAlerts,
   loadAreaReports,
   parseBrfAreaReport,
   parseGovernorAreaReports,
@@ -7,6 +9,8 @@ import {
 function assert(condition, message) {
   if (!condition) throw new Error(message)
 }
+
+assert(typeof liveReportsHandler === 'function', 'Vercel /api/live-reports has no default HTTP handler')
 
 const governorFixture = `
   <main>
@@ -75,9 +79,45 @@ assert(partial.ok && !partial.complete, 'One healthy report source should be exp
 assert(partial.areaReports.length === 3, 'Healthy reports were lost when another source failed')
 assert(partial.sources.filter((source) => source.ok).length === 1, 'Report source health is wrong')
 
+const alertFixtures = [
+  {
+    guid: 'expired-ovifat',
+    title: 'Alerte préventive – Population d’Ovifat',
+    capDescription: 'Préparez les effets essentiels; aucune évacuation actuellement ordonnée.',
+    areaDesc: 'Ovifat',
+    expiresAt: '2026-08-15T14:00:00Z',
+  },
+  {
+    guid: 'sourbrodt',
+    title: 'Alerte préventive – Population de Sourbrodt',
+    areaDesc: 'Sourbrodt',
+  },
+]
+assert(filterPublicAlerts(alertFixtures, 'OVIFAT').length === 1, 'Public-alert text filtering is not case-insensitive')
+const endpointFixture = buildLiveReportsResponse({
+  alertsDataset: {
+    payload: { alerts: alertFixtures, currentlyInForce: [], alertCount: 2 },
+    refreshedAt: '2026-08-15T14:15:00.000Z',
+    sourceUpdatedAt: '2026-08-15T14:14:55.000Z',
+  },
+  reportsDataset: { payload: partial, refreshedAt: '2026-08-15T14:15:00.000Z' },
+  query: 'Ovifat',
+  generatedAt: '2026-08-15T14:16:00.000Z',
+})
+assert(endpointFixture.publicAlerts.matchCount === 1, 'Dedicated endpoint did not return the matching expired alert')
+assert(endpointFixture.publicAlerts.totalAlertCount === 2, 'Dedicated endpoint lost the accumulated alert total')
+assert(endpointFixture.publicAlerts.currentlyInForce.length === 0, 'Expired fixture was incorrectly marked in force')
+assert(endpointFixture.publicAlerts.databaseRefreshedAt === '2026-08-15T14:15:00.000Z', 'Endpoint omitted database freshness')
+
 console.log(JSON.stringify({
   governor: governorReports,
   brf: brfReports,
   strictAmbiguousMatches: ambiguousBrf.length,
   partialSourceStatus: partial.sources,
+  endpointFixture: {
+    query: endpointFixture.query,
+    matchCount: endpointFixture.publicAlerts.matchCount,
+    totalAlertCount: endpointFixture.publicAlerts.totalAlertCount,
+    matchedGuid: endpointFixture.publicAlerts.alerts[0].guid,
+  },
 }, null, 2))

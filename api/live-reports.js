@@ -1,3 +1,5 @@
+import { loadDataset, setNoStoreHeaders } from '../server/database.mjs'
+
 export const LIVE_REPORT_SOURCES = [
   {
     id: 'governor-liege',
@@ -225,5 +227,114 @@ export async function loadAreaReports(
     complete: sourceStatus.every((source) => source.ok),
     areaReports: [...reportsBySourceAndTime.values()].sort((left, right) => left.timestampMs - right.timestampMs),
     sources: sourceStatus,
+  }
+}
+
+const PUBLIC_ALERT_TEXT_FIELDS = [
+  'title',
+  'description',
+  'headline',
+  'capDescription',
+  'areaDesc',
+]
+
+function normalizedSearchText(value) {
+  return String(value ?? '')
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLocaleLowerCase('en')
+}
+
+export function filterPublicAlerts(alerts, query) {
+  const normalizedQuery = normalizedSearchText(query).trim()
+  if (!normalizedQuery) return [...(alerts ?? [])]
+  return (alerts ?? []).filter((alert) => normalizedSearchText(
+    PUBLIC_ALERT_TEXT_FIELDS.map((field) => alert?.[field]).join(' '),
+  ).includes(normalizedQuery))
+}
+
+function requestSearchQuery(request) {
+  const queryValue = Array.isArray(request?.query?.q) ? request.query.q[0] : request?.query?.q
+  if (queryValue != null) return String(queryValue).trim().slice(0, 100)
+  try {
+    return new URL(request?.url || '/', 'https://venn-fire.vercel.app').searchParams.get('q')?.trim().slice(0, 100) || ''
+  } catch {
+    return ''
+  }
+}
+
+export function buildLiveReportsResponse({
+  alertsDataset,
+  reportsDataset,
+  query = '',
+  generatedAt = new Date().toISOString(),
+}) {
+  const publicAlertsPayload = alertsDataset?.payload ?? {
+    alerts: [],
+    currentlyInForce: [],
+    alertCount: 0,
+    nearIncidentCount: 0,
+  }
+  const allAlerts = Array.isArray(publicAlertsPayload.alerts) ? publicAlertsPayload.alerts : []
+  const matchedAlerts = filterPublicAlerts(allAlerts, query)
+
+  return {
+    schemaVersion: 1,
+    ok: true,
+    generatedAt,
+    query: query || null,
+    reports: reportsDataset
+      ? {
+          ...reportsDataset.payload,
+          databaseRefreshedAt: reportsDataset.refreshedAt,
+          databaseSourceUpdatedAt: reportsDataset.sourceUpdatedAt,
+        }
+      : { ok: false, complete: false, areaReports: [], sources: [] },
+    publicAlerts: {
+      ...publicAlertsPayload,
+      alerts: matchedAlerts,
+      totalAlertCount: allAlerts.length,
+      matchCount: matchedAlerts.length,
+      databaseRefreshedAt: alertsDataset?.refreshedAt ?? null,
+      databaseSourceUpdatedAt: alertsDataset?.sourceUpdatedAt ?? null,
+    },
+    interpretation: [
+      'publicAlerts.alerts includes retained expired CAP alerts, not only alerts currently present in the live feed.',
+      'publicAlerts.currentlyInForce contains only GUIDs present during the latest successful CAP feed refresh.',
+      'An absent text match is not proof that no alert was issued before database accumulation began.',
+    ],
+  }
+}
+
+export default async function handler(request, response) {
+  setNoStoreHeaders(response)
+  response.setHeader('Access-Control-Allow-Origin', '*')
+  response.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
+  if (request.method === 'OPTIONS') return response.status(204).end()
+  if (request.method !== 'GET') {
+    return response.status(405).json({ ok: false, error: 'Method not allowed' })
+  }
+
+  try {
+    const [alertsDataset, reportsDataset] = await Promise.all([
+      loadDataset('public-alerts'),
+      loadDataset('reports'),
+    ])
+    if (!alertsDataset && !reportsDataset) throw new Error('Report datasets have not been seeded')
+    return response.status(200).json(buildLiveReportsResponse({
+      alertsDataset,
+      reportsDataset,
+      query: requestSearchQuery(request),
+    }))
+  } catch (error) {
+    console.error('Live reports database read failed:', error?.message || error)
+    return response.status(503).json({
+      schemaVersion: 1,
+      ok: false,
+      generatedAt: new Date().toISOString(),
+      reports: { ok: false, complete: false, areaReports: [], sources: [] },
+      publicAlerts: { alerts: [], currentlyInForce: [], alertCount: 0, matchCount: 0 },
+      error: 'Live reports database read failed',
+    })
   }
 }
