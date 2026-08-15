@@ -5,8 +5,8 @@ An evidence-first, time-based incident viewer for the 14 August 2026 fire near D
 ## What is included
 
 - A map anchored at the reported Drossart locality (`50.54762° N, 6.05757° E`), not a guessed ignition coordinate.
-- A five-minute timeline from 14 August 13:00 through a bundled 15 August 11:45 CEST fallback. On Vercel, `/api/live-situation` advances the clock and imports Open-Meteo plus live incident-aircraft observations every five minutes behind a matching CDN cache.
-- A timestamped, stepwise reported-area series: `~60 ha` at 14 August 16:00, `~100 ha` at 20:00 and `~850 ha` at 15 August 07:00 from the Governor of Liège, then `>900 ha` at 11:28 from BRF. Between reports the UI means “last reported”; it never invents intermediate growth or a shape.
+- A five-minute timeline from 14 August 13:00 through a bundled 15 August 15:00 CEST fallback. On Vercel, `/api/live-situation` advances the clock and refreshes Open-Meteo, incident-aircraft observations and exact reports from the known Governor/BRF incident pages every five minutes behind a matching CDN cache.
+- A timestamped, stepwise reported-area series: `~60 ha` at 14 August 16:00, `~100 ha` at 20:00 and `~850 ha` at 15 August 07:00 from the Governor of Liège, followed by `>900 ha` at 11:28 and `>1,500 ha` at 14:30 from BRF. Between reports the UI means “last reported”; it never invents intermediate growth or a shape.
 - Separate Copernicus EFFIS daily VIIRS-derived polygons for 14 and 15 August. Their locally calculated geometry areas are approximately `501 ha` and `4,857 ha`. The latter sharply conflicts with field reporting and is labelled as an algorithmic geometry, never as 4,857 burned hectares. EFFIS supplies no within-day acquisition timestamp, so the last daily product is carried forward until the next retrieved product replaces it.
 - Thirty-two exact Airplanes.live MLAT fixes for Federal Police helicopter G10 (`44c1e5`): 21 from the audited 14 August daily trace and 11 from 15 August 30-second replay snapshots. Nineteen 15 August replay fixes are bundled for G17 (`44c1ea`). Dashed straight connectors appear only between consecutive fixes at most two minutes apart and implying at most 160 knots; every other gap stays open.
 - Photo identification of both reported helicopters: a BRF incident image visibly shows G10 airborne at 15:37:08 CEST, and another visibly shows G12 landed at 16:30:54 CEST. The times come from intact image EXIF. G12 remains photo evidence in the audit record but has no map marker.
@@ -122,6 +122,14 @@ docker compose logs -f refresh
 
 The refresh daemon starts with an immediate import, then keeps flight runs anchored to a five-minute cadence. Flight failures retry after five minutes and appear in `.local-data/refresh-status.json`. The other slower sources retain provider-appropriate schedules. Verify the importer’s cadence, filtering, append and deduplication behavior with `pnpm verify:flight-refresh`.
 
+### Durable Vercel flight history
+
+`/api/live-situation` also persists each successful live-aircraft poll when either `DATABASE_URL` or `POSTGRES_URL` is configured. A serverless Postgres database such as Neon can be connected from the Vercel Marketplace; connect it to the `venn-fire` project and redeploy so Vercel injects the connection variable.
+
+The function creates `flight_import_runs` and `flight_observations` on first use. Import runs are keyed to their UTC five-minute bucket, exact observations are idempotently keyed by aircraft, timestamp and coordinates, and records older than 30 days are removed. The API then returns the stored history together with the current fixes. If Postgres is absent or temporarily unavailable, the live response still works and reports that persistence is disabled or unhealthy in `aircraft.persistence`.
+
+The CDN cache prevents every browser from repeating the provider calls, but it does not run work by itself. The browser invokes the function immediately and every five minutes while the site is open. Gap-free shared Postgres history with no visitors additionally needs a five-minute scheduler, such as Vercel Cron on a plan that supports five-minute schedules. The included refresh daemon keeps a separate local audit archive; it does not wake the Vercel function.
+
 ## Airplanes.live historical import and area scan
 
 Fetch and normalize the daily traces for all seven known Belgian Federal Police MD helicopters (G10, G11, G12, G14, G15, G16 and G17):
@@ -227,8 +235,8 @@ No provider failure is interpreted as proof that an aircraft did not fly. It mea
 - FIRMS sensor figures are never added or averaged. MODIS receives no area figure; its pass-specific pixels are too coarse for this fire scale.
 - RMI Mont Rigi values are exact ten-minute station measurements, but all selected fields in the bundled near-real-time window are still awaiting RMI quality validation. Open-Meteo remains explicitly labelled model fallback data.
 - EFFIS geometry is a daily VIIRS-derived algorithmic polygon, not NASA FIRMS point data, not an operational perimeter and not a within-day five-minute series. The last product is visibly carried forward until replacement.
-- Reported fire size is a step series tied to four source times. Repeating the latest value between reports means “last reported,” not “measured continuously.”
-- The 15 August `4,857 ha` EFFIS polygon calculation is not shown as burned area; the primary affected-area figure remains the dated ~850/>900 ha reporting.
+- Reported fire size is a step series tied to five source times. Repeating the latest value between reports means “last reported,” not “measured continuously.” Live parsing is restricted to the two known incident pages and fails closed unless both a qualified hectare statement and source timestamp are present.
+- The 15 August `4,857 ha` EFFIS polygon calculation is not shown as burned area; the primary affected-area figure remains the latest dated report (`>1,500 ha` from BRF at 14:30 CEST).
 - The Aachen/Walheim MLAT artifact and every observation outside 10 km are excluded from incident-aircraft data.
 - Raw provider responses, retrieval timestamps and interpretation limits stay with every local import.
 - This viewer is informational, not an emergency service. Follow BE-Alert and local authorities.
@@ -256,4 +264,4 @@ No provider failure is interpreted as proof that an aircraft did not fly. It mea
 
 Production is hosted at [venn-fire.vercel.app](https://venn-fire.vercel.app).
 
-Vercel deploys `main` automatically with `pnpm build`, output directory `dist`, and Node.js 22. Pull requests receive preview deployments. `api/live-situation.js` is a same-origin, fixed-source serverless function with a five-minute CDN cache; the browser requests it immediately and every five minutes. It reads public adsb.fi, ADSB.lol and Open-Meteo endpoints and contains no API key. `api/firms-situation.js` is isolated behind a 15-minute cache and reads `FIRMS_MAP_KEY` only from the server environment; the key is never returned to the browser or stored in the repository.
+Vercel deploys `main` automatically with `pnpm build`, output directory `dist`, and Node.js 22. Pull requests receive preview deployments. `api/live-situation.js` is a same-origin, fixed-source serverless function with a five-minute CDN cache; the browser requests it immediately and every five minutes. It reads public adsb.fi, ADSB.lol and Open-Meteo endpoints plus the whitelisted Governor of Liège and BRF incident pages, and contains no API key. When Postgres is connected, each uncached successful aircraft poll is also written to the shared 30-day history before the response is cached. Area-page parsing is deliberately narrow: a source failure or ambiguous number leaves the audited bundled reports in place. `api/firms-situation.js` is isolated behind a 15-minute cache and reads `FIRMS_MAP_KEY` only from the server environment; the key is never returned to the browser or stored in the repository.

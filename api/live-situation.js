@@ -1,3 +1,5 @@
+import { loadAreaReports } from './live-reports.js'
+
 export const INCIDENT = { latitude: 50.54762, longitude: 6.05757 }
 export const INCIDENT_AIRCRAFT = new Map([
   ['44c1e5', { callSign: 'G10', registration: 'OO-POE' }],
@@ -217,6 +219,57 @@ async function loadWeather() {
   return { rows, current }
 }
 
+async function storeAndLoadAircraftHistory(aircraftResult, generatedAt) {
+  // Dynamic so the standalone Docker importer can continue reusing this file's
+  // provider normalization without loading the database driver.
+  const history = await import('../server/flight-history.mjs')
+  if (!history.flightDatabaseUrl()) {
+    return {
+      observations: aircraftResult.status === 'fulfilled' ? aircraftResult.value.observations : [],
+      persistence: {
+        configured: false,
+        ok: false,
+        historyObservationCount: 0,
+        persistedThisPoll: 0,
+      },
+    }
+  }
+
+  try {
+    const stored = aircraftResult.status === 'fulfilled'
+      ? await history.persistFlightPoll({
+          generatedAt,
+          observations: aircraftResult.value.observations,
+          sources: aircraftResult.value.sources,
+          conflicts: aircraftResult.value.conflicts,
+        })
+      : await history.loadFlightHistory()
+    const live = aircraftResult.status === 'fulfilled' ? aircraftResult.value.observations : []
+    const observations = history.mergeFlightHistory(stored.observations, live)
+    return {
+      observations,
+      persistence: {
+        configured: true,
+        ok: true,
+        historyObservationCount: stored.observations.length,
+        persistedThisPoll: stored.persistedObservations ?? 0,
+        retentionDays: history.FLIGHT_HISTORY_RETENTION_DAYS,
+      },
+    }
+  } catch (error) {
+    console.error('Flight-history persistence failed:', error.message ?? error)
+    return {
+      observations: aircraftResult.status === 'fulfilled' ? aircraftResult.value.observations : [],
+      persistence: {
+        configured: true,
+        ok: false,
+        historyObservationCount: 0,
+        persistedThisPoll: 0,
+      },
+    }
+  }
+}
+
 export default async function handler(request, response) {
   response.setHeader('Access-Control-Allow-Origin', '*')
   response.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
@@ -228,24 +281,39 @@ export default async function handler(request, response) {
   if (request.method !== 'GET') return response.status(405).json({ error: 'Method not allowed' })
 
   const requestedAtMs = Date.now()
-  const [weatherResult, aircraftResult] = await Promise.allSettled([
+  const [weatherResult, aircraftResult, reportsResult] = await Promise.allSettled([
     loadWeather(),
     loadAircraft(requestedAtMs),
+    loadAreaReports(),
   ])
+  const generatedAt = new Date(requestedAtMs).toISOString()
+  const aircraftHistory = await storeAndLoadAircraftHistory(aircraftResult, generatedAt)
+  const liveAircraft = aircraftResult.status === 'fulfilled' ? aircraftResult.value : null
 
   return response.status(200).json({
-    schemaVersion: 1,
-    generatedAt: new Date(requestedAtMs).toISOString(),
+    schemaVersion: 2,
+    generatedAt,
     refreshAfterSeconds: LIVE_REFRESH_SECONDS,
     weather: weatherResult.status === 'fulfilled'
       ? { ok: true, ...weatherResult.value }
       : { ok: false, rows: [], current: null },
-    aircraft: aircraftResult.status === 'fulfilled'
-      ? { ok: true, ...aircraftResult.value }
-      : { ok: false, observations: [], conflicts: [], sources: [] },
+    aircraft: {
+      ok: Boolean(liveAircraft),
+      observations: aircraftHistory.observations,
+      conflicts: liveAircraft?.conflicts ?? [],
+      sources: liveAircraft?.sources ?? [],
+      persistence: aircraftHistory.persistence,
+    },
+    reports: reportsResult.status === 'fulfilled'
+      ? reportsResult.value
+      : { ok: false, complete: false, areaReports: [], sources: [] },
     interpretation: [
+      'Reported hectares are exact timestamped statements parsed only from the whitelisted Governor of Liège and BRF incident pages; they remain separate from satellite-derived estimates.',
+      'Governor figures are official situation estimates. BRF figures are local reporting and retain that distinct label.',
+      'Between timestamped reports, the viewer carries the last report forward and does not interpolate fire growth.',
       'Aircraft coordinates are exact current receiver observations from one selected provider; provider positions are never averaged.',
       'Only known incident aircraft within 10 km of Drossart are returned, excluding the known Aachen/Walheim MLAT artifact.',
+      'When Postgres is configured, exact observations are deduplicated into 30-day shared history before this response is cached.',
       'Absence from this response is not proof that an aircraft did not fly.',
       'Open-Meteo values are model output, not readings from an incident weather station.',
     ],

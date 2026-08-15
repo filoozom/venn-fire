@@ -54,8 +54,10 @@ const states = {
   firstOfficialReport: await reportedAreaAt('2026-08-14T16:00:00+02:00'),
   eveningOfficialReport: await reportedAreaAt('2026-08-14T20:00:00+02:00'),
   morningOfficialReport: await reportedAreaAt('2026-08-15T07:00:00+02:00'),
-  beforeLatestReport: await reportedAreaAt('2026-08-15T11:25:00+02:00'),
-  latestReport: await reportedAreaAt('2026-08-15T11:30:00+02:00'),
+  beforeFirstBrfReport: await reportedAreaAt('2026-08-15T11:25:00+02:00'),
+  firstBrfReport: await reportedAreaAt('2026-08-15T11:30:00+02:00'),
+  beforeLatestBrfReport: await reportedAreaAt('2026-08-15T14:25:00+02:00'),
+  latestBrfReport: await reportedAreaAt('2026-08-15T14:30:00+02:00'),
 }
 
 const expected = {
@@ -63,8 +65,10 @@ const expected = {
   firstOfficialReport: '~60ha',
   eveningOfficialReport: '~100ha',
   morningOfficialReport: '~850ha',
-  beforeLatestReport: '~850ha',
-  latestReport: '>900ha',
+  beforeFirstBrfReport: '~850ha',
+  firstBrfReport: '>900ha',
+  beforeLatestBrfReport: '>900ha',
+  latestBrfReport: '>1,500ha',
 }
 
 Object.entries(expected).forEach(([key, value]) => {
@@ -97,7 +101,52 @@ const chartBounds = await page.locator('.mini-area-chart path[stroke="#ed754a"]'
 if (chartBounds.y < 0 || chartBounds.y + chartBounds.height > 44.01) {
   throw new Error(`Reported-area chart escapes its 44 px viewBox: ${JSON.stringify(chartBounds)}`)
 }
+
+// A report refresh must advance the report timeline even when weather is down.
+// Otherwise a transient Open-Meteo failure can leave an exact source update
+// hidden until the next successful weather request.
+const livePage = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
+const liveErrors = []
+livePage.on('pageerror', (error) => liveErrors.push(error.message))
+await livePage.route('**/api/live-situation', async (route) => route.fulfill({
+  status: 200,
+  contentType: 'application/json',
+  body: JSON.stringify({
+    schemaVersion: 2,
+    generatedAt: '2026-08-15T13:10:00.000Z',
+    refreshAfterSeconds: 300,
+    weather: { ok: false, rows: [], current: null },
+    aircraft: { ok: false, observations: [], conflicts: [], sources: [] },
+    reports: {
+      ok: true,
+      complete: true,
+      areaReports: [{
+        timestampMs: Date.parse('2026-08-15T15:05:00+02:00'),
+        observedAt: '2026-08-15T13:05:00.000Z',
+        reportedHa: 1600,
+        areaPrefix: '>',
+        areaLabel: 'fixture report at 15:05 CEST',
+        source: 'BRF',
+        sourceUrl: 'https://brf.be/regional/2100196/',
+      }],
+      sources: [],
+    },
+  }),
+}))
+await livePage.goto(testUrl, { waitUntil: 'domcontentloaded' })
+await livePage.waitForFunction(() => (
+  document.querySelector('.snapshot-card--fire strong')?.textContent.replace(/\s+/gu, '') === '>1,600ha'
+))
+const reportWithoutWeather = {
+  area: await livePage.locator('.snapshot-card--fire strong').innerText(),
+  latestFrame: await livePage.locator('.updated-state strong').innerText(),
+  syncLabel: await livePage.locator('.updated-state small').innerText(),
+}
+if (!reportWithoutWeather.latestFrame.includes('15:10')) {
+  throw new Error(`Live report did not advance the timeline: ${JSON.stringify(reportWithoutWeather)}`)
+}
+if (liveErrors.length) throw new Error(`Live-report browser errors: ${liveErrors.join(' | ')}`)
 if (errors.length) throw new Error(`Browser errors: ${errors.join(' | ')}`)
 
-console.log(JSON.stringify({ states, effisOn14August, effisOn15August, unrelatedTrafficControls, officialSourceLinks, chartBounds }, null, 2))
+console.log(JSON.stringify({ states, effisOn14August, effisOn15August, unrelatedTrafficControls, officialSourceLinks, chartBounds, reportWithoutWeather }, null, 2))
 await browser.close()

@@ -139,6 +139,42 @@ export const areaReports = [
   },
 ]
 
+export function mergeAreaReports(...reportGroups) {
+  const reportsBySourceAndTime = new Map()
+  reportGroups.flat().forEach((report) => {
+    const timestampMs = Number.isFinite(report?.timestampMs)
+      ? report.timestampMs
+      : Date.parse(report?.observedAt)
+    const reportedHa = Number(report?.reportedHa)
+    const source = typeof report?.source === 'string' ? report.source.trim() : ''
+    if (!Number.isFinite(timestampMs) || !Number.isFinite(reportedHa) || reportedHa <= 0 || !source) return
+    const areaPrefix = ['~', '>', '<', '='].includes(report.areaPrefix) ? report.areaPrefix : '~'
+    reportsBySourceAndTime.set(`${source}|${timestampMs}`, {
+      ...report,
+      timestampMs,
+      reportedHa,
+      areaPrefix,
+      areaLabel: typeof report.areaLabel === 'string' && report.areaLabel.trim()
+        ? report.areaLabel.trim()
+        : `source report at ${new Date(timestampMs).toISOString()}`,
+      source,
+      sourceUrl: typeof report.sourceUrl === 'string' ? report.sourceUrl : null,
+    })
+  })
+  const seenSourceValues = new Set()
+  return [...reportsBySourceAndTime.values()]
+    .sort((left, right) => left.timestampMs - right.timestampMs)
+    .filter((report) => {
+      // BRF exposes a page-wide last-edited timestamp. If the article is later
+      // edited without changing its hectare statement, that is not a new fire-
+      // size observation and must not move an already known transition.
+      const key = `${report.source}|${report.areaPrefix}|${report.reportedHa}`
+      if (seenSourceValues.has(key)) return false
+      seenSourceValues.add(key)
+      return true
+    })
+}
+
 const localClockFormatter = new Intl.DateTimeFormat('en-GB', {
   timeZone: 'Europe/Brussels',
   hour: '2-digit',
@@ -177,12 +213,14 @@ function normalizedWeatherRows(weatherRows) {
 export function buildFireFrames({
   endMs = BUNDLED_TIMELINE_END_MS,
   weatherRows = bundledWeatherRows,
+  reportRows = areaReports,
 } = {}) {
   const boundedEndMs = Math.max(
     TIMELINE_START_MS,
     Math.floor(endMs / FIVE_MINUTES_MS) * FIVE_MINUTES_MS,
   )
   const normalizedWeather = normalizedWeatherRows(weatherRows)
+  const normalizedReports = mergeAreaReports(reportRows)
 
   return Array.from(
     { length: Math.floor((boundedEndMs - TIMELINE_START_MS) / FIVE_MINUTES_MS) + 1 },
@@ -218,7 +256,7 @@ export function buildFireFrames({
           qualityStatus: dwdWindSnapshot.qualityStatus,
         }]
       })
-      const report = areaReports.findLast((item) => item.timestampMs <= timestampMs)
+      const report = normalizedReports.findLast((item) => item.timestampMs <= timestampMs)
       const date = new Date(timestampMs)
       return {
         time: date.toISOString(),
@@ -227,7 +265,7 @@ export function buildFireFrames({
         dayLabel: localDayFormatter.format(date).toUpperCase(),
         dateLabel: localDateFormatter.format(date),
         reportedHa: report?.reportedHa ?? null,
-        reportedAreaText: report ? `${report.areaPrefix}${report.reportedHa}` : '—',
+        reportedAreaText: report ? `${report.areaPrefix}${report.reportedHa.toLocaleString('en-GB')}` : '—',
         areaLabel: report?.areaLabel ?? 'no quantified report yet',
         areaSource: report?.source ?? null,
         areaSourceUrl: report?.sourceUrl ?? null,

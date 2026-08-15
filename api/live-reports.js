@@ -117,6 +117,7 @@ export function parseGovernorAreaReports(html) {
       source: 'Governor of Liège',
       sourceUrl: 'https://gouverneur.provincedeliege.be/fr/node/7923',
       sourceKind: 'official',
+      timestampBasis: 'dated situation-heading on source page',
     }]
   }).sort((left, right) => left.timestampMs - right.timestampMs)
 }
@@ -176,6 +177,7 @@ export function parseBrfAreaReport(html) {
     source: 'BRF',
     sourceUrl: 'https://brf.be/regional/2100196/',
     sourceKind: 'local-reporting',
+    timestampBasis: 'page last-edited time published by BRF',
   }]
 }
 

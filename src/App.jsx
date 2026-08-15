@@ -42,6 +42,7 @@ import {
 } from 'lucide-react'
 import MapView from './MapView'
 import {
+  areaReports,
   buildFireFrames,
   bundledWeatherRows,
   dwdWindStations,
@@ -53,6 +54,7 @@ import {
   flights,
   incidentAircraftMeta,
   initialLayers,
+  mergeAreaReports,
   sourceLinks,
   TIMELINE_START_MS,
 } from './data'
@@ -528,10 +530,10 @@ function DataModal({ open, onClose, onImportTracks, importedCount, firmsState, f
               </div>
               <div className="method-steps">
                 <article><span>01</span><div><strong>Thermal anomaly</strong><p>FIRMS footprints appear at their exact acquisition time. VIIRS areas are confidence-sensitive footprint-union estimates; MODIS is detections-only because its pixels are too coarse at this incident scale.</p></div></article>
-                <article><span>02</span><div><strong>Reported area</strong><p>The line is a timestamped step series: ~60 ha at 16:00, ~100 ha at 20:00, ~850 ha at 07:00, then &gt;900 ha at 11:28. Between reports it means “last reported,” not measured growth.</p></div></article>
+                <article><span>02</span><div><strong>Reported area</strong><p>The line is a timestamped step series: official ~60, ~100 and ~850 ha updates, followed by BRF reports of &gt;900 ha at 11:28 and &gt;1,500 ha at 14:30. Between reports it means “last reported,” not measured growth.</p></div></article>
                 <article><span>03</span><div><strong>EFFIS daily geometry</strong><p>The 14 and 15 August VIIRS-derived polygons are separate calendar-day products. Their locally calculated geometry area is not the official affected area; EFFIS provides no within-day acquisition time for five-minute animation.</p></div></article>
                 <article><span>04</span><div><strong>Aircraft observations</strong><p>G10 and G17 are shown as individual Airplanes.live MLAT fixes. Gaps stay empty, and a marker never claims a helicopter remained airborne.</p></div></article>
-                <article><span>05</span><div><strong>Official situation reports</strong><p>The Governor of Liège supplies the incident start and the dated 60, 100 and 850 hectare estimates. Values remain stepwise between reports and link back to the official page.</p></div></article>
+                <article><span>05</span><div><strong>Situation reports</strong><p>The Governor of Liège supplies the official 60, 100 and 850 hectare estimates. BRF’s later 900 and 1,500 hectare figures stay labelled local reporting; every step links to its own source.</p></div></article>
               </div>
               <div className="safety-note"><ShieldAlert size={17} /><span>This viewer is informational and must not be used for evacuation or preservation-of-life decisions. Follow BE-Alert and emergency services.</span></div>
             </div>
@@ -572,7 +574,15 @@ function App() {
   const [firmsData, setFirmsData] = useState(EMPTY_FIRMS_DATA)
   const [firmsState, setFirmsState] = useState({ status: 'checking', generatedAt: null })
   const [liveAircraftObservations, setLiveAircraftObservations] = useState([])
-  const [syncState, setSyncState] = useState({ status: 'loading', generatedAt: null, weatherOk: false, aircraftOk: false })
+  const liveAreaReportsRef = useRef([])
+  const [syncState, setSyncState] = useState({
+    status: 'loading',
+    generatedAt: null,
+    weatherOk: false,
+    aircraftOk: false,
+    reportsOk: false,
+    reportsComplete: false,
+  })
   const frame = frames[Math.min(frameIndex, frames.length - 1)]
   const currentEffisArea = effisAreaForTimestamp(frame.timestampMs)
   // "Carried forward" means the product predates the day being viewed, not that
@@ -619,11 +629,26 @@ function App() {
         const snapshot = await response.json()
         if (cancelled) return
 
-        if (snapshot.weather?.ok && snapshot.weather.rows?.length) {
+        const weatherOk = Boolean(snapshot.weather?.ok)
+        const aircraftOk = Boolean(snapshot.aircraft?.ok)
+        const reportsOk = Boolean(snapshot.reports?.ok)
+        const reportsComplete = Boolean(snapshot.reports?.complete)
+
+        if (reportsOk && Array.isArray(snapshot.reports.areaReports)) {
+          liveAreaReportsRef.current = mergeAreaReports(
+            liveAreaReportsRef.current,
+            snapshot.reports.areaReports,
+          )
+        }
+
+        if (weatherOk || reportsOk) {
           const endMs = Date.parse(snapshot.generatedAt)
           const nextFrames = buildFireFrames({
             endMs,
-            weatherRows: [...bundledWeatherRows, ...snapshot.weather.rows],
+            weatherRows: weatherOk && snapshot.weather.rows?.length
+              ? [...bundledWeatherRows, ...snapshot.weather.rows]
+              : bundledWeatherRows,
+            reportRows: mergeAreaReports(areaReports, liveAreaReportsRef.current),
           })
           const previousLength = framesLengthRef.current
           setFrameIndex((currentIndex) => (
@@ -635,12 +660,14 @@ function App() {
           setFrames(nextFrames)
         }
 
-        if (snapshot.aircraft?.ok && snapshot.aircraft.observations?.length) {
+        // Stored history remains useful when both live providers are temporarily
+        // unavailable, even though aircraftOk correctly reports the live outage.
+        if (snapshot.aircraft?.observations?.length) {
           setLiveAircraftObservations((current) => {
             const merged = [...current, ...snapshot.aircraft.observations]
             const seen = new Set()
             return merged.filter((observation) => {
-              const key = `${observation.providerId}|${observation.icao24}|${observation.observedAt}|${observation.latitude}|${observation.longitude}`
+              const key = `${observation.icao24}|${observation.observedAt}|${observation.latitude}|${observation.longitude}`
               if (seen.has(key)) return false
               seen.add(key)
               return true
@@ -648,13 +675,15 @@ function App() {
           })
         }
 
-        const weatherOk = Boolean(snapshot.weather?.ok)
-        const aircraftOk = Boolean(snapshot.aircraft?.ok)
         setSyncState({
-          status: weatherOk && aircraftOk ? 'live' : weatherOk || aircraftOk ? 'partial' : 'bundled',
+          status: weatherOk && aircraftOk && reportsComplete
+            ? 'live'
+            : weatherOk || aircraftOk || reportsOk ? 'partial' : 'bundled',
           generatedAt: snapshot.generatedAt,
           weatherOk,
           aircraftOk,
+          reportsOk,
+          reportsComplete,
         })
       } catch {
         if (!cancelled) setSyncState((current) => ({ ...current, status: 'bundled' }))
@@ -904,7 +933,7 @@ function App() {
         </div>
 
         <div className="header-actions">
-          <div className="updated-state"><span className={`live-pulse ${syncState.status === 'live' ? '' : 'is-bundled'}`} /><div><small>{syncState.status === 'live' ? 'WEATHER · LIVE ADS-B REFRESHED' : syncState.status === 'partial' ? 'PARTIAL LIVE REFRESH' : syncState.status === 'loading' ? 'CHECKING LIVE SOURCES' : 'BUNDLED SNAPSHOT'}</small><strong>{frames.at(-1).dayLabel} · {frames.at(-1).shortTime} CEST</strong></div></div>
+          <div className="updated-state"><span className={`live-pulse ${syncState.status === 'live' ? '' : 'is-bundled'}`} /><div><small>{syncState.status === 'live' ? 'LIVE SOURCES REFRESHED' : syncState.status === 'partial' ? 'PARTIAL LIVE REFRESH' : syncState.status === 'loading' ? 'CHECKING LIVE SOURCES' : 'BUNDLED SNAPSHOT'}</small><strong>{frames.at(-1).dayLabel} · {frames.at(-1).shortTime} CEST</strong></div></div>
           <button className="data-button" type="button" onClick={() => setDataOpen(true)}><Database size={15} /><span>Data & sources</span></button>
         </div>
       </header>
@@ -996,7 +1025,7 @@ function App() {
               <SourceMark tone="effis" /><span><strong>EFFIS daily geometry</strong><small>{currentEffisArea ? `${currentEffisArea.productDate}${effisCarriedForward ? ' carried forward' : ''} · envelope containing fire activity, not burned area` : 'not yet available at selected time'}</small></span><em className="health-dot health-dot--amber" />
             </button>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
-              <SourceMark tone="official" /><span><strong>Affected-area reports</strong><small>{frame.reportedAreaText} ha · {frame.areaLabel}</small></span><em className="health-dot health-dot--amber" />
+              <SourceMark tone="official" /><span><strong>Affected-area reports</strong><small>{frame.reportedAreaText} ha · {frame.areaLabel}</small></span><em className={`health-dot ${syncState.reportsComplete ? '' : 'health-dot--amber'}`} />
             </button>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
               <SourceMark tone={frame.weatherSourceKind === 'station-observation' ? 'rmi' : 'weather'} /><span><strong>{frame.weatherSourceKind === 'station-observation' ? 'Mont Rigi station' : 'Wind model fallback'}</strong><small>{frame.weatherSourceKind === 'station-observation' ? `10 min observation · ${frame.weatherAgeMinutes} min old · awaiting RMI validation` : 'Open-Meteo hourly grid value'}</small></span><em className={`health-dot ${frame.weatherSourceKind === 'station-observation' ? 'health-dot--amber' : ''}`} />
