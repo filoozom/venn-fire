@@ -8,25 +8,32 @@ export const INCIDENT_AIRCRAFT = new Map([
 ])
 export const INCIDENT_RADIUS_KM = 10
 export const LIVE_REFRESH_SECONDS = 5 * 60
+const INCIDENT_AIRCRAFT_HEX = [...INCIDENT_AIRCRAFT.keys()].join(',')
 
 export const LIVE_AIRCRAFT_PROVIDERS = [
   {
     id: 'adsb-fi',
     name: 'adsb.fi',
     website: 'https://adsb.fi/',
-    endpoint: `https://opendata.adsb.fi/api/v2/lat/${INCIDENT.latitude}/lon/${INCIDENT.longitude}/dist/25`,
+    endpoint: `https://opendata.adsb.fi/api/v2/hex/${INCIDENT_AIRCRAFT_HEX}`,
+    intervalMinutes: 5,
   },
   {
     id: 'adsb-lol',
     name: 'ADSB.lol',
     website: 'https://www.adsb.lol/',
-    endpoint: `https://api.adsb.lol/v2/point/${INCIDENT.latitude}/${INCIDENT.longitude}/25`,
+    endpoint: `https://api.adsb.lol/v2/hex/${INCIDENT_AIRCRAFT_HEX}`,
+    intervalMinutes: 5,
   },
   {
     id: 'airplanes-live',
     name: 'Airplanes.live',
     website: 'https://airplanes.live/',
-    endpoint: `https://api.airplanes.live/v2/point/${INCIDENT.latitude}/${INCIDENT.longitude}/25`,
+    endpoint: `https://api.airplanes.live/v2/hex/${INCIDENT_AIRCRAFT_HEX}`,
+    // Their public endpoint currently rejects server traffic. Retain a regular
+    // health check without spending the free tier's 500 daily requests on the
+    // same HTTP 403 every five minutes.
+    intervalMinutes: 60,
   },
 ]
 
@@ -37,6 +44,10 @@ function haversineKm(latitude, longitude) {
   const value = Math.sin(deltaLatitude / 2) ** 2
     + Math.cos(INCIDENT.latitude * radians) * Math.cos(latitude * radians) * Math.sin(deltaLongitude / 2) ** 2
   return 6371.0088 * 2 * Math.asin(Math.sqrt(value))
+}
+
+export function incidentDistanceKm(latitude, longitude) {
+  return haversineKm(latitude, longitude)
 }
 
 async function fetchJsonResponse(url) {
@@ -51,6 +62,66 @@ async function fetchJsonResponse(url) {
 
 async function fetchJson(url) {
   return (await fetchJsonResponse(url)).payload
+}
+
+function providerDue(provider, requestedAtMs) {
+  const intervalMinutes = Number(provider.intervalMinutes) || 5
+  if (intervalMinutes <= 5) return true
+  const intervalBuckets = Math.max(1, Math.round(intervalMinutes / 5))
+  return Math.floor(requestedAtMs / (5 * 60 * 1_000)) % intervalBuckets === 0
+}
+
+async function fetchAircraftProvider(provider) {
+  try {
+    const response = await fetch(provider.endpoint, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(8_000),
+    })
+    const rawBody = await response.text()
+    const contentType = response.headers.get('content-type') || 'application/octet-stream'
+    if (!response.ok) {
+      return {
+        provider,
+        polled: true,
+        ok: false,
+        statusCode: response.status,
+        contentType,
+        rawBody,
+        error: `HTTP ${response.status}`,
+      }
+    }
+    try {
+      return {
+        provider,
+        polled: true,
+        ok: true,
+        statusCode: response.status,
+        contentType,
+        rawBody,
+        payload: JSON.parse(rawBody),
+      }
+    } catch {
+      return {
+        provider,
+        polled: true,
+        ok: false,
+        statusCode: response.status,
+        contentType,
+        rawBody,
+        error: 'Invalid JSON response',
+      }
+    }
+  } catch (error) {
+    return {
+      provider,
+      polled: true,
+      ok: false,
+      statusCode: null,
+      contentType: 'application/json',
+      rawBody: null,
+      error: String(error?.message || error),
+    }
+  }
 }
 
 function finiteNumber(value) {
@@ -110,28 +181,65 @@ export async function loadAircraft(
   providers = LIVE_AIRCRAFT_PROVIDERS,
   { includeRaw = false } = {},
 ) {
-  const results = await Promise.allSettled(providers.map(async (provider) => {
-    const response = await fetchJsonResponse(provider.endpoint)
-    return { provider, ...response }
-  }))
+  const results = await Promise.all(providers.map((provider) => (
+    providerDue(provider, requestedAtMs)
+      ? fetchAircraftProvider(provider)
+      : Promise.resolve({ provider, polled: false, ok: null })
+  )))
   const sourceStatus = []
   const candidatesByHex = new Map()
 
-  results.forEach((result, index) => {
-    const provider = providers[index]
-    if (result.status === 'rejected') {
-      sourceStatus.push({ id: provider.id, name: provider.name, ok: false })
+  results.forEach((result) => {
+    const { provider } = result
+    if (!result.polled) {
+      sourceStatus.push({
+        id: provider.id,
+        name: provider.name,
+        ok: null,
+        polled: false,
+        intervalMinutes: provider.intervalMinutes || 5,
+      })
       return
     }
-    sourceStatus.push({ id: provider.id, name: provider.name, ok: true })
-    normalizeAircraft(result.value.payload, provider, requestedAtMs).forEach((aircraft) => {
+    if (!result.ok) {
+      sourceStatus.push({
+        id: provider.id,
+        name: provider.name,
+        ok: false,
+        polled: true,
+        intervalMinutes: provider.intervalMinutes || 5,
+        statusCode: result.statusCode,
+        error: result.error,
+      })
+      return
+    }
+    const rows = result.payload?.ac || result.payload?.aircraft || []
+    const targetRows = rows.filter((aircraft) => (
+      INCIDENT_AIRCRAFT.has(String(aircraft.hex || aircraft.icao24 || '').trim().toLowerCase())
+    ))
+    const normalized = normalizeAircraft(result.payload, provider, requestedAtMs)
+    sourceStatus.push({
+      id: provider.id,
+      name: provider.name,
+      ok: true,
+      polled: true,
+      intervalMinutes: provider.intervalMinutes || 5,
+      statusCode: result.statusCode,
+      aircraftCount: rows.length,
+      targetCount: targetRows.length,
+      targetWithPositionCount: targetRows.filter((aircraft) => (
+        finiteNumber(aircraft.lat) != null && finiteNumber(aircraft.lon) != null
+      )).length,
+      acceptedObservationCount: normalized.length,
+    })
+    normalized.forEach((aircraft) => {
       const candidates = candidatesByHex.get(aircraft.icao24) || []
       candidates.push(aircraft)
       candidatesByHex.set(aircraft.icao24, candidates)
     })
   })
 
-  if (!sourceStatus.some((source) => source.ok)) {
+  if (!sourceStatus.some((source) => source.ok === true)) {
     throw new Error('All live ADS-B providers failed')
   }
 
@@ -167,15 +275,14 @@ export async function loadAircraft(
     sources: sourceStatus,
     ...(includeRaw
       ? {
-          rawResponses: results.flatMap((result) => (
-            result.status === 'fulfilled'
-              ? [{
-                  provider: result.value.provider,
-                  payload: result.value.payload,
-                  rawBody: result.value.rawBody,
-                }]
-              : []
-          )),
+          rawResponses: results.filter((result) => result.polled).map((result) => ({
+            provider: result.provider,
+            ok: result.ok,
+            statusCode: result.statusCode,
+            contentType: result.contentType,
+            rawBody: result.rawBody,
+            error: result.error || null,
+          })),
         }
       : {}),
   }

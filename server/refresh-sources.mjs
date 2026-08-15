@@ -7,6 +7,13 @@ import { loadAreaReports } from '../api/live-reports.js'
 import { loadAircraft, loadWeather } from '../api/live-situation.js'
 import { FIRMS_SENSORS } from '../src/firmsDetections.js'
 import {
+  archiveAircraftResponses,
+  backfillLegacyFlightHistory,
+  CURRENT_AIRCRAFT_TRACE_PROVIDERS,
+  HISTORICAL_AIRCRAFT_TRACE_PROVIDERS,
+  loadAircraftTraces,
+} from './aircraft-sources.mjs'
+import {
   claimSourceRefresh,
   completeSourceRefresh,
   databaseQuery,
@@ -22,7 +29,7 @@ import {
   refreshRoadEvents,
   ROAD_SOURCE_URL,
 } from './controlled-sources.mjs'
-import { persistFlightPoll } from './flight-history.mjs'
+import { persistFlightObservations, persistFlightPoll } from './flight-history.mjs'
 import { refreshVedia } from './media-sources.mjs'
 import { refreshMunicipalUpdates } from './municipal-sources.mjs'
 
@@ -76,9 +83,15 @@ async function previousPayload(key, query, fallback = {}) {
   return (await loadDataset(key, query))?.payload ?? fallback
 }
 
-async function refreshAircraft({ requestedAtMs, query }) {
+async function refreshAircraft({ requestedAtMs, query, bucketAt }) {
   const generatedAt = new Date(requestedAtMs).toISOString()
-  const result = await loadAircraft(requestedAtMs)
+  const backfill = await backfillLegacyFlightHistory({ requestedAtMs, query })
+  const result = await loadAircraft(requestedAtMs, undefined, { includeRaw: true })
+  const artifacts = await archiveAircraftResponses({
+    sourceKey: 'aircraft-live',
+    bucketAt,
+    responses: result.rawResponses,
+  }, query)
   const history = await persistFlightPoll({ generatedAt, ...result })
   const payload = {
     schemaVersion: 1,
@@ -94,10 +107,77 @@ async function refreshAircraft({ requestedAtMs, query }) {
     itemCount: history.observations.length,
     metadata: {
       changed: stored.changed,
-      healthyProviders: result.sources.filter((source) => source.ok).map((source) => source.id),
-      failedProviders: result.sources.filter((source) => !source.ok).map((source) => source.id),
+      healthyProviders: result.sources.filter((source) => source.ok === true).map((source) => source.id),
+      failedProviders: result.sources.filter((source) => source.ok === false).map((source) => source.id),
+      deferredProviders: result.sources.filter((source) => source.polled === false).map((source) => source.id),
+      rawArtifactCount: artifacts.length,
+      rawArtifacts: artifacts.map((artifact) => artifact.artifactKey),
+      legacyBackfillApplied: backfill.applied,
+      legacyBackfillObservationCount: backfill.observationCount,
     },
   }
+}
+
+async function refreshAircraftTraceSource({
+  query,
+  bucketAt,
+  providers,
+  date = null,
+  sourceKey,
+}) {
+  const result = await loadAircraftTraces({ providers, date })
+  const artifacts = await archiveAircraftResponses({
+    sourceKey,
+    bucketAt,
+    responses: result.responses,
+  }, query)
+  const persisted = await persistFlightObservations(
+    { observations: result.observations },
+    { databaseUrl: '', query },
+  )
+  const healthy = result.sources.filter((source) => source.ok)
+  const failed = result.sources.filter((source) => !source.ok)
+  return {
+    itemCount: result.observations.length,
+    metadata: {
+      date,
+      complete: failed.length === 0,
+      responseCount: result.responses.length,
+      healthyResponseCount: healthy.length,
+      failedResponseCount: failed.length,
+      failedResponses: failed.map((source) => ({
+        providerId: source.id,
+        icao24: source.icao24,
+        statusCode: source.statusCode,
+        error: source.error,
+      })),
+      receivedObservationCount: result.observations.length,
+      upsertedObservationCount: persisted.persistedObservations,
+      historyObservationCount: persisted.observations.length,
+      rawArtifactCount: artifacts.length,
+      rawArtifacts: artifacts.map((artifact) => artifact.artifactKey),
+    },
+  }
+}
+
+async function refreshCurrentAircraftTraces({ query, bucketAt }) {
+  return refreshAircraftTraceSource({
+    query,
+    bucketAt,
+    providers: CURRENT_AIRCRAFT_TRACE_PROVIDERS,
+    sourceKey: 'aircraft-traces',
+  })
+}
+
+async function refreshHistoricalAircraftTraces({ requestedAtMs, query, bucketAt }) {
+  const date = new Date(requestedAtMs - 24 * 60 * 60 * 1_000).toISOString().slice(0, 10)
+  return refreshAircraftTraceSource({
+    query,
+    bucketAt,
+    providers: HISTORICAL_AIRCRAFT_TRACE_PROVIDERS,
+    date,
+    sourceKey: 'aircraft-history',
+  })
 }
 
 async function refreshOpenMeteo({ requestedAtMs, query }) {
@@ -780,7 +860,17 @@ export const REFRESH_SOURCES = [
   {
     key: 'aircraft', label: 'Live incident aircraft', intervalMinutes: 5, run: refreshAircraft,
     providerUrl: 'https://airplanes.live/api-guide/',
-    coverage: 'adsb.fi, ADSB.lol and Airplanes.live receiver fixes for the three identified police helicopters inside 10 km',
+    coverage: 'Batched identity checks against adsb.fi and ADSB.lol every five minutes, hourly Airplanes.live health checks, exact accepted fixes and every raw response retained',
+  },
+  {
+    key: 'aircraft-traces', label: 'Current aircraft trace catch-up', intervalMinutes: 30, run: refreshCurrentAircraftTraces,
+    providerUrl: 'https://www.adsb.lol/',
+    coverage: 'Current-day ADSB.lol traces for G10, G12 and G17 recover exact incident-area fixes missed between five-minute live polls',
+  },
+  {
+    key: 'aircraft-history', label: 'Completed aircraft history catch-up', intervalMinutes: 360, run: refreshHistoricalAircraftTraces,
+    providerUrl: 'https://globe.airplanes.live/',
+    coverage: 'Previous-day Airplanes.live and ADSB.lol full traces, filtered to exact fixes inside 10 km and retained with raw source files',
   },
   {
     key: 'open-meteo', label: 'Open-Meteo model weather', intervalMinutes: 5, run: refreshOpenMeteo,
@@ -938,7 +1028,7 @@ export async function refreshAllSources({ requestedAtMs = Date.now() } = {}) {
   return Promise.all(claims.map(async ({ source, claimed, bucketAt }) => {
     if (!claimed) return { sourceKey: source.key, status: 'skipped', bucketAt }
     try {
-      const result = await source.run({ requestedAtMs, query })
+      const result = await source.run({ requestedAtMs, query, bucketAt })
       await completeSourceRefresh({
         sourceKey: source.key,
         bucketAt,

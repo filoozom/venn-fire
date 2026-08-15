@@ -7,6 +7,7 @@ import {
   flightObservationKey,
   loadFlightHistory,
   mergeFlightHistory,
+  persistFlightObservations,
   persistFlightPoll,
 } from '../server/flight-history.mjs'
 
@@ -123,5 +124,14 @@ assert.equal(database.state.observations.size, 2, 'duplicate observations were n
 assert.equal(secondPoll.observations.length, 2)
 assert.equal(database.state.schemaStatements, 3, 'schema was initialized more than once for one warm query client')
 assert.equal(database.state.observations.get(flightObservationKey(first)).altitude_ft, null)
+
+const catchup = observation('44c1e5', '2026-08-15T12:06:00.000Z', 50.551, 6.061, {
+  providerId: 'adsb-lol-current-trace',
+  providerName: 'ADSB.lol current trace',
+})
+const catchupImport = await persistFlightObservations({ observations: [catchup] }, options)
+assert.equal(catchupImport.persistedObservations, 1)
+assert.equal(catchupImport.observations.length, 3)
+assert.equal(database.state.runs.size, 1, 'trace catch-up must not overwrite the live five-minute poll audit row')
 
 console.log('Verified: Postgres flight history is durable, bucketed and idempotent.')

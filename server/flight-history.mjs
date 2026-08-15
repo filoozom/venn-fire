@@ -193,6 +193,81 @@ export async function loadFlightHistory({
   }
 }
 
+async function upsertFlightObservations(observations, query) {
+  const records = observations.filter(validObservation).map(observationRecord)
+  if (!records.length) return 0
+
+  const persisted = await query(`
+    WITH incoming AS (
+      SELECT * FROM jsonb_to_recordset($1::jsonb) AS item(
+        observation_key text,
+        icao24 text,
+        callsign text,
+        registration text,
+        observed_at timestamptz,
+        latitude double precision,
+        longitude double precision,
+        altitude_ft double precision,
+        ground_speed_kt double precision,
+        track_degrees double precision,
+        distance_drossart_km double precision,
+        update_type text,
+        provider_id text,
+        provider_name text,
+        provider_url text,
+        corroborated_by jsonb,
+        source_data jsonb
+      )
+    )
+    INSERT INTO flight_observations (
+      observation_key, icao24, callsign, registration, observed_at,
+      latitude, longitude, altitude_ft, ground_speed_kt, track_degrees,
+      distance_drossart_km, update_type, provider_id, provider_name,
+      provider_url, corroborated_by, source_data
+    )
+    SELECT
+      observation_key, icao24, callsign, registration, observed_at,
+      latitude, longitude, altitude_ft, ground_speed_kt, track_degrees,
+      distance_drossart_km, update_type, provider_id, provider_name,
+      provider_url, corroborated_by, source_data
+    FROM incoming
+    ON CONFLICT (observation_key) DO UPDATE SET
+      callsign = COALESCE(EXCLUDED.callsign, flight_observations.callsign),
+      registration = COALESCE(EXCLUDED.registration, flight_observations.registration),
+      altitude_ft = COALESCE(EXCLUDED.altitude_ft, flight_observations.altitude_ft),
+      ground_speed_kt = COALESCE(EXCLUDED.ground_speed_kt, flight_observations.ground_speed_kt),
+      track_degrees = COALESCE(EXCLUDED.track_degrees, flight_observations.track_degrees),
+      provider_id = COALESCE(EXCLUDED.provider_id, flight_observations.provider_id),
+      provider_name = COALESCE(EXCLUDED.provider_name, flight_observations.provider_name),
+      provider_url = COALESCE(EXCLUDED.provider_url, flight_observations.provider_url),
+      corroborated_by = EXCLUDED.corroborated_by,
+      source_data = EXCLUDED.source_data,
+      last_ingested_at = now()
+    RETURNING observation_key
+  `, [JSON.stringify(records)])
+  return persisted.length
+}
+
+export async function persistFlightObservations({ observations = [] }, {
+  databaseUrl = flightDatabaseUrl(),
+  query = databaseUrl ? databaseQuery(databaseUrl) : null,
+  since = FLIGHT_HISTORY_START,
+  limit = FLIGHT_HISTORY_LIMIT,
+} = {}) {
+  if (!databaseUrl && !query) {
+    return { configured: false, ok: false, persistedObservations: 0, observations: [] }
+  }
+  await ensureSchema(query)
+  const persistedObservations = await upsertFlightObservations(observations, query)
+  const history = await loadFlightHistory({ databaseUrl, query, since, limit })
+  return {
+    configured: true,
+    ok: true,
+    persistedObservations,
+    observations: history.observations,
+  }
+}
+
 export async function persistFlightPoll({
   generatedAt,
   observations = [],
@@ -229,58 +304,7 @@ export async function persistFlightPoll({
       updated_at = now()
   `, [bucketAt, generatedAt, JSON.stringify(sources), JSON.stringify(conflicts), records.length])
 
-  let persistedObservations = 0
-  if (records.length) {
-    const persisted = await query(`
-      WITH incoming AS (
-        SELECT * FROM jsonb_to_recordset($1::jsonb) AS item(
-          observation_key text,
-          icao24 text,
-          callsign text,
-          registration text,
-          observed_at timestamptz,
-          latitude double precision,
-          longitude double precision,
-          altitude_ft double precision,
-          ground_speed_kt double precision,
-          track_degrees double precision,
-          distance_drossart_km double precision,
-          update_type text,
-          provider_id text,
-          provider_name text,
-          provider_url text,
-          corroborated_by jsonb,
-          source_data jsonb
-        )
-      )
-      INSERT INTO flight_observations (
-        observation_key, icao24, callsign, registration, observed_at,
-        latitude, longitude, altitude_ft, ground_speed_kt, track_degrees,
-        distance_drossart_km, update_type, provider_id, provider_name,
-        provider_url, corroborated_by, source_data
-      )
-      SELECT
-        observation_key, icao24, callsign, registration, observed_at,
-        latitude, longitude, altitude_ft, ground_speed_kt, track_degrees,
-        distance_drossart_km, update_type, provider_id, provider_name,
-        provider_url, corroborated_by, source_data
-      FROM incoming
-      ON CONFLICT (observation_key) DO UPDATE SET
-        callsign = COALESCE(EXCLUDED.callsign, flight_observations.callsign),
-        registration = COALESCE(EXCLUDED.registration, flight_observations.registration),
-        altitude_ft = COALESCE(EXCLUDED.altitude_ft, flight_observations.altitude_ft),
-        ground_speed_kt = COALESCE(EXCLUDED.ground_speed_kt, flight_observations.ground_speed_kt),
-        track_degrees = COALESCE(EXCLUDED.track_degrees, flight_observations.track_degrees),
-        provider_id = COALESCE(EXCLUDED.provider_id, flight_observations.provider_id),
-        provider_name = COALESCE(EXCLUDED.provider_name, flight_observations.provider_name),
-        provider_url = COALESCE(EXCLUDED.provider_url, flight_observations.provider_url),
-        corroborated_by = EXCLUDED.corroborated_by,
-        source_data = EXCLUDED.source_data,
-        last_ingested_at = now()
-      RETURNING observation_key
-    `, [JSON.stringify(records)])
-    persistedObservations = persisted.length
-  }
+  const persistedObservations = await upsertFlightObservations(observations, query)
 
   const history = await loadFlightHistory({ databaseUrl, query, since, limit })
   return {

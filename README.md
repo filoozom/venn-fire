@@ -31,7 +31,7 @@ The linked serverless Postgres database is addressed through `DATABASE_URL` or `
 - `source_artifacts`: the content-addressed raw audit archive, including source API/feed responses and retained Sentinel quicklook bytes. Current counts and original-byte totals are reported by the database overview.
 - `flight_import_runs` and `flight_observations`: exact, deduplicated receiver fixes retained for the incident lifetime.
 
-The repository contains no data snapshots, raw-response directory or local refresh daemon. Reviewed incident configuration and all former local snapshots were seeded into Postgres before their local removal.
+The repository contains no data snapshots, raw-response directory or local refresh daemon. The deleted aircraft snapshot is recovered once from its immutable Git revision, validated as 51 exact observations, archived and idempotently inserted into Postgres; the migration record prevents another upstream request after it succeeds.
 
 ### Retained public-alert lookup
 
@@ -63,7 +63,10 @@ The scheduler has five-minute granularity. A database lease makes repeated calls
 
 | Source | Dataset | Provider interval |
 | --- | --- | ---: |
-| adsb.fi + ADSB.lol + Airplanes.live | Exact receiver observations for the configured incident aircraft inside 10 km; providers are health-reported independently | 5 min |
+| adsb.fi + ADSB.lol | One batched identity request per provider for G10, G12 and G17; exact receiver observations inside 10 km plus every raw success/error response retained | 5 min |
+| ADSB.lol current traces | Exact trace catch-up for G10, G12 and G17, recovering receiver fixes missed between live polls without interpolation | 30 min |
+| Airplanes.live + ADSB.lol completed traces | Previous-day full-trace reconciliation for all three aircraft; exact in-radius fixes and raw trace files retained | 6 h |
+| Airplanes.live live API | Access-health check retained while the provider rejects server traffic, without consuming its limited allowance on repeated HTTP 403 responses | 60 min |
 | Open-Meteo | Hourly model-grid temperature, humidity, wind and gust rows | 5 min |
 | Governor of Liège + BRF | Strictly parsed, timestamped affected-area reports and official incident events | 5 min |
 | Stavelot + Malmedy + Jalhay + Baelen + Eupen + Waimes + Bütgenbach + VHP + HLZ DG + Eifel Police | Official local-authority and emergency-service RSS/JSON/WordPress/HTML feeds; incident notices and raw source responses are retained | 5 min |

@@ -2,9 +2,16 @@
 
 import assert from 'node:assert/strict'
 import { createHmac } from 'node:crypto'
+import { gunzipSync } from 'node:zlib'
 
 import butgenbachSourceHandler, { config as butgenbachSourceConfig } from '../api/butgenbach-source.js'
 import { LIVE_AIRCRAFT_PROVIDERS, normalizeAircraft } from '../api/live-situation.js'
+import {
+  buildAircraftArtifact,
+  CURRENT_AIRCRAFT_TRACE_PROVIDERS,
+  HISTORICAL_AIRCRAFT_TRACE_PROVIDERS,
+  normalizeAircraftTrace,
+} from '../server/aircraft-sources.mjs'
 import { payloadHash, setNoStoreHeaders } from '../server/database.mjs'
 import {
   normalizeDatexRoadEvents,
@@ -37,6 +44,8 @@ import {
 
 const expectedSources = [
   'aircraft',
+  'aircraft-traces',
+  'aircraft-history',
   'open-meteo',
   'reports',
   'local-authority-updates',
@@ -56,9 +65,15 @@ assert.deepEqual(REFRESH_SOURCES.map((source) => source.key), expectedSources)
 assert.ok(REFRESH_SOURCES.every((source) => source.intervalMinutes >= 5))
 assert.ok(REFRESH_SOURCES.every((source) => source.intervalMinutes % 5 === 0))
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'aircraft').intervalMinutes, 5)
+assert.equal(REFRESH_SOURCES.find((source) => source.key === 'aircraft-traces').intervalMinutes, 30)
+assert.equal(REFRESH_SOURCES.find((source) => source.key === 'aircraft-history').intervalMinutes, 360)
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'firms').intervalMinutes, 15)
 assert.equal(LIVE_AIRCRAFT_PROVIDERS.length, 3)
 assert.equal(LIVE_AIRCRAFT_PROVIDERS.at(-1).id, 'airplanes-live')
+assert.equal(LIVE_AIRCRAFT_PROVIDERS.at(-1).intervalMinutes, 60)
+assert.ok(LIVE_AIRCRAFT_PROVIDERS.every((provider) => provider.endpoint.includes('/hex/44c1e5,44c1e8,44c1ea')))
+assert.equal(CURRENT_AIRCRAFT_TRACE_PROVIDERS.length, 1)
+assert.equal(HISTORICAL_AIRCRAFT_TRACE_PROVIDERS.length, 2)
 assert.equal(REFRESH_QUEUE_TOPIC, 'venn-fire-refresh')
 assert.equal(REFRESH_SCHEDULER_DATASET, 'refresh-scheduler')
 assert.equal(REFRESH_INTERVAL_MS, 5 * 60_000)
@@ -88,6 +103,36 @@ const normalized = normalizeAircraft({
 }, provider, Date.parse('2026-08-15T12:05:01Z'))
 assert.equal(normalized.length, 1, 'aircraft normalization must enforce identity and incident-radius filters')
 assert.equal(normalized[0].observedAt, '2026-08-15T08:04:50.000Z')
+
+const traceProvider = CURRENT_AIRCRAFT_TRACE_PROVIDERS[0]
+const trace = normalizeAircraftTrace({
+  timestamp: Date.parse('2026-08-15T08:00:00.000Z') / 1_000,
+  trace: [
+    [30, 50.55, 6.06, 2_100, 72, 185, 0, 0, { flight: 'G10 ' }, 'mlat'],
+    [60, 50.55, 6.06, 2_100, 72, 185, 0, 0, null, 'mlat'],
+    [90, 50.80, 6.50, 2_100, 72, 185, 0, 0, null, 'mlat'],
+  ],
+}, { icao24: '44c1e5', callSign: 'G10', registration: 'OO-POE' }, traceProvider)
+assert.equal(trace.length, 2, 'trace catch-up must retain exact in-radius fixes and reject distant MLAT points')
+assert.equal(trace[0].observedAt, '2026-08-15T08:00:30.000Z')
+assert.equal(trace[0].providerId, 'adsb-lol-current-trace')
+
+const rawArtifact = buildAircraftArtifact({
+  sourceKey: 'aircraft-live',
+  bucketAt: '2026-08-15T18:45:00.000Z',
+  response: {
+    provider: LIVE_AIRCRAFT_PROVIDERS[0],
+    statusCode: 200,
+    contentType: 'application/json',
+    rawBody: '{"now":1786819500,"ac":[]}',
+  },
+})
+assert.equal(rawArtifact.contentEncoding, 'gzip')
+assert.equal(
+  gunzipSync(Buffer.from(rawArtifact.contentBase64, 'base64')).toString('utf8'),
+  '{"now":1786819500,"ac":[]}',
+  'archived aircraft artifacts must round-trip to the exact provider body',
+)
 
 const earlier = {
   generatedAt: '2026-08-15T13:00:00.000Z',
@@ -384,4 +429,4 @@ try {
   else process.env.INTERNAL_SOURCE_TOKEN = previousProxyToken
 }
 
-console.log('refresh pipeline verified: 15 leased sources, local-authority/public/controlled adapters, five-minute grid, semantic history, no-store APIs')
+console.log(`refresh pipeline verified: ${REFRESH_SOURCES.length} leased sources, local-authority/public/controlled adapters, five-minute grid, semantic history, no-store APIs`)
