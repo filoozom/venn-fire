@@ -144,13 +144,13 @@ await selectTime('2026-08-14T23:55:00+02:00')
 const effisOn14August = await page.locator('.snapshot-card--effis').innerText()
 await selectTime('2026-08-15T00:05:00+02:00')
 const effisOn15August = await page.locator('.snapshot-card--effis').innerText()
-if (!effisOn14August.includes('501')) {
+if (!effisOn14August.includes('2026-08-14')) {
   throw new Error('14 August EFFIS geometry was not shown on 14 August')
 }
 if (effisOn14August.includes('carried forward')) {
   throw new Error('14 August EFFIS geometry was labelled carried forward on its own product date')
 }
-if (!effisOn15August.includes('4,857')) {
+if (!effisOn15August.includes('2026-08-15') || effisOn15August.includes('carried forward')) {
   throw new Error('15 August EFFIS geometry did not appear at the start of 15 August')
 }
 
