@@ -99,8 +99,8 @@ pnpm build
 Production browser checks can be run with:
 
 ```bash
-pnpm visual-check -- https://venn-fire.vercel.app
-pnpm verify:timeline -- https://venn-fire.vercel.app
+pnpm visual-check https://venn-fire.vercel.app
+pnpm verify:timeline https://venn-fire.vercel.app
 ```
 
 ## Deployment
