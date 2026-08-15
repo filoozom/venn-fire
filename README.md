@@ -49,11 +49,13 @@ For emergency information, follow BE-Alert and local authorities.
 
 ## Deployment
 
-The repository is ready for Cloudflare Pages Git integration:
+Production is hosted at [venn-fire.vercel.app](https://venn-fire.vercel.app).
+
+Vercel detects the Vite configuration automatically. The production settings are:
 
 - Production branch: `main`
 - Build command: `pnpm build`
 - Build output directory: `dist`
 - Node.js version: `22`
 
-Once the repository is connected in Cloudflare Pages, every push to `main` deploys automatically and pull requests receive preview URLs.
+Connect `filoozom/venn-fire` in the Vercel project's Git settings to deploy every push to `main` automatically and create preview deployments for pull requests.
