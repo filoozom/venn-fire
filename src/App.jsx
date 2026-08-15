@@ -45,6 +45,7 @@ import {
   effisAreaForTimestamp,
   effisProductIsCarriedForward,
   FIVE_MINUTES_MS,
+  mergeIncidentFlights,
   runtimeDataFromResponse,
 } from './data'
 import {
@@ -620,29 +621,12 @@ function FireViewer({ runtime, databaseError }) {
   )
   const reportedAreaText = frame.reportedAreaText
 
-  const displayFlights = useMemo(() => runtime.flights.map((flight) => {
-    const live = liveAircraftObservations
-      .filter((observation) => observation.icao24 === flight.icao24)
-      .map((observation) => ({
-        observedAt: observation.observedAt,
-        timestampMs: Date.parse(observation.observedAt),
-        position: [observation.latitude, observation.longitude],
-        altitudeFt: observation.altitudeFt,
-        updateType: observation.updateType,
-      }))
-    if (!live.length) return flight
-
-    const observations = [...(flight.observations || []), ...live]
-      .sort((left, right) => left.timestampMs - right.timestampMs)
-      .filter((observation, index, all) => {
-        const previous = all[index - 1]
-        return !previous
-          || observation.timestampMs !== previous.timestampMs
-          || observation.position[0] !== previous.position[0]
-          || observation.position[1] !== previous.position[1]
-      })
-    return { ...flight, observations }
-  }), [liveAircraftObservations, runtime.flights])
+  const displayFlights = useMemo(
+    () => mergeIncidentFlights(runtime.flights, liveAircraftObservations),
+    [liveAircraftObservations, runtime.flights],
+  )
+  const receiverObservedFlights = displayFlights.filter((flight) => flight.observations?.length)
+  const receiverObservedCallSigns = receiverObservedFlights.map((flight) => flight.callSign).join(', ')
 
   useEffect(() => {
     const previousLength = framesLengthRef.current
@@ -1109,7 +1093,7 @@ function FireViewer({ runtime, databaseError }) {
               <div className="air-ops-summary">
                 <span className="kicker">TRACK COVERAGE</span>
                 <h2>Aerial operations</h2>
-                <p>G10 and G17 have incident-area MLAT observations; G12 is confirmed only by a timestamped 14 August photo. The 15 August heatmap replay is single-provider evidence and does not identify water pickups or drops.</p>
+                <p>{receiverObservedFlights.length} identified aircraft have exact incident-area receiver fixes{receiverObservedCallSigns ? `: ${receiverObservedCallSigns}` : ''}. G12 remains photo-confirmed only. Receiver positions establish proximity, not water pickups or drops.</p>
                 <button type="button" onClick={() => setDataOpen(true)}><FileUp size={14} /> Import tracks</button>
               </div>
 
@@ -1135,7 +1119,7 @@ function FireViewer({ runtime, databaseError }) {
                 })}
               </div>
 
-              <div className="coverage-note"><Radio size={15} /><p><strong>Dots are observations; dashed lines are not flight paths.</strong><span>Airplanes.live supplied 30-second MLAT replay samples for G10 and G17 on 15 August. Straight connectors appear only across gaps ≤2 minutes and plausible speed. G12 remains photo-only near this incident.</span></p></div>
+              <div className="coverage-note"><Radio size={15} /><p><strong>Dots are observations; dashed lines are not flight paths.</strong><span>Five-minute point checks discover verified and GRZLY incident aircraft without extra provider calls; trace reconciliation fills exact ADS-B/MLAT fixes missed between polls. Straight connectors appear only across gaps ≤2 minutes and plausible speed.</span></p></div>
               <div className="coverage-note"><Info size={15} /><p><strong>Wide-area checks separate this incident from nearby activity.</strong><span>{runtime.incidentAircraftMeta.negativeFindings?.[0]} {runtime.incidentAircraftMeta.negativeFindings?.[1]} The known Aachen/Walheim MLAT artifact is excluded.</span></p></div>
             </div>
           ) : null}

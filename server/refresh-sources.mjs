@@ -11,6 +11,7 @@ import {
   CURRENT_AIRCRAFT_TRACE_PROVIDERS,
   HISTORICAL_AIRCRAFT_TRACE_PROVIDERS,
   loadAircraftTraces,
+  trackedAircraftFromObservations,
 } from './aircraft-sources.mjs'
 import {
   claimSourceRefresh,
@@ -86,7 +87,9 @@ async function previousPayload(key, query, fallback = {}) {
 async function refreshAircraft({ requestedAtMs, query, bucketAt }) {
   const generatedAt = new Date(requestedAtMs).toISOString()
   const backfill = await backfillLegacyFlightHistory({ requestedAtMs, query })
-  const result = await loadAircraft(requestedAtMs, undefined, { includeRaw: true })
+  const previous = await previousPayload('aircraft', query, { observations: [] })
+  const trackedAircraft = trackedAircraftFromObservations(previous.observations)
+  const result = await loadAircraft(requestedAtMs, undefined, { includeRaw: true, trackedAircraft })
   const artifacts = await archiveProviderResponses({
     sourceKey: 'aircraft-live',
     bucketAt,
@@ -125,7 +128,9 @@ async function refreshAircraftTraceSource({
   date = null,
   sourceKey,
 }) {
-  const result = await loadAircraftTraces({ providers, date })
+  const previous = await previousPayload('aircraft', query, { observations: [] })
+  const aircraft = trackedAircraftFromObservations(previous.observations)
+  const result = await loadAircraftTraces({ providers, date, aircraft })
   const artifacts = await archiveProviderResponses({
     sourceKey,
     bucketAt,
@@ -916,17 +921,17 @@ export const REFRESH_SOURCES = [
   {
     key: 'aircraft', label: 'Live incident aircraft', intervalMinutes: 5, run: refreshAircraft,
     providerUrl: 'https://airplanes.live/api-guide/',
-    coverage: 'Batched identity checks against adsb.fi and ADSB.lol every five minutes, hourly Airplanes.live health checks, exact accepted fixes and every raw response retained',
+    coverage: 'One incident-area point request to adsb.fi and ADSB.lol every five minutes, hourly Airplanes.live health checks, conservative verified-identity/GRZLY selection, exact accepted fixes and every raw response retained',
   },
   {
     key: 'aircraft-traces', label: 'Current aircraft trace catch-up', intervalMinutes: 30, run: refreshCurrentAircraftTraces,
     providerUrl: 'https://www.adsb.lol/',
-    coverage: 'Current-day ADSB.lol traces for G10, G12 and G17 recover exact incident-area fixes missed between five-minute live polls',
+    coverage: 'Current-day ADSB.lol traces for every retained incident aircraft recover exact incident-area fixes missed between five-minute live polls',
   },
   {
     key: 'aircraft-history', label: 'Completed aircraft history catch-up', intervalMinutes: 360, run: refreshHistoricalAircraftTraces,
     providerUrl: 'https://globe.airplanes.live/',
-    coverage: 'Previous-day Airplanes.live and ADSB.lol full traces, filtered to exact fixes inside 10 km and retained with raw source files',
+    coverage: 'Previous-day Airplanes.live and ADSB.lol full traces for every retained incident aircraft, filtered to exact fixes inside 10 km and retained with raw source files',
   },
   {
     key: 'open-meteo', label: 'Open-Meteo model weather', intervalMinutes: 5, run: refreshOpenMeteo,

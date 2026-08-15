@@ -6,11 +6,16 @@ import { gunzipSync } from 'node:zlib'
 
 import butgenbachSourceHandler, { config as butgenbachSourceConfig } from '../api/butgenbach-source.js'
 import { loadFirms } from '../api/firms-situation.js'
-import { LIVE_AIRCRAFT_PROVIDERS, normalizeAircraft } from '../api/live-situation.js'
+import {
+  INCIDENT_AIRCRAFT,
+  LIVE_AIRCRAFT_PROVIDERS,
+  normalizeAircraft,
+} from '../api/live-situation.js'
 import {
   CURRENT_AIRCRAFT_TRACE_PROVIDERS,
   HISTORICAL_AIRCRAFT_TRACE_PROVIDERS,
   normalizeAircraftTrace,
+  trackedAircraftFromObservations,
 } from '../server/aircraft-sources.mjs'
 import { buildProviderArtifact } from '../server/source-artifacts.mjs'
 import { payloadHash, setNoStoreHeaders } from '../server/database.mjs'
@@ -32,8 +37,8 @@ import {
   parseMunicipalRdfFeed,
   parseHlzNewsList,
 } from '../server/municipal-sources.mjs'
-import { REFRESH_SOURCES } from '../server/refresh-sources.mjs'
-import { buildEvents } from '../src/data.js'
+import { firmsDetectionKey, REFRESH_SOURCES } from '../server/refresh-sources.mjs'
+import { buildEvents, mergeIncidentFlights } from '../src/data.js'
 import {
   nextRefreshWakeAt,
   REFRESH_INTERVAL_MS,
@@ -72,7 +77,12 @@ assert.equal(REFRESH_SOURCES.find((source) => source.key === 'firms').intervalMi
 assert.equal(LIVE_AIRCRAFT_PROVIDERS.length, 3)
 assert.equal(LIVE_AIRCRAFT_PROVIDERS.at(-1).id, 'airplanes-live')
 assert.equal(LIVE_AIRCRAFT_PROVIDERS.at(-1).intervalMinutes, 60)
-assert.ok(LIVE_AIRCRAFT_PROVIDERS.every((provider) => provider.endpoint.includes('/hex/44c1e5,44c1e8,44c1ea')))
+assert.ok(LIVE_AIRCRAFT_PROVIDERS.find((provider) => provider.id === 'adsb-fi').endpoint
+  .includes('/v3/lat/50.54762/lon/6.05757/dist/10'))
+assert.ok(LIVE_AIRCRAFT_PROVIDERS.filter((provider) => provider.id !== 'adsb-fi')
+  .every((provider) => provider.endpoint.includes('/point/50.54762/6.05757/10')))
+assert.equal(INCIDENT_AIRCRAFT.get('480849').registration, 'D-472')
+assert.equal(INCIDENT_AIRCRAFT.get('48044a').registration, 'D-604')
 assert.equal(CURRENT_AIRCRAFT_TRACE_PROVIDERS.length, 1)
 assert.equal(HISTORICAL_AIRCRAFT_TRACE_PROVIDERS.length, 2)
 assert.equal(REFRESH_QUEUE_TOPIC, 'venn-fire-refresh')
@@ -100,10 +110,15 @@ const normalized = normalizeAircraft({
     { hex: '44c1e5', flight: 'G10 ', lat: 50.55, lon: 6.06, seen_pos: 10, alt_baro: 1_500 },
     { hex: '44c1e8', flight: 'G12 ', lat: 50.80, lon: 6.50, seen_pos: 1, alt_baro: 1_000 },
     { hex: 'deadbe', flight: 'OTHER', lat: 50.55, lon: 6.06, seen_pos: 1, alt_baro: 2_000 },
+    { hex: '480999', flight: 'GRZLY82 ', r: 'D-999', t: 'H47', lat: 50.55, lon: 6.06, seen_pos: 4, alt_baro: 2_200 },
+    { hex: '480849', r: 'D-472', t: 'H47', lat: 50.56, lon: 6.05, seen_pos: 3, alt_baro: 2_300 },
   ],
 }, provider, Date.parse('2026-08-15T12:05:01Z'))
-assert.equal(normalized.length, 1, 'aircraft normalization must enforce identity and incident-radius filters')
+assert.equal(normalized.length, 3, 'aircraft normalization must retain verified/dynamic incident aircraft and reject unrelated traffic')
 assert.equal(normalized[0].observedAt, '2026-08-15T08:04:50.000Z')
+assert.equal(normalized[1].selectionBasis, 'incident-callsign')
+assert.equal(normalized[1].registration, 'D-999')
+assert.equal(normalized[2].registration, 'D-472')
 
 const traceProvider = CURRENT_AIRCRAFT_TRACE_PROVIDERS[0]
 const trace = normalizeAircraftTrace({
@@ -117,6 +132,35 @@ const trace = normalizeAircraftTrace({
 assert.equal(trace.length, 2, 'trace catch-up must retain exact in-radius fixes and reject distant MLAT points')
 assert.equal(trace[0].observedAt, '2026-08-15T08:00:30.000Z')
 assert.equal(trace[0].providerId, 'adsb-lol-current-trace')
+
+const discoveredTrace = normalizeAircraftTrace({
+  timestamp: Date.parse('2026-08-15T16:45:00.000Z') / 1_000,
+  r: 'D-999',
+  t: 'H47',
+  desc: 'BOEING-VERTOL CH-47 Chinook',
+  trace: [[10, 50.55, 6.06, 2_300, 120, 245, 0, 0, { flight: 'GRZLY82 ' }, 'adsb_icao']],
+}, {
+  icao24: '480999',
+  callSign: 'GRZLY82',
+  registration: 'D-999',
+  selectionBasis: 'incident-callsign',
+}, traceProvider)
+assert.equal(discoveredTrace.length, 1)
+assert.equal(discoveredTrace[0].aircraftType, 'H47')
+assert.equal(discoveredTrace[0].selectionBasis, 'incident-callsign')
+
+const traceTargets = trackedAircraftFromObservations(discoveredTrace)
+assert.equal(traceTargets.length, INCIDENT_AIRCRAFT.size + 1)
+assert.equal(traceTargets.find((aircraft) => aircraft.icao24 === '480999').callSign, 'GRZLY82')
+
+const displayFlights = mergeIncidentFlights([{ id: 'g10', icao24: '44c1e5', callSign: 'G10', observations: [] }], [
+  normalized[0],
+  normalized[1],
+  normalized[2],
+])
+assert.equal(displayFlights.length, 3)
+assert.equal(displayFlights.find((flight) => flight.icao24 === '480999').type, 'helicopter')
+assert.equal(displayFlights.find((flight) => flight.icao24 === '480849').callSign, 'GRZLY81')
 
 const rawArtifact = buildProviderArtifact({
   sourceKey: 'aircraft-live',
@@ -148,11 +192,19 @@ const firmsFixture = await loadFirms({
     headers: { 'Content-Type': 'text/csv' },
   }),
 })
-assert.equal(firmsFixture.rawResponses.length, 4)
-assert.equal(firmsFixture.currentWindowDetectionCount, 4)
+assert.equal(firmsFixture.rawResponses.length, 5)
+assert.equal(firmsFixture.currentWindowDetectionCount, 5)
 assert.equal(firmsFixture.latestAcquiredAt, '2026-08-15T12:05:00.000Z')
 assert.ok(firmsFixture.rawResponses.every((item) => item.rawBody === firmsCsv))
 assert.ok(firmsFixture.rawResponses.every((item) => !item.provider.endpoint.includes('never-store-this-key')))
+const meteosatFixture = firmsFixture.sensors.find((sensor) => sensor.sensorKey === 'meteosat')
+assert.equal(meteosatFixture.areaDerivationAllowed, false)
+assert.equal(meteosatFixture.areaHa, null)
+assert.notEqual(
+  firmsDetectionKey({ sensorKey: 'meteosat', satellite: 'Met9', acquiredAt: '2026-08-15T12:05:00.000Z', latitude: 50.55, longitude: 6.06 }),
+  firmsDetectionKey({ sensorKey: 'meteosat', satellite: 'Met10', acquiredAt: '2026-08-15T12:05:00.000Z', latitude: 50.55, longitude: 6.06 }),
+  'simultaneous detections from distinct Meteosat spacecraft must not collapse in Postgres',
+)
 
 const earlier = {
   generatedAt: '2026-08-15T13:00:00.000Z',

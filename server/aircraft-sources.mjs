@@ -40,8 +40,35 @@ function finiteNumber(value) {
   return Number.isFinite(number) ? number : null
 }
 
+export function trackedAircraftFromObservations(observations = []) {
+  const tracked = new Map(
+    [...INCIDENT_AIRCRAFT].map(([icao24, identity]) => [icao24, {
+      icao24,
+      ...identity,
+      selectionBasis: 'verified-icao24',
+    }]),
+  )
+  for (const observation of observations || []) {
+    const icao24 = String(observation?.icao24 || '').trim().toLowerCase()
+    if (!/^[0-9a-f]{6}$/.test(icao24)) continue
+    const existing = tracked.get(icao24) || { icao24 }
+    tracked.set(icao24, {
+      ...existing,
+      callSign: observation.callSign || existing.callSign || icao24.toUpperCase(),
+      registration: observation.registration || existing.registration || null,
+      aircraftType: observation.aircraftType || existing.aircraftType || null,
+      aircraftDescription: observation.aircraftDescription || existing.aircraftDescription || null,
+      displayType: observation.displayType || existing.displayType || null,
+      selectionBasis: observation.selectionBasis || existing.selectionBasis || 'retained-incident-history',
+    })
+  }
+  return [...tracked.values()]
+}
+
 export function normalizeAircraftTrace(payload, aircraft, provider) {
-  const identity = INCIDENT_AIRCRAFT.get(String(aircraft.icao24).toLowerCase())
+  const icao24 = String(aircraft?.icao24 || '').toLowerCase()
+  const configuredIdentity = INCIDENT_AIRCRAFT.get(icao24)
+  const identity = configuredIdentity || (aircraft?.selectionBasis ? aircraft : null)
   const baseTimestamp = finiteNumber(payload?.timestamp)
   if (!identity || baseTimestamp == null) return []
   const baseTimestampMs = baseTimestamp * 1_000
@@ -65,9 +92,16 @@ export function normalizeAircraftTrace(payload, aircraft, provider) {
     const altitudeFt = row[3] === 'ground' ? 0 : finiteNumber(row[3])
     const traceType = String(row[9] || metadata.type || 'receiver').trim().toLowerCase()
     return [{
-      icao24: String(aircraft.icao24).toLowerCase(),
+      icao24,
       callSign: String(metadata.flight || aircraft.callSign || identity.callSign).trim() || identity.callSign,
-      registration: aircraft.registration || identity.registration,
+      registration: payload.r || aircraft.registration || identity.registration,
+      aircraftType: payload.t || aircraft.aircraftType || identity.aircraftType || null,
+      aircraftDescription: payload.desc
+        || aircraft.aircraftDescription
+        || identity.aircraftDescription
+        || null,
+      displayType: aircraft.displayType || identity.displayType || null,
+      selectionBasis: aircraft.selectionBasis || identity.selectionBasis || 'verified-icao24',
       observedAt,
       latitude,
       longitude,
@@ -133,8 +167,8 @@ async function fetchTrace(provider, aircraft, date) {
 export async function loadAircraftTraces({
   providers,
   date = null,
+  aircraft = trackedAircraftFromObservations(),
 }) {
-  const aircraft = [...INCIDENT_AIRCRAFT].map(([icao24, identity]) => ({ icao24, ...identity }))
   const responses = await Promise.all(providers.flatMap((provider) => (
     aircraft.map((item) => fetchTrace(provider, item, date))
   )))

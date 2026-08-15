@@ -63,9 +63,9 @@ The scheduler has five-minute granularity. A database lease makes repeated calls
 
 | Source | Dataset | Provider interval |
 | --- | --- | ---: |
-| adsb.fi + ADSB.lol | One batched identity request per provider for G10, G12 and G17; exact receiver observations inside 10 km plus every raw success/error response retained | 5 min |
-| ADSB.lol current traces | Exact trace catch-up for G10, G12 and G17, recovering receiver fixes missed between live polls without interpolation | 30 min |
-| Airplanes.live + ADSB.lol completed traces | Previous-day full-trace reconciliation for all three aircraft; exact in-radius fixes and raw trace files retained | 6 h |
+| adsb.fi + ADSB.lol | One geographic point request per provider; verified aircraft and newly observed `GRZLY##` incident callsigns are selected inside 10 km, with exact receiver observations and every complete raw response retained | 5 min |
+| ADSB.lol current traces | Exact trace catch-up for every retained incident aircraft—including G10, G12, G17, D-472 and D-604—recovering receiver fixes missed between live polls without interpolation | 30 min |
+| Airplanes.live + ADSB.lol completed traces | Previous-day full-trace reconciliation for every retained incident aircraft; exact in-radius fixes and raw trace files retained | 6 h |
 | Airplanes.live live API | Access-health check retained while the provider rejects server traffic, without consuming its limited allowance on repeated HTTP 403 responses | 60 min |
 | Open-Meteo | Hourly model-grid temperature, humidity, wind and gust rows | 5 min |
 | Governor of Liège + BRF | Strictly parsed affected-area reports and official incident events; stated effective time and bulletin publication time are retained separately | 5 min |
@@ -77,12 +77,14 @@ The scheduler has five-minute granularity. A database lease makes repeated calls
 | Public-operations adapter | Sanitized dispatch, water pickup/drop, closure, evacuation and aggregate-compliance events | 5 min |
 | RMI Mont Rigi WFS | Ten-minute station temperature, humidity, precipitation, wind, gust and validation flags | 10 min |
 | DWD CDC | Ten-minute wind observations and quality level from three nearby stations | 10 min |
-| NASA FIRMS, four sensors | Exact VIIRS Suomi-NPP, VIIRS NOAA-20, VIIRS NOAA-21 and MODIS thermal detections | 15 min |
+| NASA FIRMS, five products | Exact VIIRS Suomi-NPP, VIIRS NOAA-20, VIIRS NOAA-21 and MODIS detections, plus GOES_NRT Meteosat scan centroids | 15 min |
 | Copernicus EMS | Rapid Mapping activation catalogue and any incident match details | 60 min |
 | Copernicus Data Space | Sentinel-2 L2A catalogue metadata and public JPEG quicklook pixels archived as Postgres artifacts | 60 min |
 | Copernicus EFFIS WFS | Daily algorithmic VIIRS geometry nearest the incident | 6 h |
 
-FIRMS is checked by every scheduler run, but its provider lease is 15 minutes to conserve the limited NASA MAP_KEY allowance. Each successful poll merges exact detections into retained history instead of replacing the previous window and archives the four raw sensor CSV responses in Postgres. The dataset reports both `generatedAt` (when FIRMS was queried) and `latestAcquiredAt` (the newest satellite overpass returned), because a current poll can legitimately contain no new observation between polar-orbiting overpasses. Configure `FIRMS_MAP_KEY` as a sensitive Vercel production environment variable; stored request URLs replace it with `MAP_KEY`, and the secret is never returned to the browser or written to the database.
+FIRMS is checked by every scheduler run, but its provider lease is 15 minutes to conserve the limited NASA MAP_KEY allowance. Each successful poll merges exact detections into retained history instead of replacing the previous window and archives five raw product CSV responses in Postgres. The dataset reports both `generatedAt` (when FIRMS was queried) and `latestAcquiredAt` (the newest satellite scan or overpass returned). GOES_NRT is capped to a two-day request and returns Met12/Met10/Met9 over Belgium; its zero scan/track dimensions are rendered as centroids and never used for hectares. Configure `FIRMS_MAP_KEY` as a sensitive Vercel production environment variable; stored request URLs replace it with `MAP_KEY`, and the secret is never returned to the browser or written to the database.
+
+Aircraft discovery does not add provider calls: the former fixed-hex request is replaced by one point request covering the incident. Exact Mode-S identities already verified for the incident remain accepted even when no callsign is broadcast; a previously unseen aircraft is accepted only when it broadcasts the conservative `GRZLY##` incident callsign pattern inside the radius. Once accepted, its identity is retained in Postgres and included in current- and previous-day trace reconciliation. Other nearby traffic remains archived in the raw provider artifact but is not normalized onto the incident map.
 
 Bütgenbach's Cloudflare policy blocks requests from the Node.js function network. Its official sitemap and article pages are therefore read through `/api/butgenbach-source`, a no-store Vercel Edge function that accepts only short-lived HMAC-signed requests for allow-listed paths on `butgenbach.be`. It is not an open proxy; the Node.js refresh worker still validates, parses and archives every official response in Postgres.
 
@@ -102,6 +104,7 @@ Run the deterministic checks with:
 ```bash
 pnpm verify:refresh
 pnpm verify:flight-history
+pnpm verify:firms-sensors
 pnpm verify:live-reports
 pnpm build
 ```
@@ -144,7 +147,7 @@ Do not add a CDN cache in front of `/api/data`, `/api/live-reports`, `/api/live-
 ## Interpretation limits
 
 - The five-minute timeline carries the latest sourced value forward; it never interpolates a new measurement.
-- FIRMS pixels are thermal anomalies, not a burned-area perimeter. Independent sensors are never summed or averaged, and MODIS does not receive a hectare estimate at this incident scale.
+- FIRMS pixels are thermal anomalies, not a burned-area perimeter. Independent sensors are never summed or averaged; only `providesArea: true` VIIRS products receive a footprint-union estimate. MODIS and Meteosat never receive hectare figures.
 - EFFIS is a daily algorithmic VIIRS geometry, not a field-surveyed operational perimeter or within-day progression.
 - Aircraft markers represent exact receiver observations within the preceding five minutes. Coverage gaps remain gaps; no route, water pickup or drop is inferred.
 - RMI and DWD station values remain separate from the Open-Meteo model. Near-real-time quality-control status is retained.

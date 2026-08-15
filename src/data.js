@@ -2,6 +2,8 @@ export const FIVE_MINUTES_MS = 5 * 60 * 1000
 export const AIRCRAFT_PATH_MAX_GAP_MS = 2 * 60 * 1000
 export const AIRCRAFT_PATH_MAX_SPEED_KT = 160
 
+const RECEIVER_FLIGHT_COLORS = ['#d35400', '#008c7a', '#b23a6f', '#7b5fc0', '#2d6f93', '#9b6b13']
+
 const RMI_STATION_MAX_AGE_MS = 20 * 60 * 1000
 const LOCAL_UTC_OFFSET_MS = 2 * 60 * 60 * 1000
 
@@ -33,6 +35,126 @@ function requiredPayload(datasets, key) {
 
 function optionalPayload(datasets, key, fallback = {}) {
   return datasets?.[key]?.payload ?? fallback
+}
+
+function receiverFlightColor(icao24) {
+  const hash = [...icao24].reduce((value, character) => (
+    ((value * 31) + character.charCodeAt(0)) >>> 0
+  ), 0)
+  return RECEIVER_FLIGHT_COLORS[hash % RECEIVER_FLIGHT_COLORS.length]
+}
+
+function receiverObservation(observation) {
+  const timestampMs = Date.parse(observation.observedAt)
+  if (!Number.isFinite(timestampMs)
+    || !Number.isFinite(Number(observation.latitude))
+    || !Number.isFinite(Number(observation.longitude))) return null
+  return {
+    observedAt: new Date(timestampMs).toISOString(),
+    timestampMs,
+    position: [Number(observation.latitude), Number(observation.longitude)],
+    altitudeFt: observation.altitudeFt,
+    updateType: observation.updateType,
+    sourceUrl: observation.providerUrl,
+  }
+}
+
+function uniqueReceiverObservations(observations) {
+  return observations
+    .filter(Boolean)
+    .sort((left, right) => left.timestampMs - right.timestampMs)
+    .filter((observation, index, all) => {
+      const previous = all[index - 1]
+      return !previous
+        || observation.timestampMs !== previous.timestampMs
+        || observation.position[0] !== previous.position[0]
+        || observation.position[1] !== previous.position[1]
+    })
+}
+
+function receiverCoverageWindows(observations) {
+  const windows = []
+  for (const observation of observations) {
+    const previous = windows.at(-1)
+    if (!previous || observation.timestampMs - previous.endMs > 5 * 60_000) {
+      windows.push({ startMs: observation.timestampMs, endMs: observation.timestampMs })
+    } else {
+      previous.endMs = observation.timestampMs
+    }
+  }
+  return windows
+}
+
+function receiverDisplayType(observation) {
+  if (observation.displayType === 'plane' || observation.displayType === 'helicopter') {
+    return observation.displayType
+  }
+  return observation.aircraftType === 'H47'
+    || /chinook|helicopter/iu.test(observation.aircraftDescription || '')
+    || /^GRZLY/iu.test(observation.callSign || '')
+    ? 'helicopter'
+    : 'plane'
+}
+
+export function mergeIncidentFlights(configuredFlights = [], aircraftObservations = []) {
+  const observationsByHex = new Map()
+  for (const observation of aircraftObservations || []) {
+    const icao24 = String(observation?.icao24 || '').trim().toLowerCase()
+    const normalized = receiverObservation(observation)
+    if (!/^[0-9a-f]{6}$/.test(icao24) || !normalized) continue
+    const group = observationsByHex.get(icao24) || []
+    group.push({ source: observation, normalized })
+    observationsByHex.set(icao24, group)
+  }
+
+  const configuredHexes = new Set(configuredFlights.map((flight) => flight.icao24))
+  const configured = configuredFlights.map((flight) => {
+    const receiverRows = observationsByHex.get(flight.icao24) || []
+    const observations = uniqueReceiverObservations([
+      ...(flight.observations || []),
+      ...receiverRows.map((row) => row.normalized),
+    ])
+    return {
+      ...flight,
+      observations,
+      coverageWindows: observations.length
+        ? receiverCoverageWindows(observations)
+        : flight.coverageWindows || [],
+    }
+  })
+
+  const discovered = [...observationsByHex]
+    .filter(([icao24]) => !configuredHexes.has(icao24))
+    .map(([icao24, rows]) => {
+      const latest = rows.at(-1).source
+      const observations = uniqueReceiverObservations(rows.map((row) => row.normalized))
+      const registration = latest.registration || null
+      const description = latest.aircraftDescription || latest.aircraftType || 'receiver-observed aircraft'
+      return {
+        id: `receiver-${icao24}`,
+        icao24,
+        callSign: latest.callSign || registration || icao24.toUpperCase(),
+        registration,
+        type: receiverDisplayType(latest),
+        color: receiverFlightColor(icao24),
+        label: [registration, description].filter(Boolean).join(' · '),
+        source: 'Database-retained ADS-B/MLAT observations',
+        sourceUrl: `https://adsb.lol/?icao=${icao24}`,
+        status: latest.selectionBasis === 'incident-callsign'
+          ? 'Selected by an incident GRZLY callsign and exact receiver fixes inside 10 km; operational purpose is not inferred'
+          : 'Verified incident aircraft with exact receiver fixes retained inside 10 km',
+        pathMethod: 'Dashed straight connectors: ≤2 min gap and ≤160 kt implied speed',
+        observations,
+        coverageWindows: receiverCoverageWindows(observations),
+        evidenceObservations: [],
+      }
+    })
+    .sort((left, right) => (
+      left.observations[0].timestampMs - right.observations[0].timestampMs
+      || left.callSign.localeCompare(right.callSign)
+    ))
+
+  return [...configured, ...discovered]
 }
 
 export function mergeAreaReports(...reportGroups) {

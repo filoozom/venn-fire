@@ -2,34 +2,51 @@ import { databaseOverview, loadDatasets, setNoStoreHeaders } from '../server/dat
 
 export const INCIDENT = { latitude: 50.54762, longitude: 6.05757 }
 export const INCIDENT_AIRCRAFT = new Map([
-  ['44c1e5', { callSign: 'G10', registration: 'OO-POE' }],
-  ['44c1e8', { callSign: 'G12', registration: 'OO-POH' }],
-  ['44c1ea', { callSign: 'G17', registration: 'OO-POJ' }],
+  ['44c1e5', { callSign: 'G10', registration: 'OO-POE', displayType: 'helicopter' }],
+  ['44c1e8', { callSign: 'G12', registration: 'OO-POH', displayType: 'helicopter' }],
+  ['44c1ea', { callSign: 'G17', registration: 'OO-POJ', displayType: 'helicopter' }],
+  ['480849', {
+    callSign: 'GRZLY81',
+    registration: 'D-472',
+    aircraftType: 'H47',
+    aircraftDescription: 'Boeing CH-47F Chinook',
+    displayType: 'helicopter',
+  }],
+  ['48044a', {
+    callSign: 'GRZLY80',
+    callSignAliases: ['GRZLY91'],
+    registration: 'D-604',
+    aircraftType: 'H47',
+    aircraftDescription: 'Boeing CH-47F Chinook',
+    displayType: 'helicopter',
+  }],
 ])
+export const INCIDENT_CALLSIGN_PATTERNS = [/^GRZLY\d{1,3}$/i]
 export const INCIDENT_RADIUS_KM = 10
+export const AIRCRAFT_DISCOVERY_RADIUS_NM = 10
 export const LIVE_REFRESH_SECONDS = 5 * 60
-const INCIDENT_AIRCRAFT_HEX = [...INCIDENT_AIRCRAFT.keys()].join(',')
+const INCIDENT_POINT_PATH = `point/${INCIDENT.latitude}/${INCIDENT.longitude}/${AIRCRAFT_DISCOVERY_RADIUS_NM}`
 
 export const LIVE_AIRCRAFT_PROVIDERS = [
   {
     id: 'adsb-fi',
     name: 'adsb.fi',
     website: 'https://adsb.fi/',
-    endpoint: `https://opendata.adsb.fi/api/v2/hex/${INCIDENT_AIRCRAFT_HEX}`,
+    endpoint: `https://opendata.adsb.fi/api/v3/lat/${INCIDENT.latitude}/lon/${INCIDENT.longitude}/dist/${AIRCRAFT_DISCOVERY_RADIUS_NM}`,
     intervalMinutes: 5,
   },
   {
     id: 'adsb-lol',
     name: 'ADSB.lol',
     website: 'https://www.adsb.lol/',
-    endpoint: `https://api.adsb.lol/v2/hex/${INCIDENT_AIRCRAFT_HEX}`,
+    endpoint: `https://api.adsb.lol/v2/${INCIDENT_POINT_PATH}`,
     intervalMinutes: 5,
   },
   {
     id: 'airplanes-live',
     name: 'Airplanes.live',
     website: 'https://airplanes.live/',
-    endpoint: `https://api.airplanes.live/v2/hex/${INCIDENT_AIRCRAFT_HEX}`,
+    endpoint: `https://api.airplanes.live/v2/${INCIDENT_POINT_PATH}`,
     // Their public endpoint currently rejects server traffic. Retain a regular
     // health check without spending the free tier's 500 daily requests on the
     // same HTTP 403 every five minutes.
@@ -129,7 +146,70 @@ function finiteNumber(value) {
   return Number.isFinite(number) ? number : null
 }
 
-export function normalizeAircraft(payload, provider, requestedAtMs) {
+function cleanText(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+export function trackedAircraftIdentityMap(trackedAircraft = []) {
+  const identities = new Map(
+    [...INCIDENT_AIRCRAFT].map(([icao24, identity]) => [icao24, {
+      ...identity,
+      selectionBasis: 'verified-icao24',
+    }]),
+  )
+  for (const aircraft of trackedAircraft || []) {
+    const icao24 = cleanText(aircraft?.icao24 || aircraft?.hex)?.toLowerCase()
+    if (!icao24 || !/^[0-9a-f]{6}$/.test(icao24)) continue
+    const existing = identities.get(icao24) || {}
+    identities.set(icao24, {
+      ...existing,
+      callSign: cleanText(aircraft.callSign || aircraft.flight) || existing.callSign || icao24.toUpperCase(),
+      registration: cleanText(aircraft.registration || aircraft.r) || existing.registration || null,
+      aircraftType: cleanText(aircraft.aircraftType || aircraft.t) || existing.aircraftType || null,
+      aircraftDescription: cleanText(aircraft.aircraftDescription || aircraft.desc)
+        || existing.aircraftDescription
+        || null,
+      displayType: cleanText(aircraft.displayType) || existing.displayType || null,
+      selectionBasis: existing.selectionBasis
+        || cleanText(aircraft.selectionBasis)
+        || 'retained-incident-history',
+    })
+  }
+  return identities
+}
+
+export function resolveIncidentAircraft(aircraft, identities = INCIDENT_AIRCRAFT) {
+  const icao24 = cleanText(aircraft?.hex || aircraft?.icao24)?.toLowerCase()
+  if (!icao24 || !/^[0-9a-f]{6}$/.test(icao24)) return null
+  const callSign = cleanText(aircraft.flight || aircraft.callsign || aircraft.callSign)
+  const known = identities.get(icao24)
+  if (known) {
+    return {
+      ...known,
+      icao24,
+      callSign: callSign || known.callSign,
+      registration: cleanText(aircraft.r || aircraft.registration) || known.registration || null,
+      aircraftType: cleanText(aircraft.t || aircraft.aircraftType) || known.aircraftType || null,
+      aircraftDescription: cleanText(aircraft.desc || aircraft.aircraftDescription)
+        || known.aircraftDescription
+        || null,
+      selectionBasis: known.selectionBasis || 'verified-icao24',
+    }
+  }
+  if (!callSign || !INCIDENT_CALLSIGN_PATTERNS.some((pattern) => pattern.test(callSign))) return null
+  const aircraftType = cleanText(aircraft.t || aircraft.aircraftType)
+  return {
+    icao24,
+    callSign,
+    registration: cleanText(aircraft.r || aircraft.registration),
+    aircraftType,
+    aircraftDescription: cleanText(aircraft.desc || aircraft.aircraftDescription),
+    displayType: aircraftType === 'H47' || /^GRZLY/i.test(callSign) ? 'helicopter' : null,
+    selectionBasis: 'incident-callsign',
+  }
+}
+
+export function normalizeAircraft(payload, provider, requestedAtMs, identities = INCIDENT_AIRCRAFT) {
   // These providers publish the epoch represented by `seen_pos`. Using it keeps
   // an observation's timestamp stable when two consecutive imports receive the
   // same fix; falling back to our request time preserves compatibility with
@@ -140,9 +220,9 @@ export function normalizeAircraft(payload, provider, requestedAtMs) {
     : (payloadTimestampMs > 10_000_000_000 ? payloadTimestampMs : payloadTimestampMs * 1_000)
 
   return (payload?.ac || payload?.aircraft || []).flatMap((aircraft) => {
-    const icao24 = String(aircraft.hex || aircraft.icao24 || '').trim().toLowerCase()
-    const identity = INCIDENT_AIRCRAFT.get(icao24)
+    const identity = resolveIncidentAircraft(aircraft, identities)
     if (!identity) return []
+    const { icao24 } = identity
 
     const latitude = finiteNumber(aircraft.lat)
     const longitude = finiteNumber(aircraft.lon)
@@ -158,8 +238,12 @@ export function normalizeAircraft(payload, provider, requestedAtMs) {
 
     return [{
       icao24,
-      callSign: String(aircraft.flight || aircraft.callsign || identity.callSign).trim() || identity.callSign,
-      registration: String(aircraft.r || aircraft.registration || identity.registration).trim() || identity.registration,
+      callSign: identity.callSign,
+      registration: identity.registration,
+      aircraftType: identity.aircraftType,
+      aircraftDescription: identity.aircraftDescription,
+      displayType: identity.displayType,
+      selectionBasis: identity.selectionBasis,
       observedAt: new Date(referenceTimestampMs - seenPositionSeconds * 1_000).toISOString(),
       latitude,
       longitude,
@@ -179,8 +263,9 @@ export function normalizeAircraft(payload, provider, requestedAtMs) {
 export async function loadAircraft(
   requestedAtMs,
   providers = LIVE_AIRCRAFT_PROVIDERS,
-  { includeRaw = false } = {},
+  { includeRaw = false, trackedAircraft = [] } = {},
 ) {
+  const identities = trackedAircraftIdentityMap(trackedAircraft)
   const results = await Promise.all(providers.map((provider) => (
     providerDue(provider, requestedAtMs)
       ? fetchAircraftProvider(provider)
@@ -214,10 +299,8 @@ export async function loadAircraft(
       return
     }
     const rows = result.payload?.ac || result.payload?.aircraft || []
-    const targetRows = rows.filter((aircraft) => (
-      INCIDENT_AIRCRAFT.has(String(aircraft.hex || aircraft.icao24 || '').trim().toLowerCase())
-    ))
-    const normalized = normalizeAircraft(result.payload, provider, requestedAtMs)
+    const targetRows = rows.filter((aircraft) => resolveIncidentAircraft(aircraft, identities))
+    const normalized = normalizeAircraft(result.payload, provider, requestedAtMs, identities)
     sourceStatus.push({
       id: provider.id,
       name: provider.name,

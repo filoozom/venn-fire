@@ -125,13 +125,21 @@ assert.equal(secondPoll.observations.length, 2)
 assert.equal(database.state.schemaStatements, 3, 'schema was initialized more than once for one warm query client')
 assert.equal(database.state.observations.get(flightObservationKey(first)).altitude_ft, null)
 
-const catchup = observation('44c1e5', '2026-08-15T12:06:00.000Z', 50.551, 6.061, {
+const catchup = observation('480849', '2026-08-15T12:06:00.000Z', 50.551, 6.061, {
+  callSign: 'GRZLY81',
+  registration: 'D-472',
+  aircraftType: 'H47',
+  aircraftDescription: 'Boeing CH-47F Chinook',
+  displayType: 'helicopter',
+  selectionBasis: 'verified-icao24',
   providerId: 'adsb-lol-current-trace',
   providerName: 'ADSB.lol current trace',
 })
 const catchupImport = await persistFlightObservations({ observations: [catchup] }, options)
 assert.equal(catchupImport.persistedObservations, 1)
 assert.equal(catchupImport.observations.length, 3)
+assert.equal(catchupImport.observations.at(-1).aircraftType, 'H47')
+assert.equal(catchupImport.observations.at(-1).selectionBasis, 'verified-icao24')
 assert.equal(database.state.runs.size, 1, 'trace catch-up must not overwrite the live five-minute poll audit row')
 
 console.log('Verified: Postgres flight history is durable, bucketed and idempotent.')

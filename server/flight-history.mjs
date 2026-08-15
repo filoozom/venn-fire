@@ -119,10 +119,15 @@ function isoTimestamp(value) {
 }
 
 function storedObservation(row) {
+  const sourceData = row.source_data && typeof row.source_data === 'object' ? row.source_data : {}
   return {
     icao24: row.icao24,
     callSign: row.callsign,
     registration: row.registration,
+    aircraftType: sourceData.aircraftType || null,
+    aircraftDescription: sourceData.aircraftDescription || null,
+    displayType: sourceData.displayType || null,
+    selectionBasis: sourceData.selectionBasis || null,
     observedAt: isoTimestamp(row.observed_at),
     latitude: Number(row.latitude),
     longitude: Number(row.longitude),
@@ -178,7 +183,8 @@ export async function loadFlightHistory({
       SELECT
         icao24, callsign, registration, observed_at, latitude, longitude,
         altitude_ft, ground_speed_kt, track_degrees, distance_drossart_km,
-        update_type, provider_id, provider_name, provider_url, corroborated_by
+        update_type, provider_id, provider_name, provider_url, corroborated_by,
+        source_data
       FROM flight_observations
       WHERE observed_at >= $1::timestamptz
       ORDER BY observed_at DESC
