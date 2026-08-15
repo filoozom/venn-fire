@@ -1069,24 +1069,128 @@ function FireViewer({ runtime, databaseError }) {
   )
 }
 
+async function fetchDatabaseRuntime() {
+  const response = await fetch('/api/data', {
+    cache: 'no-store',
+    headers: { Accept: 'application/json' },
+  })
+  if (!response.ok) throw new Error(`Database endpoint returned ${response.status}`)
+  return runtimeDataFromResponse(await response.json())
+}
+
+// Start the first database read as soon as the application bundle executes.
+// React can paint the shell while this request is in flight, and no incident
+// payload is kept in the browser or bundled into the application.
+let eagerRuntimeRequest = typeof window === 'undefined' ? null : fetchDatabaseRuntime()
+
+function AsyncViewerShell({ databaseError, onRetry }) {
+  const hasError = Boolean(databaseError)
+  return (
+    <div className="app-shell app-shell--hydrating" aria-busy={!hasError}>
+      <header className="app-header">
+        <div className="brand-block">
+          <span className="brand-mark"><Flame size={19} fill="currentColor" /></span>
+          <div><strong>VENN</strong><small>FIRE WATCH</small></div>
+        </div>
+
+        <div className="incident-heading">
+          <div className="incident-location"><Database size={14} /><b>LIVE INCIDENT VIEW</b></div>
+          <span className="reference-badge"><Sparkles size={11} /> OBSERVATION VIEW</span>
+        </div>
+
+        <div className="header-actions">
+          <div className="updated-state">
+            <span className="live-pulse is-bundled" />
+            <div>
+              <small>{hasError ? 'DATABASE UNAVAILABLE' : 'SYNCING LIVE SOURCES'}</small>
+              <strong>{hasError ? 'Retry available' : 'Opening viewer…'}</strong>
+            </div>
+          </div>
+          <span className="data-button async-data-button" aria-hidden="true"><Database size={15} /><span>Data &amp; sources</span></span>
+        </div>
+      </header>
+
+      <div className="workspace async-workspace">
+        <aside className="left-sidebar async-sidebar" aria-hidden="true">
+          <div className="incident-card async-incident-card">
+            <span className="async-skeleton async-skeleton--tag" />
+            <span className="async-skeleton async-skeleton--title" />
+            <span className="async-skeleton async-skeleton--copy" />
+            <div className="async-metrics"><span /><span /></div>
+          </div>
+          <div className="sidebar-section async-sidebar-section">
+            <span className="async-skeleton async-skeleton--label" />
+            <span className="async-skeleton async-skeleton--row" />
+            <span className="async-skeleton async-skeleton--row" />
+            <span className="async-skeleton async-skeleton--row" />
+          </div>
+          <div className="sidebar-section async-sidebar-section">
+            <span className="async-skeleton async-skeleton--label" />
+            <span className="async-skeleton async-skeleton--row" />
+            <span className="async-skeleton async-skeleton--row" />
+          </div>
+        </aside>
+
+        <main className="map-region async-map-region">
+          <div className="map-fallback" aria-hidden="true">
+            <i className="fallback-contour fallback-contour--one" />
+            <i className="fallback-contour fallback-contour--two" />
+            <i className="fallback-contour fallback-contour--three" />
+          </div>
+          {!hasError ? <span className="async-progress" aria-hidden="true" /> : null}
+          <span className="sr-only" role="status">
+            {hasError ? 'Live incident data is temporarily unavailable.' : 'Synchronizing live incident data.'}
+          </span>
+          {hasError ? (
+            <div className="async-error" role="alert">
+              <Database size={18} />
+              <div>
+                <strong>Live data is temporarily unavailable</strong>
+                <p>The viewer has no bundled fallback. It will retry automatically, or you can retry now.</p>
+              </div>
+              <button type="button" onClick={onRetry}>Retry now</button>
+            </div>
+          ) : null}
+          <div className="async-timeline" aria-hidden="true">
+            <span className="async-skeleton async-skeleton--label" />
+            <i />
+          </div>
+        </main>
+
+        <aside className="right-inspector async-inspector" aria-hidden="true">
+          <div className="inspector-tabs"><span>Situation</span><span>Air ops</span></div>
+          <div className="async-inspector-body">
+            <span className="async-skeleton async-skeleton--label" />
+            <span className="async-skeleton async-skeleton--clock" />
+            <div className="async-card-grid">
+              {Array.from({ length: 6 }, (_, index) => <span key={index} />)}
+            </div>
+            <span className="async-skeleton async-skeleton--panel" />
+          </div>
+        </aside>
+      </div>
+    </div>
+  )
+}
+
 function App() {
   const [runtime, setRuntime] = useState(null)
   const [databaseError, setDatabaseError] = useState(null)
+  const [retryCount, setRetryCount] = useState(0)
 
   useEffect(() => {
     let cancelled = false
     let pending = false
+    let initialRequest = eagerRuntimeRequest
+    eagerRuntimeRequest = null
 
     async function refreshDatabaseView() {
       if (pending) return
       pending = true
       try {
-        const response = await fetch('/api/data', {
-          cache: 'no-store',
-          headers: { Accept: 'application/json' },
-        })
-        if (!response.ok) throw new Error(`Database endpoint returned ${response.status}`)
-        const nextRuntime = runtimeDataFromResponse(await response.json())
+        const request = initialRequest ?? fetchDatabaseRuntime()
+        initialRequest = null
+        const nextRuntime = await request
         if (!cancelled) {
           setRuntime(nextRuntime)
           setDatabaseError(null)
@@ -1104,19 +1208,13 @@ function App() {
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [])
+  }, [retryCount])
 
   if (!runtime) {
-    return (
-      <main className="database-startup" aria-live="polite">
-        <span className="brand-mark"><Flame size={19} fill="currentColor" /></span>
-        <h1>{databaseError ? 'Data temporarily unavailable' : 'Loading incident database'}</h1>
-        <p>{databaseError
-          ? 'The viewer has no bundled fallback. Reload when the database connection is restored.'
-          : 'Fetching the current five-minute timeline from Postgres…'}</p>
-        {databaseError ? <button type="button" onClick={() => window.location.reload()}>Retry</button> : null}
-      </main>
-    )
+    return <AsyncViewerShell databaseError={databaseError} onRetry={() => {
+      setDatabaseError(null)
+      setRetryCount((count) => count + 1)
+    }} />
   }
 
   return <FireViewer runtime={runtime} databaseError={databaseError} />

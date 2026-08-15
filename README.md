@@ -4,7 +4,7 @@ Five-minute incident viewer for the High Fens wildfire near Drossart. The produc
 
 ## Data architecture
 
-The browser is database-only. It calls `/api/data` immediately and every five minutes with `cache: 'no-store'`; it never contacts a provider and has no bundled JSON fallback. All API routes also emit browser, CDN and Vercel-CDN `no-store` headers.
+The browser is database-only. It paints the viewer shell immediately, starts `/api/data` as the application bundle executes, and hydrates the interface asynchronously. It repeats that read every five minutes with `cache: 'no-store'`; it never contacts a provider and has no bundled JSON fallback. All API routes also emit browser, CDN and Vercel-CDN `no-store` headers.
 
 The production flow is:
 
@@ -63,16 +63,16 @@ The scheduler has five-minute granularity. A database lease makes repeated calls
 
 | Source | Dataset | Provider interval |
 | --- | --- | ---: |
-| adsb.fi + ADSB.lol | Incident aircraft observations | 5 min |
-| Open-Meteo | Grid weather | 5 min |
-| Governor of Liège + BRF | Affected-area reports | 5 min |
-| BE-Alert CAP gateway | Public alerts | 5 min |
-| RMI Mont Rigi WFS | Station weather | 10 min |
-| DWD CDC | Nearby wind stations | 10 min |
-| NASA FIRMS, four sensors | Thermal detections | 15 min |
-| Copernicus EMS | Rapid Mapping activations | 60 min |
-| Copernicus Data Space | Sentinel-2 catalogue | 60 min |
-| Copernicus EFFIS WFS | Daily burned-area geometry | 6 h |
+| adsb.fi + ADSB.lol | Exact receiver observations for the configured incident aircraft inside 10 km | 5 min |
+| Open-Meteo | Hourly model-grid temperature, humidity, wind and gust rows | 5 min |
+| Governor of Liège + BRF | Strictly parsed, timestamped affected-area reports and official incident events | 5 min |
+| BE-Alert CAP gateway | CAP alerts accumulated from the live feed, including records retained after expiry | 5 min |
+| RMI Mont Rigi WFS | Ten-minute station temperature, humidity, precipitation, wind, gust and validation flags | 10 min |
+| DWD CDC | Ten-minute wind observations and quality level from three nearby stations | 10 min |
+| NASA FIRMS, four sensors | Exact VIIRS Suomi-NPP, VIIRS NOAA-20, VIIRS NOAA-21 and MODIS thermal detections | 15 min |
+| Copernicus EMS | Rapid Mapping activation catalogue and any incident match details | 60 min |
+| Copernicus Data Space | Sentinel-2 L2A catalogue metadata; no image pixels are downloaded | 60 min |
+| Copernicus EFFIS WFS | Daily algorithmic VIIRS geometry nearest the incident | 6 h |
 
 FIRMS is checked by every scheduler run, but its provider lease is 15 minutes to conserve the limited NASA MAP_KEY allowance. Each successful poll merges exact detections into retained history instead of replacing the previous window. Configure `FIRMS_MAP_KEY` as a sensitive Vercel production environment variable; the value is never returned to the browser or stored in a dataset.
 
@@ -126,4 +126,6 @@ Do not add a CDN cache in front of `/api/data`, `/api/live-reports`, `/api/live-
 - EFFIS is a daily algorithmic VIIRS geometry, not a field-surveyed operational perimeter or within-day progression.
 - Aircraft markers represent exact receiver observations within the preceding five minutes. Coverage gaps remain gaps; no route, water pickup or drop is inferred.
 - RMI and DWD station values remain separate from the Open-Meteo model. Near-real-time quality-control status is retained.
+- Copernicus EMS and Sentinel-2 are discovery catalogues. No EMS match means no matching activation was found in the current catalogue, not that operational mapping does not exist elsewhere. Sentinel-2 rows are product metadata, not imagery.
+- There is no configured source for a field-confirmed perimeter, fireline progression, suppression-resource dispatch, water pickup/drop events, road closures, evacuation compliance or emergency-service CAD/radio traffic.
 - This viewer is informational, not an emergency service. Follow BE-Alert and local authorities.

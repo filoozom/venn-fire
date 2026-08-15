@@ -1,6 +1,9 @@
 import { chromium } from '@playwright/test'
 
-const testUrl = process.argv[2] || 'http://127.0.0.1:5173'
+const arguments_ = process.argv.slice(2).filter((argument) => argument !== '--')
+const testUrl = arguments_[0] || 'http://127.0.0.1:5173'
+const databaseUrl = arguments_[1] || new URL('/api/data', testUrl).href
+const proxyDatabase = arguments_.length > 1
 const browser = await chromium.launch({ headless: true })
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 1 })
 const errors = []
@@ -9,6 +12,12 @@ page.on('console', (message) => {
   if (message.type() === 'error') errors.push(message.text())
 })
 page.on('pageerror', (error) => errors.push(error.message))
+if (proxyDatabase) {
+  await page.route('**/api/data', async (route) => {
+    const upstream = await route.fetch({ url: databaseUrl })
+    await route.fulfill({ response: upstream })
+  })
+}
 
 await page.goto(testUrl, { waitUntil: 'domcontentloaded' })
 await page.waitForSelector('.timeline-panel')
@@ -44,6 +53,12 @@ mobile.on('console', (message) => {
   if (message.type() === 'error') mobileErrors.push(message.text())
 })
 mobile.on('pageerror', (error) => mobileErrors.push(error.message))
+if (proxyDatabase) {
+  await mobile.route('**/api/data', async (route) => {
+    const upstream = await route.fetch({ url: databaseUrl })
+    await route.fulfill({ response: upstream })
+  })
+}
 await mobile.goto(testUrl, { waitUntil: 'domcontentloaded' })
 await mobile.waitForSelector('.timeline-panel')
 await mobile.waitForTimeout(1800)

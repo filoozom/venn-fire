@@ -1,11 +1,65 @@
 import { chromium } from '@playwright/test'
 
-const testUrl = process.argv.slice(2).find((argument) => argument !== '--') || 'http://127.0.0.1:5173'
+const arguments_ = process.argv.slice(2).filter((argument) => argument !== '--')
+const testUrl = arguments_[0] || 'http://127.0.0.1:5173'
+const databaseUrl = arguments_[1] || new URL('/api/data', testUrl).href
+const proxyDatabase = arguments_.length > 1
+
+async function fetchDatabaseRoute(route) {
+  return proxyDatabase ? route.fetch({ url: databaseUrl }) : route.fetch()
+}
+
 const browser = await chromium.launch({ headless: true })
+
+// The viewer shell must paint while the uncached database response is still in
+// flight. This guards against reintroducing a full-page loading interstitial.
+const shellPage = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
+await shellPage.route('**/api/data', async (route) => {
+  const upstream = await fetchDatabaseRoute(route)
+  await new Promise((resolve) => setTimeout(resolve, 1_500))
+  await route.fulfill({ response: upstream })
+})
+await shellPage.goto(testUrl, { waitUntil: 'domcontentloaded' })
+await shellPage.waitForSelector('.app-shell--hydrating')
+const asyncShell = await shellPage.evaluate(() => ({
+  oldInterstitialCount: document.body.textContent.includes('Loading incident database') ? 1 : 0,
+  workspaceCount: document.querySelectorAll('.async-workspace').length,
+  mapCount: document.querySelectorAll('.async-map-region').length,
+  blockingStartupCount: document.querySelectorAll('.database-startup').length,
+}))
+if (asyncShell.oldInterstitialCount || asyncShell.blockingStartupCount
+  || asyncShell.workspaceCount !== 1 || asyncShell.mapCount !== 1) {
+  throw new Error(`Database hydrate did not render the asynchronous viewer shell: ${JSON.stringify(asyncShell)}`)
+}
+await shellPage.screenshot({ path: '/tmp/fire-async-shell.png', fullPage: true })
+await shellPage.setViewportSize({ width: 390, height: 844 })
+await shellPage.waitForTimeout(300)
+const mobileAsyncShell = await shellPage.evaluate(() => ({
+  viewportWidth: window.innerWidth,
+  bodyWidth: document.body.scrollWidth,
+  workspaceCount: document.querySelectorAll('.async-workspace').length,
+  mapWidth: Math.round(document.querySelector('.async-map-region')?.getBoundingClientRect().width ?? 0),
+  sidebarRight: Math.round(document.querySelector('.async-sidebar')?.getBoundingClientRect().right ?? 0),
+}))
+if (mobileAsyncShell.bodyWidth !== mobileAsyncShell.viewportWidth
+  || mobileAsyncShell.workspaceCount !== 1 || mobileAsyncShell.mapWidth !== mobileAsyncShell.viewportWidth
+  || mobileAsyncShell.sidebarRight > 0) {
+  throw new Error(`Asynchronous viewer shell overflowed on mobile: ${JSON.stringify(mobileAsyncShell)}`)
+}
+await shellPage.screenshot({ path: '/tmp/fire-async-shell-mobile.png', fullPage: true })
+await shellPage.waitForSelector('.timeline-range')
+await shellPage.close()
+
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
 const errors = []
 
 page.on('pageerror', (error) => errors.push(error.message))
+if (proxyDatabase) {
+  await page.route('**/api/data', async (route) => {
+    const upstream = await fetchDatabaseRoute(route)
+    await route.fulfill({ response: upstream })
+  })
+}
 await page.goto(testUrl, { waitUntil: 'domcontentloaded' })
 await page.waitForSelector('.timeline-range')
 
@@ -114,7 +168,7 @@ const livePage = await browser.newPage({ viewport: { width: 1440, height: 1000 }
 const liveErrors = []
 livePage.on('pageerror', (error) => liveErrors.push(error.message))
 await livePage.route('**/api/data', async (route) => {
-  const upstream = await route.fetch()
+  const upstream = await fetchDatabaseRoute(route)
   const payload = await upstream.json()
   payload.generatedAt = '2026-08-15T13:10:00.000Z'
   payload.datasets.reports.payload = {
@@ -152,5 +206,5 @@ if (databaseReportUpdate.logEntries !== 1) {
 if (liveErrors.length) throw new Error(`Live-report browser errors: ${liveErrors.join(' | ')}`)
 if (errors.length) throw new Error(`Browser errors: ${errors.join(' | ')}`)
 
-console.log(JSON.stringify({ states, bundledLatestAreaLogEntries, effisOn14August, effisOn15August, unrelatedTrafficControls, officialSourceLinks, chartBounds, databaseReportUpdate }, null, 2))
+console.log(JSON.stringify({ asyncShell, mobileAsyncShell, states, bundledLatestAreaLogEntries, effisOn14August, effisOn15August, unrelatedTrafficControls, officialSourceLinks, chartBounds, databaseReportUpdate }, null, 2))
 await browser.close()

@@ -3105,35 +3105,303 @@ button.connection-card--upload {
   max-height: 340px;
   overflow-y: auto;
 }
-/* The application intentionally has no bundled data fallback. */
-.database-startup {
-  min-height: 100vh;
+/* The database hydrates asynchronously; this shell paints before its first
+   response and contains no bundled incident values. */
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+.async-data-button {
+  opacity: 0.62;
+  pointer-events: none;
+}
+
+.async-sidebar,
+.async-inspector {
+  overflow: hidden;
+}
+
+.async-incident-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 212px;
+}
+
+.async-skeleton {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  background: #e7ece9;
+  border-radius: 5px;
+}
+
+.async-skeleton::after,
+.async-card-grid > span::after,
+.async-metrics > span::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, 0.7) 48%, transparent 76%);
+  transform: translateX(-100%);
+  animation: asyncShimmer 1.65s ease-in-out infinite;
+  content: "";
+}
+
+.async-incident-card .async-skeleton,
+.async-metrics > span {
+  background: rgba(255, 255, 255, 0.13);
+}
+
+.async-skeleton--tag {
+  width: 104px;
+  height: 16px;
+}
+
+.async-skeleton--title {
+  width: 78%;
+  height: 42px;
+  margin-top: 8px;
+}
+
+.async-skeleton--copy {
+  width: 62%;
+  height: 11px;
+}
+
+.async-metrics {
   display: grid;
-  place-content: center;
-  justify-items: center;
-  gap: 0.8rem;
-  padding: 2rem;
-  color: #f4f0e9;
-  background: #141918;
-  text-align: center;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 10px;
 }
 
-.database-startup h1,
-.database-startup p {
-  margin: 0;
+.async-metrics > span {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  height: 54px;
+  border-radius: 6px;
 }
 
-.database-startup p {
-  max-width: 34rem;
-  color: #aeb9b4;
+.async-sidebar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
 }
 
-.database-startup button {
-  margin-top: 0.5rem;
-  padding: 0.65rem 1rem;
-  border: 1px solid #51615b;
-  border-radius: 0.5rem;
-  color: inherit;
-  background: #25302c;
+.async-skeleton--label {
+  width: 82px;
+  height: 9px;
+}
+
+.async-skeleton--row {
+  width: 100%;
+  height: 38px;
+}
+
+.async-sidebar-section .async-skeleton--row:nth-child(3) {
+  width: 88%;
+}
+
+.async-sidebar-section .async-skeleton--row:nth-child(4) {
+  width: 94%;
+}
+
+.async-map-region .map-fallback {
+  z-index: 0;
+}
+
+.async-progress {
+  position: absolute;
+  z-index: 20;
+  top: 0;
+  left: 0;
+  width: 34%;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, var(--fire), transparent);
+  animation: asyncProgress 1.45s ease-in-out infinite;
+}
+
+.async-timeline {
+  position: absolute;
+  z-index: 10;
+  right: 18px;
+  bottom: 18px;
+  left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  min-height: 106px;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(12px);
+}
+
+.async-timeline > i {
+  position: relative;
+  display: block;
+  height: 5px;
+  margin-top: 12px;
+  background: #d9e1dc;
+  border-radius: 999px;
+}
+
+.async-timeline > i::after {
+  position: absolute;
+  top: 50%;
+  left: 36%;
+  width: 14px;
+  height: 14px;
+  background: var(--forest);
+  border: 3px solid #fff;
+  border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(21, 45, 36, 0.28);
+  transform: translate(-50%, -50%);
+  content: "";
+}
+
+.async-error {
+  position: absolute;
+  z-index: 30;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 13px;
+  width: min(560px, calc(100% - 32px));
+  padding: 14px 15px;
+  color: #273e35;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid #d9e1dc;
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  transform: translate(-50%, -65%);
+  backdrop-filter: blur(12px);
+}
+
+.async-error > svg {
+  color: #b57827;
+}
+
+.async-error strong {
+  display: block;
+  font-size: 13px;
+}
+
+.async-error p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.async-error button {
+  padding: 8px 10px;
+  color: #fff;
+  background: var(--forest);
+  border: 0;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 800;
   cursor: pointer;
+}
+
+.async-inspector .inspector-tabs > span {
+  display: grid;
+  place-items: center;
+  flex: 1;
+  color: #88948f;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.async-inspector-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 22px 17px;
+}
+
+.async-skeleton--clock {
+  width: 46%;
+  height: 34px;
+}
+
+.async-card-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.async-card-grid > span {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  height: 86px;
+  background: #edf1ee;
+  border: 1px solid #e4eae6;
+  border-radius: 7px;
+}
+
+.async-skeleton--panel {
+  width: 100%;
+  height: 138px;
+}
+
+@keyframes asyncShimmer {
+  60%, 100% { transform: translateX(100%); }
+}
+
+@keyframes asyncProgress {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(390%); }
+}
+
+@media (max-width: 740px) {
+  .app-shell--hydrating .incident-heading {
+    justify-content: flex-start;
+  }
+
+  .app-shell--hydrating .incident-location b {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .async-timeline {
+    right: 8px;
+    bottom: 8px;
+    left: 8px;
+    min-height: 88px;
+    padding: 14px;
+  }
+
+  .async-error {
+    grid-template-columns: auto 1fr;
+  }
+
+  .async-error button {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .async-skeleton::after,
+  .async-card-grid > span::after,
+  .async-metrics > span::after,
+  .async-progress {
+    animation: none;
+  }
 }
