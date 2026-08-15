@@ -47,6 +47,7 @@ import {
   dwdWindStations,
   events,
   effisAreaForTimestamp,
+  effisProductIsCarriedForward,
   fireFrames,
   FIVE_MINUTES_MS,
   flights,
@@ -566,7 +567,9 @@ function App() {
   const [syncState, setSyncState] = useState({ status: 'loading', generatedAt: null, weatherOk: false, aircraftOk: false })
   const frame = frames[Math.min(frameIndex, frames.length - 1)]
   const currentEffisArea = effisAreaForTimestamp(frame.timestampMs)
-  const effisCarriedForward = currentEffisArea?.productDate === '2026-08-14'
+  // "Carried forward" means the product predates the day being viewed, not that
+  // it happens to be the 14 August one. On 14 August that product is current.
+  const effisCarriedForward = effisProductIsCarriedForward(currentEffisArea, frame.timestampMs)
     && frame.timestampMs >= Date.parse('2026-08-15T00:00:00+02:00')
   const layerOptions = useMemo(
     () => layerOptionsFor(currentEffisArea, effisCarriedForward, firmsData.sensors, frame),

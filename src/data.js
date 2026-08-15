@@ -2,7 +2,12 @@ import nearbyTrafficSummary from './nearbyTrafficSummary.json'
 import incidentAircraftSnapshot from './incidentAircraftSnapshot.json'
 import montRigiSnapshot from './montRigiObservations.json'
 import dwdWindSnapshot from './dwdWindObservations.json'
-import { effisAreaForTimestamp, effisBurnedArea, effisBurnedAreas } from './effisBurnedArea'
+import {
+  effisAreaForTimestamp,
+  effisBurnedArea,
+  effisBurnedAreas,
+  effisProductIsCarriedForward,
+} from './effisBurnedArea'
 
 const CENTER = [50.54762, 6.05757]
 export const FIVE_MINUTES_MS = 5 * 60 * 1000
@@ -12,7 +17,7 @@ export const AIRCRAFT_PATH_MAX_SPEED_KT = 160
 export const TIMELINE_START_MS = Date.parse('2026-08-14T13:00:00+02:00')
 export const BUNDLED_TIMELINE_END_MS = Date.parse('2026-08-15T11:45:00+02:00')
 
-export { effisAreaForTimestamp, effisBurnedArea, effisBurnedAreas }
+export { effisAreaForTimestamp, effisBurnedArea, effisBurnedAreas, effisProductIsCarriedForward }
 
 // Open-Meteo historical-forecast model values for 50.548 N, 6.061 E,
 // retrieved at 11:30 CEST on 15 August 2026. Entries run from 13:00 CEST on

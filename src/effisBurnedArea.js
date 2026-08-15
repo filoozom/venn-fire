@@ -200,13 +200,44 @@ export const effisBurnedAreas = [effisBurnedArea20260814, effisBurnedArea2026081
 // Retain the original export for code that needs the latest available product.
 export const effisBurnedArea = effisBurnedArea20260815
 
-export function effisAreaForTimestamp(timestampMs) {
-  const localDayBoundaryMs = Date.parse('2026-08-15T00:00:00+02:00')
-  if (timestampMs < localDayBoundaryMs) return effisBurnedArea20260814
+// Belgium is UTC+2 for the whole incident window, and every timestamp in this
+// project is expressed against that offset.
+const LOCAL_UTC_OFFSET_MS = 2 * 60 * 60 * 1000
 
-  // Keep the last available product visible until it is replaced. Hiding the
-  // layer would visually imply that the fire disappeared during the source gap.
-  // Callers label this as a carried-forward 14 August daily product.
-  if (timestampMs < Date.parse(effisBurnedArea20260815.retrievedAt)) return effisBurnedArea20260814
-  return effisBurnedArea20260815
+function localDayStartMs(productDate) {
+  return Date.parse(`${productDate}T00:00:00+02:00`)
+}
+
+function localDateOf(timestampMs) {
+  return new Date(timestampMs + LOCAL_UTC_OFFSET_MS).toISOString().slice(0, 10)
+}
+
+export function effisAreaForTimestamp(timestampMs) {
+  // Each product is EFFIS's daily footprint for its own product date, so it
+  // becomes applicable at the start of that local day and stays visible until
+  // the next product's day begins.
+  //
+  // This must never be gated on retrievedAt. That field records when we fetched
+  // the file, not the period it describes, so gating on it pushed published data
+  // later on the timeline every time the importer ran: the 15 August product
+  // appeared only from 11:33 CEST purely because that is when the import
+  // happened, and a later refresh would have delayed it further.
+  let applicable = null
+  for (const product of effisBurnedAreas) {
+    if (timestampMs >= localDayStartMs(product.productDate)) applicable = product
+  }
+
+  // Before the first product's day, keep the earliest one rather than hiding the
+  // layer. A blank would imply the fire had no footprint at all.
+  return applicable ?? effisBurnedAreas[0]
+}
+
+/**
+ * Whether the displayed product predates the day being viewed, meaning it is the
+ * previous day's footprint held over because no product exists yet for this day.
+ * A product shown on its own date is current, not carried forward.
+ */
+export function effisProductIsCarriedForward(product, timestampMs) {
+  if (!product) return false
+  return product.productDate < localDateOf(timestampMs)
 }

@@ -51,15 +51,22 @@ Object.entries(expected).forEach(([key, value]) => {
   if (normalized !== value) throw new Error(`${key}: expected ${value}, got ${normalized}`)
 })
 
-await selectTime('2026-08-15T11:30:00+02:00')
-const effisBeforeRetrieval = await page.locator('.snapshot-card--effis').innerText()
-await selectTime('2026-08-15T11:35:00+02:00')
-const effisAfterRetrieval = await page.locator('.snapshot-card--effis').innerText()
-if (!effisBeforeRetrieval.includes('501') || !effisBeforeRetrieval.includes('carried forward')) {
-  throw new Error('Last available 14 August EFFIS geometry was not carried across the source gap')
+// Each EFFIS product is gated on its own product date, never on retrievedAt.
+// Our fetch time must not decide when published data appears on the timeline:
+// gating on it made the 15 August product surface only from 11:33 CEST, and any
+// later re-import would have pushed it later still.
+await selectTime('2026-08-14T23:55:00+02:00')
+const effisOn14August = await page.locator('.snapshot-card--effis').innerText()
+await selectTime('2026-08-15T00:05:00+02:00')
+const effisOn15August = await page.locator('.snapshot-card--effis').innerText()
+if (!effisOn14August.includes('501')) {
+  throw new Error('14 August EFFIS geometry was not shown on 14 August')
 }
-if (!effisAfterRetrieval.includes('4,857')) {
-  throw new Error('15 August EFFIS geometry did not appear after its retrieval time')
+if (effisOn14August.includes('carried forward')) {
+  throw new Error('14 August EFFIS geometry was labelled carried forward on its own product date')
+}
+if (!effisOn15August.includes('4,857')) {
+  throw new Error('15 August EFFIS geometry did not appear at the start of 15 August')
 }
 
 const chartBounds = await page.locator('.mini-area-chart path[stroke="#ed754a"]').evaluate((path) => {
@@ -71,5 +78,5 @@ if (chartBounds.y < 0 || chartBounds.y + chartBounds.height > 44.01) {
 }
 if (errors.length) throw new Error(`Browser errors: ${errors.join(' | ')}`)
 
-console.log(JSON.stringify({ states, effisBeforeRetrieval, effisAfterRetrieval, chartBounds }, null, 2))
+console.log(JSON.stringify({ states, effisOn14August, effisOn15August, chartBounds }, null, 2))
 await browser.close()
