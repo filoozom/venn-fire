@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-15T12:51:59.455Z",
+  "generatedAt": "2026-08-15T13:11:59.391Z",
   "source": {
     "name": "BE-Alert public alerts (Belgian CAP gateway)",
     "url": "https://publicalerts.be/CapGateway/#!/?lang=en",
@@ -5115,7 +5115,7 @@
         }
       ],
       "firstRetrievedAt": "2026-08-15T12:50:43.168Z",
-      "lastRetrievedAt": "2026-08-15T12:51:59.455Z",
+      "lastRetrievedAt": "2026-08-15T13:11:59.391Z",
       "identifier": "240e7056-ba24-4f9f-9fb9-625888379c2c",
       "sender": "be-alert@be-alert.be",
       "sentAt": "2026-08-15T14:06:57+02:00",

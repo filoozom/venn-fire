@@ -440,7 +440,7 @@ export const flights = [
   },
 ]
 
-export const events = [
+const narrativeEvents = [
   // No town or village was evacuated. The provincial order cleared the moorland
   // itself, and two hospitality businesses standing in it were evacuated. The
   // commune of Baelen's explicit denial is kept alongside them, because without
@@ -499,14 +499,6 @@ export const events = [
     sourceUrl: 'https://gouverneur.provincedeliege.be/fr/node/7923',
   },
   {
-    frame: frameAt('2026-08-14T16:00:00+02:00'),
-    time: '16:00',
-    title: '~60 ha officially estimated',
-    detail: '600,000 m² affected · Governor of Liège',
-    type: 'area',
-    sourceUrl: 'https://gouverneur.provincedeliege.be/fr/node/7923',
-  },
-  {
     frame: frameAt('2026-08-14T14:29:00+02:00'),
     time: '14:29',
     title: 'Two police helicopters reported',
@@ -552,22 +544,6 @@ export const events = [
     type: 'aircraft',
   },
   {
-    frame: frameAt('2026-08-14T20:00:00+02:00'),
-    time: '20:00',
-    title: '~100 ha officially estimated',
-    detail: 'Affected-area estimate, not a measured perimeter · Governor of Liège',
-    type: 'area',
-    sourceUrl: 'https://gouverneur.provincedeliege.be/fr/node/7923',
-  },
-  {
-    frame: frameAt('2026-08-15T07:00:00+02:00'),
-    time: '07:00',
-    title: '~850 ha officially estimated',
-    detail: '15 Aug official situation update · Governor of Liège',
-    type: 'area',
-    sourceUrl: 'https://gouverneur.provincedeliege.be/fr/node/7923',
-  },
-  {
     frame: frameAt('2026-08-15T07:13:00+02:00'),
     time: '07:13',
     title: 'G10 observations resume',
@@ -598,20 +574,29 @@ export const events = [
   {
     frame: frameAt('2026-08-15T11:28:00+02:00'),
     time: '11:28',
-    title: '>900 ha reported affected',
-    detail: 'Updated local reporting; official 07:00 estimate was ~850 ha · BRF',
-    type: 'area',
-    sourceUrl: 'https://brf.be/regional/2100196/',
-  },
-  {
-    frame: frameAt('2026-08-15T11:28:00+02:00'),
-    time: '11:28',
     title: 'Firefighting helicopters operating',
     detail: 'Operational status reported; no drop coordinates published · BRF',
     type: 'aircraft',
     sourceUrl: 'https://brf.be/regional/2100196/',
   },
 ]
+
+// Area figures are published once, in areaReports, and the incident log derives
+// its entries from them. They used to be written twice -- once for the card and
+// chart, once by hand for the log -- and drifted: the >1,500 ha update reached
+// the card but never the log.
+const areaReportEvents = areaReports.map((report) => ({
+  frame: frameAt(new Date(report.timestampMs).toISOString()),
+  time: localClockFormatter.format(new Date(report.timestampMs)),
+  title: `${report.areaPrefix}${report.reportedHa.toLocaleString('en-GB')} ha reported affected`,
+  detail: `${report.areaLabel} · ${report.source}`,
+  type: 'area',
+  sourceUrl: report.sourceUrl,
+  sourceName: `${report.source}, ${report.areaLabel}`,
+}))
+
+export const events = [...areaReportEvents, ...narrativeEvents]
+
 
 // No hand-drawn reserve polygon is bundled. The OpenStreetMap basemap remains the
 // source for protected-area boundaries.
