@@ -42,6 +42,11 @@ import {
 } from 'lucide-react'
 import MapView from './MapView'
 import {
+  AIRCRAFT_EDGE_GRID_CELL_M,
+  AIRCRAFT_EDGE_TIME_BUCKET_MS,
+  deriveAircraftSupportedEdge,
+} from './aircraftFireEstimate'
+import {
   effisAreaForTimestamp,
   effisProductIsCarriedForward,
   FIVE_MINUTES_MS,
@@ -82,6 +87,7 @@ const FIRMS_LAYER_DEFAULTS = {
 // reported high confidence there. Drawn as a single dissolved boundary rather
 // than a mosaic of pixel rectangles.
 const BEST_ESTIMATE_RULE = '2+ satellites agree and the cell has a high-confidence detection'
+const AIRCRAFT_EDGE_RULE = 'repeated near-core GRZLY direction changes; long reservoir-side and transit legs excluded'
 
 function dwdWindLayerKey(stationId) {
   return `dwdWind:${stationId}`
@@ -758,6 +764,16 @@ function FireViewer({ runtime, databaseError }) {
     [bestEstimateDetections, firmsData.locationReference],
   )
 
+  const aircraftSupportedEdge = useMemo(() => deriveAircraftSupportedEdge({
+    flights: displayFlights,
+    detections: bestEstimateDetections,
+    outlineRings: fireOutlineRings,
+    frameTimestampMs: frame.timestampMs,
+    origin: firmsData.locationReference,
+    gridCellM: AIRCRAFT_EDGE_GRID_CELL_M,
+    timeBucketMs: AIRCRAFT_EDGE_TIME_BUCKET_MS,
+  }), [displayFlights, bestEstimateDetections, fireOutlineRings, frame.timestampMs, firmsData.locationReference])
+
   const visibleFirmsDetections = useMemo(() => firmsDetectionsAtTime.filter((detection) => (
     layers[FIRMS_LAYER_KEYS[detection.sensorKey]]
       && activeConfidenceLevels.includes(detection.confidence.label)
@@ -856,7 +872,7 @@ function FireViewer({ runtime, databaseError }) {
               {/* The best estimate sits beside the reported figure. EFFIS keeps its
                   own card below: at roughly five times the reported area it is an
                   envelope, and giving it headline position overstated the burn. */}
-              <div><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}</strong><span>best estimate ha</span><small>{bestEstimateDetections.length ? `${BEST_ESTIMATE_RULE} · derived` : 'no qualifying detections yet'}</small></div>
+              <div><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}</strong><span>satellite-core ha</span><small>{bestEstimateDetections.length ? `${BEST_ESTIMATE_RULE} · ${aircraftSupportedEdge.candidates.length ? `+ ${aircraftSupportedEdge.candidates.length} aircraft edge cells · ` : ''}derived` : 'no qualifying detections yet'}</small></div>
             </div>
           </div>
 
@@ -870,12 +886,16 @@ function FireViewer({ runtime, databaseError }) {
                   onChange={() => setLayers((value) => ({ ...value, [FIRE_OUTLINE_KEY]: !value[FIRE_OUTLINE_KEY] }))}
                 />
                 <span>Best estimate outline</span>
-                <em>{bestEstimateDetections.length ? `${Math.round(bestEstimateAreaHa).toLocaleString('en-GB')} ha` : '—'}</em>
+                <em>{bestEstimateDetections.length ? `${Math.round(bestEstimateAreaHa).toLocaleString('en-GB')} sat. ha` : '—'}</em>
               </label>
+            </div>
+            <div className="outline-method-key" aria-label="Best estimate outline methods">
+              <span><i className="is-satellite" /> Satellite core</span>
+              {aircraftSupportedEdge.candidates.length ? <span><i className="is-aircraft" /> Aircraft-supported edge</span> : null}
             </div>
             <p className="layer-note">
               {bestEstimateDetections.length
-                ? `One dissolved boundary around detections where ${BEST_ESTIMATE_RULE}. Enclosed unburned ground is left open rather than filled. Derived estimate, not a burned area.`
+                ? `Solid boundary: detections where ${BEST_ESTIMATE_RULE}. ${aircraftSupportedEdge.candidates.length ? `Dashed extension: ${aircraftSupportedEdge.candidates.length} ${aircraftSupportedEdge.callSigns.join(', ')} cells derived from ${AIRCRAFT_EDGE_RULE}, binned at 5 minutes and snapped to the same 50 m grid. ` : ''}The hectare figure remains satellite-only; neither line is a confirmed burned-area perimeter.`
                 : 'No detections meet the best-estimate rule at this time.'}
             </p>
           </div>
@@ -954,6 +974,7 @@ function FireViewer({ runtime, databaseError }) {
             importedTracks={importedTracks}
             firmsDetections={visibleFirmsDetections}
             fireOutlineRings={layers[FIRE_OUTLINE_KEY] ? fireOutlineRings : []}
+            aircraftFireEdge={layers[FIRE_OUTLINE_KEY] ? aircraftSupportedEdge : null}
             mapLabels={runtime.mapLabels}
             protectedArea={runtime.protectedArea}
             officialPerimeter={runtime.officialPerimeter.current}
@@ -1013,7 +1034,7 @@ function FireViewer({ runtime, databaseError }) {
 
               <div className="snapshot-grid">
                 <article className="snapshot-card snapshot-card--fire"><span><Flame size={15} /> REPORTED AREA</span><strong>{reportedAreaText}<small>{frame.reportedHa == null ? '' : 'ha'}</small></strong><p>{frame.areaLabel}</p></article>
-                <article className="snapshot-card snapshot-card--estimate"><span><Flame size={15} /> BEST ESTIMATE</span><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}<small>{bestEstimateDetections.length ? 'ha' : ''}</small></strong><p>{bestEstimateDetections.length ? `${bestEstimateDetections.length} detections · 2+ satellites agree · derived estimate` : 'no qualifying detections yet'}</p></article>
+                <article className="snapshot-card snapshot-card--estimate"><span><Flame size={15} /> BEST ESTIMATE</span><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}<small>{bestEstimateDetections.length ? 'ha' : ''}</small></strong><p>{bestEstimateDetections.length ? `satellite-only area · ${bestEstimateDetections.length} detections · 2+ satellites agree${aircraftSupportedEdge.candidates.length ? ` · ${aircraftSupportedEdge.candidates.length} aircraft edge cells` : ''}` : 'no qualifying detections yet'}</p></article>
                 <article className="snapshot-card snapshot-card--effis"><span><Layers3 size={15} /> EFFIS DAILY GEOMETRY</span><strong>{currentEffisArea ? Math.round(currentEffisArea.areaHa).toLocaleString('en-GB') : '—'}<small>{currentEffisArea ? 'ha' : ''}</small></strong><p>{currentEffisArea ? `${currentEffisArea.productDate}${effisCarriedForward ? ' carried forward until replacement' : ''} · envelope containing fire activity, not burned area` : 'no EFFIS product available at selected time'}</p></article>
                 <article className="snapshot-card"><span><Satellite size={15} /> HOTSPOTS</span><strong>{visibleFirmsDetections.length}<small>px</small></strong><p>shaded by confidence · exact NASA FIRMS detections</p></article>
                 <article className="snapshot-card"><span><Helicopter size={15} /> AIR OPS</span><strong>{activeFlights.length}<small>recent</small></strong><p>{activeFlights.length ? 'fix within previous 5 min' : 'no recent observation'}</p></article>
@@ -1120,6 +1141,7 @@ function FireViewer({ runtime, databaseError }) {
               </div>
 
               <div className="coverage-note"><Radio size={15} /><p><strong>Dots are observations; dashed lines are not flight paths.</strong><span>Five-minute point checks discover verified and GRZLY incident aircraft without extra provider calls; trace reconciliation fills exact ADS-B/MLAT fixes missed between polls. Straight connectors appear only across gaps ≤2 minutes and plausible speed.</span></p></div>
+              <div className="coverage-note"><Flame size={15} /><p><strong>The fire outline uses only repeated near-core GRZLY direction changes.</strong><span>Those evidence points enter on five-minute frames and are snapped to the same 50 m grid. Long reservoir-side and transit legs are excluded; the dashed extension is an inference, not a detected drop or confirmed fire front.</span></p></div>
               <div className="coverage-note"><Info size={15} /><p><strong>Wide-area checks separate this incident from nearby activity.</strong><span>{runtime.incidentAircraftMeta.negativeFindings?.[0]} {runtime.incidentAircraftMeta.negativeFindings?.[1]} The known Aachen/Walheim MLAT artifact is excluded.</span></p></div>
             </div>
           ) : null}

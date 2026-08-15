@@ -138,6 +138,7 @@ export default function MapView({
   importedTracks = [],
   firmsDetections = [],
   fireOutlineRings = [],
+  aircraftFireEdge = null,
   mapLabels = [],
   protectedArea = [],
   officialPerimeter = null,
@@ -214,6 +215,7 @@ export default function MapView({
     const group = overlayRef.current
     if (!group) return
     group.clearLayers()
+    const aircraftEdgeLayers = []
 
     // The Drossart marker was removed: it plotted the place name used in the
     // incident reports, not a fire measurement, and read as an ignition point.
@@ -325,6 +327,60 @@ export default function MapView({
       }).addTo(group)
     }
 
+    // The dashed arc is deliberately separate from the solid satellite core.
+    // It connects repeated fire-side GRZLY direction changes, never the full
+    // reservoir-side route, and it is not included in the hectare figure.
+    if (aircraftFireEdge?.extensionLine?.length >= 3) {
+      const callSigns = aircraftFireEdge.callSigns.map(escapeHtml).join(', ')
+      aircraftEdgeLayers.push(L.polyline(aircraftFireEdge.extensionLine, {
+        color: '#fff2cf',
+        weight: 6,
+        opacity: 0.78,
+        dashArray: '9 7',
+        lineCap: 'round',
+        lineJoin: 'round',
+        interactive: false,
+      }).addTo(group))
+      const edgeLine = L.polyline(aircraftFireEdge.extensionLine, {
+        color: '#ffad45',
+        weight: 3.4,
+        opacity: 0.96,
+        dashArray: '9 7',
+        lineCap: 'round',
+        lineJoin: 'round',
+        className: 'aircraft-fire-edge',
+      })
+        .bindTooltip(
+          `<strong>Aircraft-supported edge hypothesis</strong><br>`
+          + `${aircraftFireEdge.candidates.length} repeated ${callSigns} direction-change cells<br>`
+          + `<small>5-minute evidence frames · ${aircraftFireEdge.gridCellM} m grid · not included in hectares</small><br>`
+          + '<small>Receiver positions do not confirm a water drop or fire perimeter.</small>',
+          { sticky: true },
+        )
+        .addTo(group)
+      aircraftEdgeLayers.push(edgeLine)
+
+      aircraftFireEdge.candidates.forEach((candidate) => {
+        const edgePoint = L.circleMarker(candidate.position, {
+          radius: 3.2,
+          color: '#fff3d7',
+          weight: 1,
+          fillColor: '#ffad45',
+          fillOpacity: 0.92,
+          className: 'aircraft-fire-edge-point',
+        })
+          .bindTooltip(
+            `<strong>${escapeHtml(candidate.callSign)} edge evidence</strong><br>`
+            + `${localObservationTime(candidate.observedAt)} CEST · ${candidate.turnDegrees.toFixed(0)}° direction change<br>`
+            + `${Math.round(candidate.coreDistanceM).toLocaleString('en-GB')} m from the corroborated thermal core<br>`
+            + '<small>Snapped to 50 m grid; operational purpose is not asserted.</small>',
+            { direction: 'top' },
+          )
+          .addTo(group)
+        aircraftEdgeLayers.push(edgePoint)
+      })
+    }
+
     if (layers.aircraft) {
       ;[...flights, ...importedTracks].forEach((flight) => {
         if (flight.observations?.length) {
@@ -376,6 +432,9 @@ export default function MapView({
       })
     }
 
+    // Keep the inferred edge readable when its source aircraft layer is also on.
+    aircraftEdgeLayers.forEach((layer) => layer.bringToFront?.())
+
     if (layers.wind && frame.drossartWind) {
       const windIcon = windMapIcon({
         label: 'GRID',
@@ -422,7 +481,7 @@ export default function MapView({
         }), { direction: 'top', offset: [0, -18] })
         .addTo(group)
     })
-  }, [frameIndex, frame, flights, effisArea, effisCarriedForward, layers, importedTracks, firmsDetections, fireOutlineRings, protectedArea, officialPerimeter])
+  }, [frameIndex, frame, flights, effisArea, effisCarriedForward, layers, importedTracks, firmsDetections, fireOutlineRings, aircraftFireEdge, protectedArea, officialPerimeter])
 
   return (
     <div className="map-surface" aria-label="Interactive fire situation map">

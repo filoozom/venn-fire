@@ -86,6 +86,8 @@ FIRMS is checked by every scheduler run, but its provider lease is 15 minutes to
 
 Aircraft discovery does not add provider calls: the former fixed-hex request is replaced by one point request covering the incident. Exact Mode-S identities already verified for the incident remain accepted even when no callsign is broadcast; a previously unseen aircraft is accepted only when it broadcasts the conservative `GRZLY##` incident callsign pattern inside the radius. Once accepted, its identity is retained in Postgres and included in current- and previous-day trace reconciliation. Other nearby traffic remains archived in the raw provider artifact but is not normalized onto the incident map.
 
+The Best estimate outline has two visibly separate components. Its solid red core remains the 50 m raster union of high-confidence, independently corroborated VIIRS footprints. Its dashed amber extension is derived at each five-minute timeline frame from repeated sharp `GRZLY##` direction changes within 3.5 km of that core, requires nearby support from another five-minute frame, snaps the resulting evidence cells to the same 50 m grid and excludes long reservoir-side/transit route legs. Aircraft evidence never contributes to the hectare figure: receiver data has no payload or drop-state field and cannot establish a burned area or confirmed fire front.
+
 Bütgenbach's Cloudflare policy blocks requests from the Node.js function network. Its official sitemap and article pages are therefore read through `/api/butgenbach-source`, a no-store Vercel Edge function that accepts only short-lived HMAC-signed requests for allow-listed paths on `butgenbach.be`. It is not an open proxy; the Node.js refresh worker still validates, parses and archives every official response in Postgres.
 
 The project is currently on Vercel Hobby, whose native cron frequency is not sufficient for five-minute work. A Vercel Queue message therefore wakes the private consumer at minute 02/07/12/... and schedules the next delayed message before polling providers. Queue delivery is durable and automatically retried. Push delivery is pinned to a deployment; the `refresh-scheduler` database record names the active deployment so an old chain stops after a release. `.github/workflows/refresh.yml` calls the public bootstrap endpoint on deployments and every 15 minutes as a fallback. Push runs wait until the production alias reports their exact commit before taking ownership. A once-daily native Vercel cron provides an additional recovery path allowed by Hobby. Every path activates the current deployment and schedules its next queue wake-up. The endpoint has no user-controlled URL or query target, and Postgres leases enforce the provider limits even if paths fire together.
@@ -104,6 +106,7 @@ Run the deterministic checks with:
 ```bash
 pnpm verify:refresh
 pnpm verify:flight-history
+pnpm verify:aircraft-fire-edge
 pnpm verify:firms-sensors
 pnpm verify:live-reports
 pnpm build
@@ -149,7 +152,7 @@ Do not add a CDN cache in front of `/api/data`, `/api/live-reports`, `/api/live-
 - The five-minute timeline carries the latest sourced value forward; it never interpolates a new measurement.
 - FIRMS pixels are thermal anomalies, not a burned-area perimeter. Independent sensors are never summed or averaged; only `providesArea: true` VIIRS products receive a footprint-union estimate. MODIS and Meteosat never receive hectare figures.
 - EFFIS is a daily algorithmic VIIRS geometry, not a field-surveyed operational perimeter or within-day progression.
-- Aircraft markers represent exact receiver observations within the preceding five minutes. Coverage gaps remain gaps; no route, water pickup or drop is inferred.
+- Aircraft markers represent exact receiver observations within the preceding five minutes. Coverage gaps remain gaps; no route, water pickup or drop is inferred. Repeated near-core `GRZLY##` direction changes may support the separately dashed edge hypothesis, but never a hectare calculation or confirmed perimeter.
 - RMI and DWD station values remain separate from the Open-Meteo model. Near-real-time quality-control status is retained.
 - Copernicus EMS is a discovery catalogue. No EMS match means no matching activation was found in the current catalogue, not that operational mapping does not exist elsewhere. Sentinel-2 records include catalogue metadata and retained public JPEG quicklooks; they are not analysis-ready multispectral bands or a derived burn product.
 - Municipal notices can report closures and evacuation guidance, but no agency feed is currently connected for a field-confirmed perimeter/fireline progression, live DATEX road state, suppression-resource dispatch, water pickup/drop events or aggregate evacuation compliance. Ready adapters remain empty until access or an agency-approved export is supplied. Raw CAD/radio and personal identities are intentionally excluded.

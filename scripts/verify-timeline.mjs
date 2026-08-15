@@ -130,6 +130,21 @@ Object.entries(expected).forEach(([key, value]) => {
   if (normalized !== value) throw new Error(`${key}: expected ${value}, got ${normalized}`)
 })
 
+// A lone manoeuvre must not alter the fire outline. The aircraft-supported edge
+// becomes visible only after a second nearby GRZLY direction change, on the same
+// five-minute timeline used by the rest of the incident.
+await selectTime('2026-08-15T18:55:00+02:00')
+const edgeBeforeRepeat = await page.locator('.outline-method-key').innerText()
+await selectTime('2026-08-15T19:05:00+02:00')
+const edgeAfterRepeat = await page.locator('.outline-method-key').innerText()
+const edgeNoteAfterRepeat = await page.locator('.layer-note').first().innerText()
+if (edgeBeforeRepeat.includes('Aircraft-supported edge')) {
+  throw new Error(`Aircraft edge appeared before repeat support: ${edgeBeforeRepeat}`)
+}
+if (!edgeAfterRepeat.includes('Aircraft-supported edge') || !edgeNoteAfterRepeat.includes('2 GRZLY81 cells')) {
+  throw new Error(`Aircraft edge did not enter on the expected five-minute frame: ${edgeAfterRepeat} / ${edgeNoteAfterRepeat}`)
+}
+
 await selectTime('2026-08-15T14:30:00+02:00')
 const bundledLatestAreaLogEntries = await page.getByText('>1,500 ha reported affected', { exact: true }).count()
 if (bundledLatestAreaLogEntries !== 1) {
@@ -206,5 +221,5 @@ if (databaseReportUpdate.logEntries !== 1) {
 if (liveErrors.length) throw new Error(`Live-report browser errors: ${liveErrors.join(' | ')}`)
 if (errors.length) throw new Error(`Browser errors: ${errors.join(' | ')}`)
 
-console.log(JSON.stringify({ asyncShell, mobileAsyncShell, states, bundledLatestAreaLogEntries, effisOn14August, effisOn15August, unrelatedTrafficControls, officialSourceLinks, chartBounds, databaseReportUpdate }, null, 2))
+console.log(JSON.stringify({ asyncShell, mobileAsyncShell, states, aircraftEdgeTimeline: { edgeBeforeRepeat, edgeAfterRepeat, edgeNoteAfterRepeat }, bundledLatestAreaLogEntries, effisOn14August, effisOn15August, unrelatedTrafficControls, officialSourceLinks, chartBounds, databaseReportUpdate }, null, 2))
 await browser.close()
