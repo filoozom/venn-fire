@@ -27,6 +27,7 @@ The linked serverless Postgres database is addressed through `DATABASE_URL` or `
 - `app_datasets`: latest normalized payload for each dataset.
 - `app_dataset_versions`: immutable, content-addressed history when source content changes. Retrieval timestamps are excluded from the content hash.
 - `source_refresh_runs`: one status record for every claimed source/time bucket, including unchanged polls and errors.
+- `refresh_scheduler_ticks`: one leased status row per deployment/wake-up slot, preventing duplicate queue messages from branching the refresh chain.
 - `source_artifacts`: the migrated compressed raw audit archive. The completed migration contains 147 artifacts representing 23,679,948 original bytes.
 - `flight_import_runs` and `flight_observations`: exact, deduplicated receiver fixes retained for the incident lifetime.
 

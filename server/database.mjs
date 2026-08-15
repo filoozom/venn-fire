@@ -90,6 +90,23 @@ export async function ensureDatabaseSchema(query = databaseQuery()) {
         ON source_refresh_runs (started_at DESC)
       `)
       await query(`
+        CREATE TABLE IF NOT EXISTS refresh_scheduler_ticks (
+          deployment_id text NOT NULL,
+          scheduled_for timestamptz NOT NULL,
+          status text NOT NULL CHECK (status IN ('running', 'ok', 'failed')),
+          message_id text,
+          started_at timestamptz NOT NULL DEFAULT now(),
+          completed_at timestamptz,
+          error text,
+          metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+          PRIMARY KEY (deployment_id, scheduled_for)
+        )
+      `)
+      await query(`
+        CREATE INDEX IF NOT EXISTS refresh_scheduler_ticks_started_at_idx
+        ON refresh_scheduler_ticks (started_at DESC)
+      `)
+      await query(`
         CREATE TABLE IF NOT EXISTS source_artifacts (
           artifact_key text PRIMARY KEY,
           source_key text NOT NULL,
