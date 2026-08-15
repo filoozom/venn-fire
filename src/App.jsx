@@ -216,6 +216,9 @@ function Timeline({ frameIndex, setFrameIndex, playing, setPlaying, playbackRate
       <div className="timeline-foot">
         <span><Radio size={12} /> {visibleEvents.length} verified or referenced updates visible</span>
         <span className="reconstruction-note"><Info size={12} /> Perimeters and aircraft paths are a transparent incident reconstruction until official geometry / track imports are connected.</span>
+        <a className="apyos-credit" href="https://apyos.com" target="_blank" rel="noreferrer">
+          Developed by <strong>Apyos</strong><ExternalLink size={11} />
+        </a>
       </div>
     </section>
   )

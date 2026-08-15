@@ -97,7 +97,7 @@ button {
 
 .brand-block strong {
   font-family: "Arial Narrow", "Helvetica Neue", sans-serif;
-  font-size: 17px;
+  font-size: 19px;
   font-weight: 900;
   letter-spacing: 0.18em;
 }
@@ -105,7 +105,7 @@ button {
 .brand-block small {
   margin-top: 4px;
   color: #72817a;
-  font-size: 8.5px;
+  font-size: 10.5px;
   font-weight: 800;
   letter-spacing: 0.24em;
 }
@@ -124,7 +124,7 @@ button {
   gap: 8px;
   min-width: 0;
   color: #78867f;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.1em;
   white-space: nowrap;
@@ -142,7 +142,7 @@ button {
 .incident-location b {
   overflow: hidden;
   color: var(--ink);
-  font-size: 12px;
+  font-size: 13px;
   text-overflow: ellipsis;
 }
 
@@ -155,7 +155,7 @@ button {
   background: #fff6e8;
   border: 1px solid #f0ddbb;
   border-radius: 6px;
-  font-size: 8.5px;
+  font-size: 10.5px;
   font-weight: 900;
   letter-spacing: 0.11em;
 }
@@ -192,13 +192,13 @@ button {
 
 .updated-state small {
   color: #8b9792;
-  font-size: 7.5px;
+  font-size: 9.5px;
   font-weight: 800;
   letter-spacing: 0.12em;
 }
 
 .updated-state strong {
-  font-size: 10px;
+  font-size: 11.5px;
   font-weight: 750;
 }
 
@@ -211,7 +211,7 @@ button {
   background: var(--forest);
   border: 0;
   border-radius: 7px;
-  font-size: 10px;
+  font-size: 11.5px;
   font-weight: 750;
   cursor: pointer;
   transition: transform 160ms ease, background 160ms ease;
@@ -280,7 +280,7 @@ button {
   align-items: center;
   gap: 7px;
   color: #ffd4bd;
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 900;
   letter-spacing: 0.13em;
 }
@@ -306,7 +306,7 @@ button {
 .incident-card h1 {
   margin: 14px 0 5px;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 27px;
+  font-size: 30px;
   font-weight: 500;
   line-height: 1.05;
   letter-spacing: -0.035em;
@@ -315,7 +315,7 @@ button {
 .incident-card > p {
   margin: 0;
   color: rgba(255, 255, 255, 0.56);
-  font-size: 10px;
+  font-size: 11.5px;
 }
 
 .incident-metrics {
@@ -336,20 +336,20 @@ button {
 
 .incident-metrics strong {
   color: #fff4eb;
-  font-size: 17px;
+  font-size: 19px;
   font-weight: 750;
 }
 
 .incident-metrics span {
   margin-top: 1px;
   color: rgba(255, 255, 255, 0.65);
-  font-size: 9px;
+  font-size: 10.5px;
 }
 
 .incident-metrics small {
   margin-top: 5px;
   color: #ef9d72;
-  font-size: 7.5px;
+  font-size: 9.5px;
   font-weight: 800;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -369,7 +369,7 @@ button {
 
 .section-heading > span {
   color: #7f8c86;
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 900;
   letter-spacing: 0.15em;
 }
@@ -377,7 +377,7 @@ button {
 .section-heading button,
 .section-heading > small {
   color: #82908a;
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 700;
 }
 
@@ -433,7 +433,7 @@ button {
 }
 
 .layer-copy strong {
-  font-size: 10px;
+  font-size: 11.5px;
   font-weight: 700;
 }
 
@@ -441,7 +441,7 @@ button {
   margin-top: 2px;
   overflow: hidden;
   color: #8a9691;
-  font-size: 8px;
+  font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -505,13 +505,13 @@ button {
 }
 
 .source-health-row strong {
-  font-size: 9.5px;
+  font-size: 11px;
 }
 
 .source-health-row small {
   margin-top: 2px;
   color: #8b9792;
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .source-monogram {
@@ -520,7 +520,7 @@ button {
   width: 27px;
   height: 27px;
   border-radius: 7px;
-  font-size: 6.5px;
+  font-size: 9px;
   font-weight: 900;
   letter-spacing: 0.03em;
 }
@@ -580,12 +580,12 @@ button {
 }
 
 .emergency-note strong {
-  font-size: 8.5px;
+  font-size: 10.5px;
 }
 
 .emergency-note span {
   color: #9b8769;
-  font-size: 7.5px;
+  font-size: 9.5px;
   line-height: 1.35;
 }
 
@@ -657,7 +657,7 @@ button {
   color: #65736d !important;
   background: rgba(255, 255, 255, 0.76) !important;
   border-radius: 4px;
-  font-size: 7px !important;
+  font-size: 9px !important;
   backdrop-filter: blur(6px);
 }
 
@@ -703,7 +703,7 @@ button {
   background: transparent;
   border: 0;
   border-radius: 6px;
-  font-size: 8.5px;
+  font-size: 10.5px;
   font-weight: 750;
   cursor: pointer;
 }
@@ -727,7 +727,7 @@ button {
   background: rgba(255, 255, 255, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.78);
   border-radius: 8px;
-  font-size: 8.5px;
+  font-size: 10.5px;
 }
 
 .map-date-chip svg {
@@ -738,7 +738,7 @@ button {
   padding-left: 8px;
   color: #203a31;
   border-left: 1px solid #dce2de;
-  font-size: 9.5px;
+  font-size: 11px;
 }
 
 .mobile-layer-button {
@@ -750,7 +750,7 @@ button {
   background: rgba(255, 255, 255, 0.92);
   border: 0;
   border-radius: 8px;
-  font-size: 9px;
+  font-size: 10.5px;
   font-weight: 700;
 }
 
@@ -788,12 +788,12 @@ button {
 }
 
 .map-warning p strong {
-  font-size: 8.5px;
+  font-size: 10.5px;
 }
 
 .map-warning p span {
   color: #927d61;
-  font-size: 7.5px;
+  font-size: 9.5px;
 }
 
 .map-warning a {
@@ -801,7 +801,7 @@ button {
   align-items: center;
   gap: 4px;
   color: #896229;
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 800;
   text-decoration: none;
   white-space: nowrap;
@@ -853,7 +853,7 @@ button {
   align-items: flex-end;
   gap: 10px;
   color: #334b42;
-  font-size: 7px;
+  font-size: 9px;
   text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8);
 }
 
@@ -874,7 +874,7 @@ button {
 
 .map-scale-card small {
   color: #64756e;
-  font-size: 7px;
+  font-size: 9px;
 }
 
 /* Leaflet overlays */
@@ -888,7 +888,7 @@ button {
 .map-place-label span {
   display: inline-block;
   color: #203d32;
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 750;
   letter-spacing: 0.025em;
   white-space: nowrap;
@@ -896,19 +896,19 @@ button {
 }
 
 .map-place-label--city span {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 850;
 }
 
 .map-place-label--poi span {
   color: #486058;
-  font-size: 7px;
+  font-size: 9px;
   font-style: italic;
 }
 
 .map-place-label--water span {
   color: #317594;
-  font-size: 7px;
+  font-size: 9px;
 }
 
 .border-label {
@@ -922,7 +922,7 @@ button {
 .border-label span {
   display: inline-block;
   color: #7f887d;
-  font-size: 6px;
+  font-size: 8.5px;
   font-weight: 850;
   letter-spacing: 0.2em;
   transform: rotate(-78deg);
@@ -972,20 +972,20 @@ button {
 
 .fire-area-marker span {
   color: #f6b493;
-  font-size: 6px;
+  font-size: 8.5px;
   font-weight: 900;
   letter-spacing: 0.12em;
 }
 
 .fire-area-marker strong {
   margin-top: 1px;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .fire-area-marker small {
   margin-top: 2px;
   color: rgba(255, 255, 255, 0.66);
-  font-size: 6.5px;
+  font-size: 9px;
 }
 
 .aircraft-map-marker {
@@ -1105,16 +1105,16 @@ button {
 
 .wind-map-card b {
   color: #8fd7c7;
-  font-size: 7px;
+  font-size: 9px;
 }
 
 .wind-map-card strong {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .wind-map-card small {
   color: rgba(255, 255, 255, 0.65);
-  font-size: 6.5px;
+  font-size: 9px;
 }
 
 .leaflet-tooltip {
@@ -1124,13 +1124,13 @@ button {
   border: 1px solid rgba(217, 225, 220, 0.9) !important;
   border-radius: 6px !important;
   box-shadow: 0 5px 16px rgba(28, 50, 41, 0.16) !important;
-  font-size: 8px !important;
+  font-size: 10px !important;
   line-height: 1.4 !important;
   backdrop-filter: blur(8px);
 }
 
 .leaflet-tooltip strong {
-  font-size: 8.5px;
+  font-size: 10.5px;
 }
 
 .leaflet-tooltip small {
@@ -1154,20 +1154,20 @@ button {
 
 .map-popup .eyebrow {
   color: #b96141;
-  font-size: 6.5px;
+  font-size: 9px;
   font-weight: 900;
   letter-spacing: 0.12em;
 }
 
 .map-popup strong {
   margin-top: 3px;
-  font-size: 15px;
+  font-size: 17px;
 }
 
 .map-popup small {
   margin-top: 2px;
   color: #77857f;
-  font-size: 8px;
+  font-size: 10px;
 }
 
 /* Timeline */
@@ -1200,13 +1200,13 @@ button {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .timeline-title > span {
   margin-right: 3px;
   color: #6e7d77;
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 900;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1214,7 +1214,7 @@ button {
 
 .timeline-title strong {
   color: #3c5249;
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .timeline-title i {
@@ -1228,7 +1228,7 @@ button {
   align-items: center;
   gap: 11px;
   color: #79867f;
-  font-size: 7px;
+  font-size: 9px;
 }
 
 .timeline-legend span {
@@ -1306,7 +1306,7 @@ button {
   color: #36584c;
   background: #edf2ef;
   border-radius: 6px;
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 850;
 }
 
@@ -1421,7 +1421,7 @@ button {
   display: flex;
   justify-content: space-between;
   color: #87938e;
-  font-size: 6.5px;
+  font-size: 9px;
 }
 
 .timeline-now {
@@ -1452,14 +1452,14 @@ button {
 }
 
 .timeline-now strong {
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1;
 }
 
 .timeline-now small {
   margin-top: 2px;
   color: rgba(255, 255, 255, 0.7);
-  font-size: 5px;
+  font-size: 8px;
   font-weight: 800;
   letter-spacing: 0.08em;
 }
@@ -1472,7 +1472,7 @@ button {
   padding: 5px 2px 0;
   border-top: 1px solid #edf0ee;
   color: #85918c;
-  font-size: 6.5px;
+  font-size: 9px;
 }
 
 .timeline-foot span {
@@ -1485,6 +1485,33 @@ button {
   color: #587167;
   font-weight: 700;
   white-space: nowrap;
+}
+
+.apyos-credit {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  color: #526a61;
+  font-weight: 650;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 150ms ease;
+}
+
+.apyos-credit strong {
+  color: var(--forest);
+  font-weight: 850;
+}
+
+.apyos-credit:hover,
+.apyos-credit:focus-visible {
+  color: var(--fire-deep);
+}
+
+.apyos-credit:hover strong,
+.apyos-credit:focus-visible strong {
+  color: inherit;
 }
 
 .reconstruction-note {
@@ -1511,7 +1538,7 @@ button {
   color: #7c8984;
   background: transparent;
   border: 0;
-  font-size: 9px;
+  font-size: 10.5px;
   font-weight: 750;
   cursor: pointer;
 }
@@ -1540,7 +1567,7 @@ button {
   color: #527166;
   background: #edf2ef;
   border-radius: 8px;
-  font-size: 7px;
+  font-size: 9px;
 }
 
 .inspector-scroll {
@@ -1560,7 +1587,7 @@ button {
 
 .kicker {
   color: #8b9792;
-  font-size: 7.5px;
+  font-size: 9.5px;
   font-weight: 900;
   letter-spacing: 0.15em;
 }
@@ -1569,7 +1596,7 @@ button {
   grid-row: span 2;
   color: #1d382e;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 25px;
+  font-size: 28px;
   font-weight: 500;
 }
 
@@ -1577,7 +1604,7 @@ button {
   margin-left: 4px;
   color: #8c9893;
   font-family: Inter, sans-serif;
-  font-size: 7px;
+  font-size: 9px;
   font-weight: 850;
   letter-spacing: 0.1em;
 }
@@ -1585,7 +1612,7 @@ button {
 .snapshot-head p {
   margin: 5px 0 0;
   color: #5c6d66;
-  font-size: 9px;
+  font-size: 10.5px;
 }
 
 .snapshot-grid {
@@ -1609,7 +1636,7 @@ button {
   align-items: center;
   gap: 5px;
   color: #7b8983;
-  font-size: 6.7px;
+  font-size: 9px;
   font-weight: 850;
   letter-spacing: 0.08em;
 }
@@ -1624,13 +1651,13 @@ button {
   gap: 3px;
   margin-top: 8px;
   color: #1d372e;
-  font-size: 20px;
+  font-size: 22px;
   letter-spacing: -0.035em;
 }
 
 .snapshot-card > strong small {
   color: #63746d;
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0;
 }
@@ -1638,7 +1665,7 @@ button {
 .snapshot-card p {
   margin: 2px 0 0;
   color: #8b9792;
-  font-size: 7.5px;
+  font-size: 9.5px;
 }
 
 .snapshot-card--fire {
@@ -1717,12 +1744,12 @@ button {
 
 .wind-hero > div strong {
   color: #fff;
-  font-size: 17px;
+  font-size: 19px;
 }
 
 .wind-hero > div span {
   color: rgba(255, 255, 255, 0.5);
-  font-size: 7.5px;
+  font-size: 9.5px;
 }
 
 .wind-hero > p {
@@ -1736,18 +1763,18 @@ button {
 
 .wind-hero > p strong {
   color: #e9fff9;
-  font-size: 18px;
+  font-size: 20px;
 }
 
 .wind-hero > p span {
   color: rgba(255, 255, 255, 0.65);
-  font-size: 7px;
+  font-size: 9px;
 }
 
 .wind-hero > p small {
   grid-column: span 2;
   color: rgba(255, 255, 255, 0.48);
-  font-size: 7px;
+  font-size: 9px;
 }
 
 .condition-row {
@@ -1763,7 +1790,7 @@ button {
   gap: 4px;
   padding: 9px 6px 1px;
   color: rgba(255, 255, 255, 0.58);
-  font-size: 7px;
+  font-size: 9px;
 }
 
 .condition-row span + span {
@@ -1776,7 +1803,7 @@ button {
 
 .condition-row strong {
   color: #fff;
-  font-size: 9px;
+  font-size: 10.5px;
 }
 
 .event-log {
@@ -1865,7 +1892,7 @@ button {
 }
 
 .event-row strong {
-  font-size: 8.5px;
+  font-size: 10.5px;
 }
 
 .event-row.is-latest strong {
@@ -1875,14 +1902,14 @@ button {
 .event-row small {
   margin-top: 3px;
   color: #89958f;
-  font-size: 7.5px;
+  font-size: 9.5px;
 }
 
 .event-row time {
   align-self: start;
   margin-top: 8px;
   color: #8b9792;
-  font-size: 7px;
+  font-size: 9px;
   font-weight: 750;
 }
 
@@ -1893,7 +1920,7 @@ button {
 .air-ops-summary h2 {
   margin: 6px 0 5px;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 23px;
+  font-size: 26px;
   font-weight: 500;
   letter-spacing: -0.03em;
 }
@@ -1901,7 +1928,7 @@ button {
 .air-ops-summary p {
   margin: 0;
   color: #7c8983;
-  font-size: 8.5px;
+  font-size: 10.5px;
   line-height: 1.5;
 }
 
@@ -1915,7 +1942,7 @@ button {
   background: #edf4f0;
   border: 1px solid #dce7e0;
   border-radius: 6px;
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 750;
   cursor: pointer;
 }
@@ -1966,13 +1993,13 @@ button {
 }
 
 .flight-head strong {
-  font-size: 9.5px;
+  font-size: 11px;
 }
 
 .flight-head small {
   margin-top: 2px;
   color: #7f8c86;
-  font-size: 7.5px;
+  font-size: 9.5px;
 }
 
 .flight-state {
@@ -1980,7 +2007,7 @@ button {
   color: #89958f;
   background: #f1f4f2;
   border-radius: 4px;
-  font-size: 6px;
+  font-size: 8.5px;
   font-weight: 900;
   letter-spacing: 0.08em;
 }
@@ -2007,13 +2034,13 @@ button {
 
 .flight-stats small {
   color: #9aa49f;
-  font-size: 5.8px;
+  font-size: 8.5px;
   font-weight: 850;
   letter-spacing: 0.08em;
 }
 
 .flight-stats strong {
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .flight-provenance {
@@ -2022,7 +2049,7 @@ button {
   gap: 4px;
   margin-top: 9px;
   color: #937241;
-  font-size: 6.8px;
+  font-size: 9px;
 }
 
 .coverage-note {
@@ -2049,12 +2076,12 @@ button {
 }
 
 .coverage-note strong {
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .coverage-note span {
   color: #8c8274;
-  font-size: 7px;
+  font-size: 9px;
   line-height: 1.4;
 }
 
@@ -2109,7 +2136,7 @@ button {
 .modal-header h2 {
   margin: 0;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 25px;
+  font-size: 28px;
   font-weight: 500;
   letter-spacing: -0.03em;
 }
@@ -2144,7 +2171,7 @@ button {
   color: #7b8983;
   background: transparent;
   border: 0;
-  font-size: 9px;
+  font-size: 10.5px;
   font-weight: 750;
   cursor: pointer;
 }
@@ -2213,7 +2240,7 @@ button {
 }
 
 .connection-title strong {
-  font-size: 10px;
+  font-size: 11.5px;
 }
 
 .status-pill {
@@ -2224,7 +2251,7 @@ button {
   color: #687971;
   background: #edf1ef;
   border-radius: 5px;
-  font-size: 6.5px;
+  font-size: 9px;
   font-style: normal;
   font-weight: 850;
   letter-spacing: 0.04em;
@@ -2245,7 +2272,7 @@ button {
 .connection-copy p {
   margin: 5px 0 0;
   color: #75837d;
-  font-size: 8.5px;
+  font-size: 10.5px;
   line-height: 1.5;
 }
 
@@ -2265,7 +2292,7 @@ button {
   border-radius: 7px 0 0 7px;
   outline: none;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 8.5px;
+  font-size: 10.5px;
 }
 
 .key-input input:focus {
@@ -2291,7 +2318,7 @@ button {
   background: #234f3f;
   border: 0;
   border-radius: 0 7px 7px 0;
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 750;
   cursor: pointer;
 }
@@ -2308,7 +2335,7 @@ button {
   align-self: flex-start;
   margin-top: 7px;
   color: #396b58;
-  font-size: 7.5px;
+  font-size: 9.5px;
   font-weight: 700;
   text-decoration: none;
 }
@@ -2338,14 +2365,14 @@ button.connection-card--upload {
   align-self: flex-start;
   margin-top: 8px;
   color: #2f6a54;
-  font-size: 7.5px;
+  font-size: 9.5px;
   font-weight: 800;
 }
 
 .connection-meta {
   margin-top: 9px;
   color: #567b6c;
-  font-size: 7px;
+  font-size: 9px;
   font-weight: 750;
 }
 
@@ -2359,7 +2386,7 @@ button.connection-card--upload {
   background: #f4f6f5;
   border: 1px solid #e0e5e2;
   border-radius: 7px;
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.4;
 }
 
@@ -2401,12 +2428,12 @@ button.connection-card--upload {
 
 .method-callout p {
   margin: 0;
-  font-size: 8.5px;
+  font-size: 10.5px;
   line-height: 1.5;
 }
 
 .method-callout strong {
-  font-size: 9px;
+  font-size: 10.5px;
 }
 
 .method-steps {
@@ -2433,7 +2460,7 @@ button.connection-card--upload {
   color: #477665;
   background: #eaf2ee;
   border-radius: 50%;
-  font-size: 7px;
+  font-size: 9px;
   font-weight: 850;
 }
 
@@ -2444,13 +2471,13 @@ button.connection-card--upload {
 }
 
 .method-steps strong {
-  font-size: 9px;
+  font-size: 10.5px;
 }
 
 .method-steps p {
   margin: 0;
   color: #7a8782;
-  font-size: 7.5px;
+  font-size: 9.5px;
   line-height: 1.45;
 }
 
@@ -2463,7 +2490,7 @@ button.connection-card--upload {
   background: #fff8eb;
   border: 1px solid #efdfbf;
   border-radius: 8px;
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.45;
 }
 
@@ -2503,17 +2530,17 @@ button.connection-card--upload {
 }
 
 .directory-row strong {
-  font-size: 9.5px;
+  font-size: 11px;
 }
 
 .directory-row small {
   color: #7e8b85;
-  font-size: 7.5px;
+  font-size: 9.5px;
 }
 
 .directory-row em {
   color: #7c8a84;
-  font-size: 7px;
+  font-size: 9px;
   font-style: normal;
 }
 
@@ -2536,7 +2563,7 @@ button.connection-card--upload {
 
 .source-footnote p {
   margin: 0;
-  font-size: 7.5px;
+  font-size: 9.5px;
   line-height: 1.5;
 }
 
@@ -2654,11 +2681,11 @@ button.connection-card--upload {
   }
 
   .brand-block strong {
-    font-size: 14px;
+    font-size: 16px;
   }
 
   .brand-block small {
-    font-size: 6.5px;
+    font-size: 9px;
   }
 
   .incident-heading {
@@ -2666,7 +2693,7 @@ button.connection-card--upload {
   }
 
   .incident-location b {
-    font-size: 9px;
+    font-size: 10.5px;
   }
 
   .header-actions {
