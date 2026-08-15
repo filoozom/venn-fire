@@ -6,6 +6,7 @@ export const LIVE_REPORT_SOURCES = [
     name: 'Governor of Liège',
     url: 'https://gouverneur.provincedeliege.be/fr/node/7923',
     parser: parseGovernorAreaReports,
+    eventParser: parseGovernorSituationEvents,
   },
   {
     id: 'brf',
@@ -76,6 +77,69 @@ function clockLabel(timestampMs) {
   }).format(new Date(timestampMs))
 }
 
+const GOVERNOR_SOURCE_URL = 'https://gouverneur.provincedeliege.be/fr/node/7923'
+
+const PREVENTIVE_EVACUATION_AREAS = [
+  {
+    municipality: 'Waimes',
+    streets: [
+      "Rue d'Averscheidt",
+      'Rue Haute',
+      'Rue du Bouvier',
+      'Rue de Bosfagne',
+      'Rue coin du bois',
+      'Rue Sainte Apolline',
+      'Chemin des Champs',
+      'Rue de la Roer',
+      'Voie des Hôtes',
+      'Rue Pré Louis',
+      'Rue Clair Chêne',
+      'Rue des Tourbières',
+      'Rue des Tchenas',
+      'Rue de la Station',
+      'Am Rurbusch',
+      'Rue du camp',
+      'À la croix Marquet',
+    ],
+  },
+  {
+    municipality: 'Bütgenbach',
+    streets: [
+      'Rurstraße',
+      'Leykaul',
+      'Am Breitenbach',
+      'Schieferweg',
+      'Auf dem Hau',
+      'Rickshelderweg',
+      'Am Schwarzbach',
+    ],
+  },
+]
+
+function governorSections(html) {
+  const text = htmlToSourceText(html)
+  const headingPattern = /(?:POINT DE SITUATION|D[ÉE]CLENCHEMENT PHASE PROVINCIALE)\s+(\d{1,2})\/(\d{1,2})\/(\d{4})\s*-\s*(\d{1,2})\s*[hH:]\s*(\d{2})?/gu
+  const headings = [...text.matchAll(headingPattern)]
+  return headings.flatMap((heading, index) => {
+    const timestampMs = brusselsTimestamp(heading[1], heading[2], heading[3], heading[4], heading[5])
+    if (!Number.isFinite(timestampMs)) return []
+    return [{
+      timestampMs,
+      text: text.slice(heading.index, headings[index + 1]?.index ?? text.length),
+    }]
+  })
+}
+
+function comparableSourceText(value) {
+  return String(value)
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/ß/gu, 'ss')
+    .replace(/[^a-z0-9]+/giu, ' ')
+    .trim()
+    .toLocaleLowerCase('fr')
+}
+
 function numericAreaFromFrenchSection(section) {
   const hectares = section.match(/(?:(plus de|au moins|pr[eè]s de|environ|approximativement|quelque|estim[ée]e? [àa])\s+)?(\d[\d.\s\u00a0\u202f]*(?:,\d+)?)\s*hectares?\b/iu)
   if (hectares) {
@@ -100,15 +164,8 @@ function numericAreaFromFrenchSection(section) {
 }
 
 export function parseGovernorAreaReports(html) {
-  const text = htmlToSourceText(html)
-  const headingPattern = /(?:POINT DE SITUATION|D[ÉE]CLENCHEMENT PHASE PROVINCIALE)\s+(\d{1,2})\/(\d{1,2})\/(\d{4})\s*-\s*(\d{1,2})\s*[hH:]\s*(\d{2})?/gu
-  const headings = [...text.matchAll(headingPattern)]
-
-  return headings.flatMap((heading, index) => {
-    const timestampMs = brusselsTimestamp(heading[1], heading[2], heading[3], heading[4], heading[5])
-    if (!Number.isFinite(timestampMs)) return []
-    const sectionEnd = headings[index + 1]?.index ?? text.length
-    const area = numericAreaFromFrenchSection(text.slice(heading.index, sectionEnd))
+  return governorSections(html).flatMap(({ timestampMs, text }) => {
+    const area = numericAreaFromFrenchSection(text)
     if (!area) return []
     const time = clockLabel(timestampMs)
     return [{
@@ -117,11 +174,49 @@ export function parseGovernorAreaReports(html) {
       ...area,
       areaLabel: `official estimate at ${time} CEST`,
       source: 'Governor of Liège',
-      sourceUrl: 'https://gouverneur.provincedeliege.be/fr/node/7923',
+      sourceUrl: GOVERNOR_SOURCE_URL,
       sourceKind: 'official',
       timestampBasis: 'dated situation-heading on source page',
     }]
   }).sort((left, right) => left.timestampMs - right.timestampMs)
+}
+
+export function parseGovernorSituationEvents(html) {
+  const expectedTimestampMs = Date.parse('2026-08-15T16:00:00+02:00')
+  return governorSections(html).flatMap(({ timestampMs, text }) => {
+    if (timestampMs !== expectedTimestampMs) return []
+    const comparable = comparableSourceText(text)
+    const requiredPhrases = [
+      'ordre d evacuation preventif',
+      'vents changeants',
+      'importante fumee',
+      'centre sportif de malmedy',
+      'avenue du pont de la warche 1',
+    ]
+    const requiredStreets = PREVENTIVE_EVACUATION_AREAS
+      .flatMap((area) => area.streets)
+      .map(comparableSourceText)
+    if (![...requiredPhrases, ...requiredStreets].every((phrase) => comparable.includes(phrase))) return []
+
+    return [{
+      id: 'governor-liege-2026-08-15-1600-preventive-evacuation',
+      timestampMs,
+      observedAt: new Date(timestampMs).toISOString(),
+      type: 'evacuation',
+      title: 'Preventive evacuation ordered for named streets in Waimes and Bütgenbach',
+      detail: 'Changing winds and heavy smoke. Residents of the listed streets are asked to leave their homes as a precaution and to go to the Centre sportif de Malmedy, Avenue du Pont de la Warche 1, 4960 Malmedy. Residents of other streets should stay indoors with doors and windows closed. Tourists staying in the area are asked to go home.',
+      affectedAreas: PREVENTIVE_EVACUATION_AREAS,
+      scopeKind: 'named-streets',
+      receptionCentre: {
+        name: 'Centre sportif de Malmedy',
+        address: 'Avenue du Pont de la Warche 1, 4960 Malmedy',
+      },
+      sourceUrl: GOVERNOR_SOURCE_URL,
+      sourceName: 'Governor of Liège, situation update 15 Aug 16:00 CEST',
+      sourceKind: 'official',
+      timestampBasis: 'dated situation-heading on source page',
+    }]
+  })
 }
 
 function attributeValue(tag, attribute) {
@@ -206,26 +301,41 @@ export async function loadAreaReports(
   const results = await Promise.allSettled(sources.map(async (source) => {
     const html = await fetchHtml(source)
     const areaReports = source.parser(html)
-    if (!areaReports.length) throw new Error('No timestamped area report matched the strict parser')
-    return { source, areaReports }
+    const events = source.eventParser?.(html) ?? []
+    if (!areaReports.length && !events.length) {
+      throw new Error('No timestamped report or event matched the strict parser')
+    }
+    return { source, areaReports, events }
   }))
 
   const sourceStatus = results.map((result, index) => {
     const source = sources[index]
     return result.status === 'fulfilled'
-      ? { id: source.id, name: source.name, url: source.url, ok: true, reportCount: result.value.areaReports.length }
-      : { id: source.id, name: source.name, url: source.url, ok: false, reportCount: 0 }
+      ? {
+          id: source.id,
+          name: source.name,
+          url: source.url,
+          ok: true,
+          reportCount: result.value.areaReports.length,
+          eventCount: result.value.events.length,
+        }
+      : { id: source.id, name: source.name, url: source.url, ok: false, reportCount: 0, eventCount: 0 }
   })
   const areaReports = results.flatMap((result) => (
     result.status === 'fulfilled' ? result.value.areaReports : []
   ))
   const reportsBySourceAndTime = new Map()
   areaReports.forEach((report) => reportsBySourceAndTime.set(`${report.source}|${report.timestampMs}`, report))
+  const eventsById = new Map()
+  results.flatMap((result) => (
+    result.status === 'fulfilled' ? result.value.events : []
+  )).forEach((event) => eventsById.set(event.id, event))
 
   return {
     ok: sourceStatus.some((source) => source.ok),
     complete: sourceStatus.every((source) => source.ok),
     areaReports: [...reportsBySourceAndTime.values()].sort((left, right) => left.timestampMs - right.timestampMs),
+    events: [...eventsById.values()].sort((left, right) => left.timestampMs - right.timestampMs),
     sources: sourceStatus,
   }
 }
@@ -289,7 +399,7 @@ export function buildLiveReportsResponse({
           databaseRefreshedAt: reportsDataset.refreshedAt,
           databaseSourceUpdatedAt: reportsDataset.sourceUpdatedAt,
         }
-      : { ok: false, complete: false, areaReports: [], sources: [] },
+      : { ok: false, complete: false, areaReports: [], events: [], sources: [] },
     publicAlerts: {
       ...publicAlertsPayload,
       alerts: matchedAlerts,
@@ -332,7 +442,7 @@ export default async function handler(request, response) {
       schemaVersion: 1,
       ok: false,
       generatedAt: new Date().toISOString(),
-      reports: { ok: false, complete: false, areaReports: [], sources: [] },
+      reports: { ok: false, complete: false, areaReports: [], events: [], sources: [] },
       publicAlerts: { alerts: [], currentlyInForce: [], alertCount: 0, matchCount: 0 },
       error: 'Live reports database read failed',
     })

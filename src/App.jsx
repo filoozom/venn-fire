@@ -995,7 +995,16 @@ function FireViewer({ runtime, databaseError }) {
                       <div key={`${event.time}-${event.title}`} className="event-item">
                         <button className={`event-row ${index === 0 ? 'is-latest' : ''}`} type="button" onClick={() => setFrameIndex(event.frame)}>
                           <span className={`event-icon event-icon--${event.type}`}><Icon size={14} /></span>
-                          <span><strong>{event.title}</strong><small>{event.detail}</small></span>
+                          <span>
+                            <strong>{event.title}</strong>
+                            <small>{event.detail}</small>
+                            {event.affectedAreas?.length ? (
+                              <small className="event-affected-areas">
+                                <b>Named streets — </b>
+                                {event.affectedAreas.map((area) => `${area.municipality}: ${area.streets.join(', ')}`).join(' · ')}
+                              </small>
+                            ) : null}
+                          </span>
                           <time>{event.time}</time>
                         </button>
                         {event.sourceUrl ? (

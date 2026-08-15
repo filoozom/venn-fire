@@ -230,6 +230,20 @@ function frameAt(timestampMs, timelineStartMs, frameCount) {
   ))
 }
 
+function classifiedEventType(content, fallback = 'alert') {
+  const normalized = String(content ?? '')
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLocaleLowerCase('en')
+  const explicitlyNotAnOrder = /aucune evacuation|no (?:population|residential) evacuation|evacuation standby/iu.test(normalized)
+  if (explicitlyNotAnOrder) {
+    return /cleared|seal(?:ed|s)?|must leave the (?:hohes )?venn/iu.test(normalized) ? 'closure' : 'alert'
+  }
+  if (/evac/iu.test(normalized)) return 'evacuation'
+  if (/clos|ferm|gesperrt/iu.test(normalized)) return 'closure'
+  return fallback
+}
+
 function alertEvents(alerts, timelineStartMs, frameCount) {
   return alerts.flatMap((alert) => {
     const timestampMs = Date.parse(alert.sentAt || alert.publishedAt || alert.startsAt)
@@ -240,11 +254,29 @@ function alertEvents(alerts, timelineStartMs, frameCount) {
       time: localClockFormatter.format(new Date(timestampMs)),
       title: alert.headline || alert.title || 'BE-Alert update',
       detail: alert.capDescription || alert.description || alert.areaDesc || 'Public warning issued',
-      type: /evac/iu.test(content) ? 'evacuation' : /clos|ferm|gesperrt/iu.test(content) ? 'closure' : 'alert',
+      type: classifiedEventType(content),
       sourceUrl: alert.link,
       sourceName: 'BE-Alert CAP 1.2',
     }]
   })
+}
+
+function normalizeTimelineEvent(event, timelineStartMs, frameCount) {
+  const timestampMs = Number.isFinite(event?.timestampMs)
+    ? event.timestampMs
+    : Date.parse(event?.observedAt)
+  if (Number.isFinite(timestampMs)) {
+    return {
+      ...event,
+      timestampMs,
+      frame: frameAt(timestampMs, timelineStartMs, frameCount),
+      time: localClockFormatter.format(new Date(timestampMs)),
+      type: classifiedEventType(`${event.title || ''} ${event.detail || ''}`, event.type),
+    }
+  }
+  return Number.isFinite(event?.frame) && event?.time
+    ? { ...event, type: classifiedEventType(`${event.title || ''} ${event.detail || ''}`, event.type) }
+    : null
 }
 
 export function buildEvents({ reportRows, baseEvents, alerts, timelineStartMs, frameCount }) {
@@ -259,12 +291,17 @@ export function buildEvents({ reportRows, baseEvents, alerts, timelineStartMs, f
   }))
   const candidates = [
     ...areaEvents,
-    ...(baseEvents ?? []).filter((event) => event.type !== 'area'),
+    ...(baseEvents ?? [])
+      .filter((event) => event.type !== 'area')
+      .map((event) => normalizeTimelineEvent(event, timelineStartMs, frameCount))
+      .filter(Boolean),
     ...alertEvents(alerts ?? [], timelineStartMs, frameCount),
   ]
   const unique = new Map()
   for (const event of candidates) {
-    const key = `${event.sourceUrl || event.sourceName || ''}|${event.time}|${event.title}`
+    const key = event.id || (event.sourceUrl
+      ? `${event.sourceUrl}|${event.time}`
+      : `${event.sourceName || ''}|${event.time}|${event.title}`)
     if (!unique.has(key)) unique.set(key, event)
   }
   return [...unique.values()]
@@ -325,7 +362,10 @@ export function runtimeDataFromResponse(response) {
   })
   const events = buildEvents({
     reportRows,
-    baseEvents: incident.events ?? [],
+    baseEvents: [
+      ...(incident.events ?? []),
+      ...(reportsPayload.events ?? []),
+    ],
     alerts: publicAlerts.alerts ?? [],
     timelineStartMs,
     frameCount: frames.length,

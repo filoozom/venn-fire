@@ -131,6 +131,18 @@ function mergeAreaReports(previous, incoming) {
     })
 }
 
+function mergeReportEvents(previous, incoming) {
+  const byId = new Map()
+  for (const event of [...(previous || []), ...(incoming || [])]) {
+    const timestampMs = Number.isFinite(event?.timestampMs)
+      ? event.timestampMs
+      : Date.parse(event?.observedAt)
+    if (!Number.isFinite(timestampMs) || !event?.id || !event?.title || !event?.sourceUrl) continue
+    byId.set(event.id, { ...event, timestampMs })
+  }
+  return [...byId.values()].sort((left, right) => left.timestampMs - right.timestampMs)
+}
+
 async function refreshReports({ requestedAtMs, query }) {
   const generatedAt = new Date(requestedAtMs).toISOString()
   const [incoming, previous] = await Promise.all([
@@ -139,9 +151,18 @@ async function refreshReports({ requestedAtMs, query }) {
   ])
   if (!incoming.ok) throw new Error('No live situation-report source succeeded')
   const areaReports = mergeAreaReports(previous.areaReports, incoming.areaReports)
-  const payload = { schemaVersion: 1, generatedAt, ...incoming, areaReports }
+  const events = mergeReportEvents(previous.events, incoming.events)
+  const payload = { schemaVersion: 1, generatedAt, ...incoming, areaReports, events }
   const stored = await saveDataset({ key: 'reports', payload }, query)
-  return { itemCount: areaReports.length, metadata: { changed: stored.changed, complete: incoming.complete } }
+  return {
+    itemCount: areaReports.length + events.length,
+    metadata: {
+      changed: stored.changed,
+      complete: incoming.complete,
+      areaReportCount: areaReports.length,
+      eventCount: events.length,
+    },
+  }
 }
 
 const ALERT_FEED_URL = 'https://publicalerts.be/CapGateway/feed'

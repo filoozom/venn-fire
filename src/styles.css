@@ -3090,6 +3090,16 @@ button.connection-card--upload {
   color: #e2593f;
 }
 
+.event-row .event-affected-areas {
+  color: #5f6e67;
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.event-affected-areas b {
+  color: #344d42;
+}
+
 /* The incident log carries every sourced update, so it scrolls. */
 .event-list {
   max-height: 340px;
