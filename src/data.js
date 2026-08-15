@@ -1,19 +1,20 @@
 import nearbyTrafficSummary from './nearbyTrafficSummary.json'
+import incidentAircraftSnapshot from './incidentAircraftSnapshot.json'
+import { effisAreaForTimestamp, effisBurnedArea, effisBurnedAreas } from './effisBurnedArea'
 
 const CENTER = [50.54762, 6.05757]
-const FIVE_MINUTES_MS = 5 * 60 * 1000
+export const FIVE_MINUTES_MS = 5 * 60 * 1000
 export const AIRCRAFT_PATH_MAX_GAP_MS = 2 * 60 * 1000
 export const AIRCRAFT_PATH_MAX_SPEED_KT = 160
-const TIMELINE_START_MS = Date.parse('2026-08-14T13:00:00+02:00')
-const TIMELINE_END_MS = Date.parse('2026-08-15T02:00:00+02:00')
-const REPORTED_AREA_AT_MS = Date.parse('2026-08-14T20:32:00+02:00')
+export const TIMELINE_START_MS = Date.parse('2026-08-14T13:00:00+02:00')
+export const BUNDLED_TIMELINE_END_MS = Date.parse('2026-08-15T11:45:00+02:00')
 
-export { effisBurnedArea } from './effisBurnedArea'
+export { effisAreaForTimestamp, effisBurnedArea, effisBurnedAreas }
 
 // Open-Meteo historical-forecast model values for 50.548 N, 6.061 E,
-// rechecked at 04:55 CEST on 15 August 2026. Entries run from 13:00 CEST on
-// 14 August through 02:00 CEST on 15 August, one value per local clock hour.
-const hourlyWeather = [
+// retrieved at 11:30 CEST on 15 August 2026. Entries run from 13:00 CEST on
+// 14 August through 12:00 CEST on 15 August, one value per local clock hour.
+const bundledHourlyWeatherValues = [
   { windSpeed: 7.6, windDirection: 335, gust: 27.4, humidity: 16, temperature: 30.7 },
   { windSpeed: 6.5, windDirection: 339, gust: 27.0, humidity: 15, temperature: 30.9 },
   { windSpeed: 7.2, windDirection: 333, gust: 27.4, humidity: 16, temperature: 31.9 },
@@ -28,34 +29,132 @@ const hourlyWeather = [
   { windSpeed: 8.3, windDirection: 135, gust: 13.3, humidity: 33, temperature: 23.8 },
   { windSpeed: 9.7, windDirection: 135, gust: 16.2, humidity: 29, temperature: 24.0 },
   { windSpeed: 11.2, windDirection: 141, gust: 18.0, humidity: 32, temperature: 23.6 },
+  { windSpeed: 11.9, windDirection: 135, gust: 21.6, humidity: 33, temperature: 23.8 },
+  { windSpeed: 11.2, windDirection: 147, gust: 20.5, humidity: 28, temperature: 24.3 },
+  { windSpeed: 14.0, windDirection: 137, gust: 28.1, humidity: 27, temperature: 24.2 },
+  { windSpeed: 11.2, windDirection: 146, gust: 21.6, humidity: 29, temperature: 23.7 },
+  { windSpeed: 8.3, windDirection: 139, gust: 20.9, humidity: 32, temperature: 23.5 },
+  { windSpeed: 4.0, windDirection: 67, gust: 18.4, humidity: 41, temperature: 22.8 },
+  { windSpeed: 5.0, windDirection: 143, gust: 18.4, humidity: 38, temperature: 25.7 },
+  { windSpeed: 9.4, windDirection: 287, gust: 26.6, humidity: 37, temperature: 26.0 },
+  { windSpeed: 4.3, windDirection: 305, gust: 27.0, humidity: 32, temperature: 25.7 },
+  { windSpeed: 8.3, windDirection: 303, gust: 25.2, humidity: 25, temperature: 28.2 },
 ]
 
-function clockLabel(index) {
-  const totalMinutes = 13 * 60 + index * 5
-  const hours = Math.floor(totalMinutes / 60) % 24
-  const minutes = totalMinutes % 60
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
+export const bundledHourlyWeather = bundledHourlyWeatherValues.map((weather, index) => ({
+  ...weather,
+  timestampMs: TIMELINE_START_MS + index * 60 * 60 * 1000,
+  observedAt: new Date(TIMELINE_START_MS + index * 60 * 60 * 1000).toISOString(),
+  source: 'Open-Meteo hourly model',
+}))
+
+export const areaReports = [
+  {
+    timestampMs: Date.parse('2026-08-14T16:00:00+02:00'),
+    reportedHa: 60,
+    areaPrefix: '~',
+    areaLabel: 'official estimate at 16:00 CEST',
+    source: 'Governor of Liège',
+    sourceUrl: 'https://gouverneur.provincedeliege.be/fr/node/7923',
+  },
+  {
+    timestampMs: Date.parse('2026-08-14T20:00:00+02:00'),
+    reportedHa: 100,
+    areaPrefix: '~',
+    areaLabel: 'official estimate at 20:00 CEST',
+    source: 'Governor of Liège',
+    sourceUrl: 'https://gouverneur.provincedeliege.be/fr/node/7923',
+  },
+  {
+    timestampMs: Date.parse('2026-08-15T07:00:00+02:00'),
+    reportedHa: 850,
+    areaPrefix: '~',
+    areaLabel: 'official estimate at 07:00 CEST',
+    source: 'Governor of Liège',
+    sourceUrl: 'https://gouverneur.provincedeliege.be/fr/node/7923',
+  },
+  {
+    timestampMs: Date.parse('2026-08-15T11:28:00+02:00'),
+    reportedHa: 900,
+    areaPrefix: '>',
+    areaLabel: 'local reporting updated at 11:28 CEST',
+    source: 'BRF',
+    sourceUrl: 'https://brf.be/regional/2100196/',
+  },
+]
+
+const localClockFormatter = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/Brussels',
+  hour: '2-digit',
+  minute: '2-digit',
+})
+
+const localDayFormatter = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/Brussels',
+  day: '2-digit',
+  month: 'short',
+})
+
+const localDateFormatter = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/Brussels',
+  weekday: 'long',
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+})
+
+function normalizedWeatherRows(weatherRows) {
+  return weatherRows
+    .map((weather) => ({
+      ...weather,
+      timestampMs: Number.isFinite(weather.timestampMs) ? weather.timestampMs : Date.parse(weather.observedAt),
+    }))
+    .filter((weather) => Number.isFinite(weather.timestampMs))
+    .sort((left, right) => left.timestampMs - right.timestampMs)
 }
 
-export const fireFrames = Array.from(
-  { length: Math.floor((TIMELINE_END_MS - TIMELINE_START_MS) / FIVE_MINUTES_MS) + 1 },
-  (_, index) => {
-    const timestampMs = TIMELINE_START_MS + index * FIVE_MINUTES_MS
-    const weather = hourlyWeather[Math.min(hourlyWeather.length - 1, Math.floor(index / 12))]
-    const areaReported = timestampMs >= REPORTED_AREA_AT_MS
-    return {
-      time: new Date(timestampMs).toISOString(),
-      timestampMs,
-      shortTime: clockLabel(index),
-      dayLabel: timestampMs < Date.parse('2026-08-15T00:00:00+02:00') ? '14 AUG' : '15 AUG',
-      dateLabel: timestampMs < Date.parse('2026-08-15T00:00:00+02:00') ? 'Friday, 14 August 2026' : 'Saturday, 15 August 2026',
-      reportedHa: areaReported ? 100 : null,
-      areaLabel: areaReported ? 'reported by 20:32 CEST' : 'no quantified report yet',
-      confidence: areaReported ? 'Reported' : 'Unknown',
-      ...weather,
-    }
-  },
-)
+export function buildFireFrames({
+  endMs = BUNDLED_TIMELINE_END_MS,
+  weatherRows = bundledHourlyWeather,
+} = {}) {
+  const boundedEndMs = Math.max(
+    TIMELINE_START_MS,
+    Math.floor(endMs / FIVE_MINUTES_MS) * FIVE_MINUTES_MS,
+  )
+  const normalizedWeather = normalizedWeatherRows(weatherRows)
+
+  return Array.from(
+    { length: Math.floor((boundedEndMs - TIMELINE_START_MS) / FIVE_MINUTES_MS) + 1 },
+    (_, index) => {
+      const timestampMs = TIMELINE_START_MS + index * FIVE_MINUTES_MS
+      const weather = normalizedWeather.findLast((row) => row.timestampMs <= timestampMs) || normalizedWeather[0]
+      const report = areaReports.findLast((item) => item.timestampMs <= timestampMs)
+      const date = new Date(timestampMs)
+      return {
+        time: date.toISOString(),
+        timestampMs,
+        shortTime: localClockFormatter.format(date),
+        dayLabel: localDayFormatter.format(date).toUpperCase(),
+        dateLabel: localDateFormatter.format(date),
+        reportedHa: report?.reportedHa ?? null,
+        reportedAreaText: report ? `${report.areaPrefix}${report.reportedHa}` : '—',
+        areaLabel: report?.areaLabel ?? 'no quantified report yet',
+        areaSource: report?.source ?? null,
+        areaSourceUrl: report?.sourceUrl ?? null,
+        confidence: report ? 'Reported' : 'Unknown',
+        weatherObservedAt: weather?.observedAt ?? null,
+        weatherSource: weather?.source ?? null,
+        windSpeed: weather?.windSpeed ?? 0,
+        windDirection: weather?.windDirection ?? 0,
+        gust: weather?.gust ?? 0,
+        humidity: weather?.humidity ?? 0,
+        temperature: weather?.temperature ?? 0,
+      }
+    },
+  )
+}
+
+export const fireFrames = buildFireFrames()
 
 function frameAt(isoTimestamp) {
   return Math.max(0, Math.min(
@@ -112,39 +211,37 @@ export function normalizeNearbyTrafficSnapshot(snapshot) {
   })
 }
 
-// Exact Airplanes.live MLAT observations inside the broad incident search area.
-// They are points, not an interpolated path. The map may join two consecutive
-// points with a dashed straight connector only when the gap is <= 2 minutes and
-// the implied speed is <= 160 kt. It never bridges a reception gap.
-const g10Observations = [
-  ['2026-08-14T13:38:15.750Z', 50.521941, 6.078803, 2400],
-  ['2026-08-14T13:38:22.460Z', 50.516669, 6.074526, 2400],
-  ['2026-08-14T13:38:34.270Z', 50.520168, 6.069050, 2400],
-  ['2026-08-14T13:38:44.310Z', 50.538008, 6.070774, 2400],
-  ['2026-08-14T13:39:15.950Z', 50.551977, 6.072269, 2300],
-  ['2026-08-14T13:39:42.560Z', 50.543633, 6.077209, 2200],
-  ['2026-08-14T13:40:58.310Z', 50.520087, 6.057261, 2300],
-  ['2026-08-14T13:42:34.620Z', 50.568727, 6.078311, 2200],
-  ['2026-08-14T13:43:13.330Z', 50.549070, 6.055296, 2100],
-  ['2026-08-14T13:44:33.140Z', 50.550808, 6.061617, 1900],
-  ['2026-08-14T13:47:13.260Z', 50.538072, 6.050555, 1900],
-  ['2026-08-14T15:55:39.630Z', 50.541514, 6.105832, 2300],
-  ['2026-08-14T15:56:03.190Z', 50.554369, 6.099623, 2400],
-  ['2026-08-14T15:56:18.690Z', 50.566137, 6.099951, 2500],
-  ['2026-08-14T15:56:46.140Z', 50.558978, 6.084347, 2500],
-  ['2026-08-14T17:07:32.710Z', 50.517032, 6.110781, 2200],
-  ['2026-08-14T17:08:15.120Z', 50.541705, 6.104886, 2200],
-  ['2026-08-14T17:08:44.430Z', 50.529479, 6.087585, 2200],
-  ['2026-08-14T17:16:51.660Z', 50.564184, 6.102402, 2200],
-  ['2026-08-14T17:26:43.490Z', 50.540709, 6.074895, 2400],
-  ['2026-08-14T17:27:43.360Z', 50.552538, 6.069688, 2300],
-].map(([observedAt, latitude, longitude, altitudeFt]) => ({
-  observedAt,
-  timestampMs: Date.parse(observedAt),
-  position: [latitude, longitude],
-  altitudeFt,
-  updateType: 'MLAT',
-}))
+// Exact Airplanes.live MLAT observations from the checked-in provenance
+// snapshot. They are points, not an interpolated path. The map may join two
+// consecutive points only when the gap and implied speed pass the published
+// thresholds; reception gaps and the known Aachen/Walheim artifact stay open.
+export const incidentAircraftMeta = {
+  schemaVersion: incidentAircraftSnapshot.schemaVersion,
+  generatedAt: incidentAircraftSnapshot.generatedAt,
+  selection: incidentAircraftSnapshot.selection,
+  sources: incidentAircraftSnapshot.sources,
+  negativeFindings: incidentAircraftSnapshot.negativeFindings,
+}
+
+const incidentSourceById = Object.fromEntries(
+  incidentAircraftSnapshot.sources.map((source) => [source.id, source]),
+)
+
+function incidentObservations(icao24) {
+  const aircraft = incidentAircraftSnapshot.aircraft.find((item) => item.icao24 === icao24)
+  return (aircraft?.observations || []).map(([observedAt, latitude, longitude, altitudeFt, sourceId]) => ({
+    observedAt,
+    timestampMs: Date.parse(observedAt),
+    position: [latitude, longitude],
+    altitudeFt,
+    sourceId,
+    sourceUrl: incidentSourceById[sourceId]?.url,
+    updateType: sourceId.includes('replay') ? 'MLAT · 30 s replay snapshot' : 'MLAT · audited daily trace',
+  }))
+}
+
+const g10Observations = incidentObservations('44c1e5')
+const g17Observations = incidentObservations('44c1ea')
 
 export const flights = [
   {
@@ -154,13 +251,14 @@ export const flights = [
     icao24: '44c1e5',
     label: 'Belgian Federal Police MD902',
     type: 'helicopter',
-    status: 'Observed MLAT; incident role strongly corroborated, not an official mission log',
+    status: 'Observed MLAT on 14 and 15 August; 15 August is a single-provider 30 s replay pending the full daily trace',
     color: '#2f80ed',
     source: 'Airplanes.live globe history',
-    sourceUrl: 'https://globe.airplanes.live/?icao=44c1e5&showTrace=2026-08-14',
-    coverageWindows: ['15:38–15:47', '17:55–17:56', '19:07–19:27'],
-    start: '15:38',
-    end: '19:27',
+    sourceUrl: 'https://globe.airplanes.live/?icao=44c1e5&showTrace=2026-08-15',
+    sourceRetrievedAt: '2026-08-15T09:32:08.676Z',
+    coverageWindows: ['14 Aug 15:38–15:47', '14 Aug 17:55–17:56', '14 Aug 19:07–19:27', '15 Aug 07:13–09:19'],
+    start: '14 Aug 15:38',
+    end: '15 Aug 09:19',
     drops: null,
     distance: null,
     pathMethod: 'Dashed straight connectors: ≤2 min gap and ≤160 kt implied speed',
@@ -175,6 +273,27 @@ export const flights = [
       },
     ],
     observations: g10Observations,
+  },
+  {
+    id: 'g17-44c1ea',
+    callSign: 'G17',
+    registration: 'OO-POJ',
+    icao24: '44c1ea',
+    label: 'Belgian Federal Police MD902',
+    type: 'helicopter',
+    status: 'Observed by Airplanes.live MLAT over the incident area on 15 August; single-provider 30 s replay pending the full daily trace',
+    color: '#137a9d',
+    source: 'Airplanes.live globe history',
+    sourceUrl: 'https://globe.airplanes.live/?icao=44c1ea&showTrace=2026-08-15',
+    sourceRetrievedAt: '2026-08-15T09:32:08.676Z',
+    coverageWindows: ['15 Aug 08:08–10:43'],
+    start: '15 Aug 08:08',
+    end: '15 Aug 10:43',
+    drops: null,
+    distance: null,
+    pathMethod: 'Dashed straight connectors: ≤2 min gap and ≤160 kt implied speed',
+    evidenceObservations: [],
+    observations: g17Observations,
   },
   {
     id: 'g12-44c1e8',
@@ -214,9 +333,17 @@ export const events = [
     frame: frameAt('2026-08-14T13:06:00+02:00'),
     time: '13:06',
     title: 'Fire reported near Drossart',
-    detail: 'Reported incident start · Vedia',
+    detail: 'Official incident start time · Governor of Liège',
     type: 'alert',
-    sourceUrl: 'https://www.vedia.be/info/incendie-dans-les-fagnes-de-100-hectares-detruits-la-phase-provinciale-declenchee/213726',
+    sourceUrl: 'https://gouverneur.provincedeliege.be/fr/node/7923',
+  },
+  {
+    frame: frameAt('2026-08-14T16:00:00+02:00'),
+    time: '16:00',
+    title: '~60 ha officially estimated',
+    detail: '600,000 m² affected · Governor of Liège',
+    type: 'area',
+    sourceUrl: 'https://gouverneur.provincedeliege.be/fr/node/7923',
   },
   {
     frame: frameAt('2026-08-14T14:29:00+02:00'),
@@ -264,12 +391,64 @@ export const events = [
     type: 'aircraft',
   },
   {
-    frame: frameAt('2026-08-14T20:32:00+02:00'),
-    time: '20:32',
-    title: '~100 ha reported affected',
-    detail: 'Reported estimate, not a measured perimeter · BRF / Vedia',
+    frame: frameAt('2026-08-14T20:00:00+02:00'),
+    time: '20:00',
+    title: '~100 ha officially estimated',
+    detail: 'Affected-area estimate, not a measured perimeter · Governor of Liège',
     type: 'area',
-    sourceUrl: 'https://brf.be/regional/2099996/',
+    sourceUrl: 'https://gouverneur.provincedeliege.be/fr/node/7923',
+  },
+  {
+    frame: frameAt('2026-08-15T07:00:00+02:00'),
+    time: '07:00',
+    title: '~850 ha officially estimated',
+    detail: '15 Aug official situation update · Governor of Liège',
+    type: 'area',
+    sourceUrl: 'https://gouverneur.provincedeliege.be/fr/node/7923',
+  },
+  {
+    frame: frameAt('2026-08-15T07:13:00+02:00'),
+    time: '07:13',
+    title: 'G10 observations resume',
+    detail: '15 Aug incident-area MLAT observations · Airplanes.live',
+    type: 'aircraft',
+  },
+  {
+    frame: frameAt('2026-08-15T08:08:00+02:00'),
+    time: '08:08',
+    title: 'G17 observations begin',
+    detail: 'Federal Police helicopter over incident area · Airplanes.live',
+    type: 'aircraft',
+  },
+  {
+    frame: frameAt('2026-08-15T09:19:00+02:00'),
+    time: '09:19',
+    title: 'G10 last receiver observation',
+    detail: 'No position or airborne state inferred after this fix',
+    type: 'aircraft',
+  },
+  {
+    frame: frameAt('2026-08-15T10:43:00+02:00'),
+    time: '10:43',
+    title: 'G17 last receiver observation',
+    detail: 'No position or airborne state inferred after this fix',
+    type: 'aircraft',
+  },
+  {
+    frame: frameAt('2026-08-15T11:28:00+02:00'),
+    time: '11:28',
+    title: '>900 ha reported affected',
+    detail: 'Updated local reporting; official 07:00 estimate was ~850 ha · BRF',
+    type: 'area',
+    sourceUrl: 'https://brf.be/regional/2100196/',
+  },
+  {
+    frame: frameAt('2026-08-15T11:28:00+02:00'),
+    time: '11:28',
+    title: 'Firefighting helicopters operating',
+    detail: 'Operational status reported; no drop coordinates published · BRF',
+    type: 'aircraft',
+    sourceUrl: 'https://brf.be/regional/2100196/',
   },
 ]
 
@@ -284,14 +463,21 @@ export const mapLabels = [
 export const sourceLinks = [
   {
     name: 'Copernicus EFFIS',
-    detail: '14 Aug VIIRS-derived near-real-time footprint',
-    cadence: 'Daily reference layer',
+    detail: '14/15 Aug VIIRS-derived daily geometry; calculated polygon area is not official fire size',
+    cadence: 'Daily, no within-day acquisition time',
     url: 'https://forest-fire.emergency.copernicus.eu/about-effis/technical-background/rapid-damage-assessment',
     tone: 'effis',
   },
   {
+    name: 'EFFIS 15 Aug WFS response',
+    detail: 'Exact geometry response used for the locally calculated 4,857 ha polygon area',
+    cadence: 'Retrieved 15 Aug 11:33 CEST',
+    url: effisBurnedArea.sourceRequestUrl,
+    tone: 'effis',
+  },
+  {
     name: 'Airplanes.live',
-    detail: 'Historical ADS-B / MLAT observations',
+    detail: 'Historical ADS-B / MLAT observations for G10 and G17',
     cadence: '30 s replay slices; reception varies',
     url: 'https://airplanes.live/api/',
     tone: 'adsb',
@@ -311,18 +497,25 @@ export const sourceLinks = [
     tone: 'adsb',
   },
   {
+    name: 'Governor of Liège',
+    detail: 'Official incident updates: ~60, ~100 and ~850 ha',
+    cadence: 'Official situation reports',
+    url: 'https://gouverneur.provincedeliege.be/fr/node/7923',
+    tone: 'official',
+  },
+  {
     name: 'BRF',
-    detail: 'Incident and helicopter reporting',
+    detail: 'Updated >900 ha report and helicopter operational context',
     cadence: 'Local reporting',
-    url: 'https://brf.be/regional/2099996/',
-    tone: 'rmi',
+    url: 'https://brf.be/regional/2100196/',
+    tone: 'report',
   },
   {
     name: 'Vedia',
     detail: 'Incident start and affected-area reporting',
     cadence: 'Local reporting',
     url: 'https://www.vedia.be/info/incendie-dans-les-fagnes-de-100-hectares-detruits-la-phase-provinciale-declenchee/213726',
-    tone: 'rmi',
+    tone: 'report',
   },
   {
     name: 'Open-Meteo',

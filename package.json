@@ -14,7 +14,10 @@
     "scan:aircraft": "node scripts/extract-adsb-replay.mjs",
     "enrich:aircraft": "node scripts/enrich-aircraft-candidates.mjs",
     "build:traffic-snapshot": "node scripts/build-nearby-traffic-snapshot.mjs",
-    "verify:traffic-snapshot": "node scripts/verify-nearby-traffic-snapshot.mjs"
+    "verify:traffic-snapshot": "node scripts/verify-nearby-traffic-snapshot.mjs",
+    "verify:incident-aircraft": "node scripts/verify-incident-aircraft-snapshot.mjs",
+    "verify:timeline": "node scripts/verify-timeline.mjs",
+    "check:live-endpoint": "node scripts/check-live-endpoint.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",

@@ -4,9 +4,6 @@ import 'leaflet/dist/leaflet.css'
 import {
   AIRCRAFT_PATH_MAX_GAP_MS,
   AIRCRAFT_PATH_MAX_SPEED_KT,
-  effisBurnedArea,
-  fireFrames,
-  flights,
   incidentCenter,
   mapLabels,
   protectedArea,
@@ -16,7 +13,7 @@ const OBSERVATION_RECENCY_MS = 5 * 60 * 1000
 const TRAFFIC_PATH_MAX_GAP_MS = 90 * 1000
 const LOW_LEVEL_TRAFFIC_MAX_SPEED_KT = 250
 const OVERFLIGHT_TRAFFIC_MAX_SPEED_KT = 700
-const INCIDENT_MAP_BOUNDS = [[50.505, 6.015], [50.58, 6.135]]
+const INCIDENT_MAP_BOUNDS = [[50.49, 5.975], [50.575, 6.145]]
 const INCIDENT_MAP_PADDING = {
   paddingTopLeft: [18, 72],
   paddingBottomRight: [18, 190],
@@ -153,6 +150,10 @@ function localObservationTime(timestamp) {
 
 export default function MapView({
   frameIndex,
+  frame,
+  flights = [],
+  effisArea = null,
+  effisCarriedForward = false,
   layers,
   baseMode,
   onMapReady,
@@ -190,7 +191,7 @@ export default function MapView({
       zoomIn: () => map.zoomIn(0.75),
       zoomOut: () => map.zoomOut(0.75),
       home,
-      fire: () => map.flyToBounds(L.latLngBounds(effisBurnedArea.rings[0]), {
+      fire: () => map.flyToBounds(L.latLngBounds(effisArea?.rings?.[0] || INCIDENT_MAP_BOUNDS), {
         paddingTopLeft: [35, 95],
         paddingBottomRight: [35, 185],
         maxZoom: 14,
@@ -233,8 +234,6 @@ export default function MapView({
     if (!group) return
     group.clearLayers()
 
-    const frame = fireFrames[frameIndex]
-
     L.circleMarker(incidentCenter, {
       radius: 7,
       color: '#fff3d6',
@@ -259,37 +258,37 @@ export default function MapView({
         .addTo(group)
     }
 
-    if (layers.perimeter) {
-      L.polygon(effisBurnedArea.rings, {
+    if (layers.perimeter && effisArea) {
+      L.polygon(effisArea.rings, {
         className: 'fire-perimeter-glow',
-        color: '#ff703e',
-        fillColor: '#ef4f2f',
-        weight: 8,
-        opacity: 0.16,
-        fillOpacity: 0.08,
+        color: '#d98a3b',
+        fillColor: '#d98a3b',
+        weight: 6,
+        opacity: 0.10,
+        fillOpacity: 0.025,
         interactive: false,
       }).addTo(group)
 
-      L.polygon(effisBurnedArea.rings, {
+      L.polygon(effisArea.rings, {
         className: 'fire-perimeter-line',
-        color: '#ff9a5a',
-        fillColor: '#f04f2c',
+        color: '#d48b3a',
+        fillColor: '#d48b3a',
         weight: 2.4,
-        opacity: 0.96,
-        fillOpacity: 0.22,
+        opacity: 0.90,
+        fillOpacity: 0.07,
         dashArray: '8 5',
       })
-        .bindPopup(`<div class="map-popup"><span class="eyebrow">COPERNICUS EFFIS · VIIRS NRT</span><strong>~${Math.round(effisBurnedArea.areaHa)} ha footprint geometry</strong><small>${effisBurnedArea.productLabel} · ${effisBurnedArea.nominalResolutionM} m sensor pixels</small><small>Automatically derived from active-fire detections; not field-confirmed and not synchronized to the five-minute slider.</small><small>Separate local reporting estimated ~100 ha affected by 20:32 CEST.</small></div>`)
-        .bindTooltip(`<strong>EFFIS VIIRS-derived footprint</strong><br>~${Math.round(effisBurnedArea.areaHa)} ha geometry · ${effisBurnedArea.productLabel}<br><small>Static daily product, not a surveyed perimeter</small>`, { sticky: true })
+        .bindPopup(`<div class="map-popup"><span class="eyebrow">COPERNICUS EFFIS · VIIRS NRT</span><strong>${Math.round(effisArea.areaHa).toLocaleString('en-GB')} ha algorithmic geometry</strong><small>${effisArea.productLabel}${effisCarriedForward ? ' · carried forward as last available product' : ''} · ${effisArea.nominalResolutionM} m nominal sensor pixels</small><small>Calculated from the WFS polygon; not a field-confirmed burned-area estimate and not synchronized within the day.</small><small>Separate reporting at this selected time: ${frame.reportedAreaText} ha (${frame.areaLabel}).</small><a href="${effisArea.sourceRequestUrl}" target="_blank" rel="noreferrer">Open source WFS GeoJSON</a></div>`)
+        .bindTooltip(`<strong>EFFIS VIIRS-derived daily geometry</strong><br>${Math.round(effisArea.areaHa).toLocaleString('en-GB')} ha calculated polygon area · ${effisArea.productLabel}<br><small>Algorithmic envelope, not the official affected-area estimate</small>`, { sticky: true })
         .addTo(group)
 
       const labelIcon = L.divIcon({
         className: 'fire-area-marker',
-        html: `<div><span>EFFIS · VIIRS FOOTPRINT</span><strong>~${Math.round(effisBurnedArea.areaHa)} ha</strong><small>14 AUG DAILY · NOT SLIDER-TIMED</small></div>`,
+        html: `<div><span>EFFIS · DAILY GEOMETRY</span><strong>${Math.round(effisArea.areaHa).toLocaleString('en-GB')} ha</strong><small>${effisArea.productDate}${effisCarriedForward ? ' · CARRIED FORWARD' : ''} · NOT FIRE SIZE</small></div>`,
         iconSize: [174, 66],
         iconAnchor: [87, 76],
       })
-      L.marker(effisBurnedArea.labelPosition, { icon: labelIcon, interactive: false }).addTo(group)
+      L.marker(effisArea.labelPosition, { icon: labelIcon, interactive: false }).addTo(group)
     }
 
     if (layers.hotspots) {
@@ -428,13 +427,13 @@ export default function MapView({
     if (layers.wind) {
       const windIcon = L.divIcon({
         className: 'wind-map-card',
-        html: `<div><span class="wind-compass"><svg viewBox="0 0 24 24" style="--wind-rotation:${(frame.windDirection + 180) % 360}deg" aria-hidden="true"><path d="M12 20V4M6.5 9.5 12 4l5.5 5.5"/></svg></span><p><b>from ${windCardinal(frame.windDirection)}</b><strong>${frame.windSpeed.toFixed(1)} km/h</strong><small>arrow toward ${windCardinal((frame.windDirection + 180) % 360)} · gust ${frame.gust.toFixed(1)}</small></p></div>`,
+        html: `<div><span class="wind-compass"><svg viewBox="0 0 24 24" style="--wind-rotation:${(frame.windDirection + 180) % 360}deg" aria-hidden="true"><path d="M12 20V4M6.5 9.5 12 4l5.5 5.5"/></svg></span><p><b>from ${windCardinal(frame.windDirection)}</b><strong>${frame.windSpeed.toFixed(1)} km/h</strong><small>wind blowing toward ${windCardinal((frame.windDirection + 180) % 360)} · gust ${frame.gust.toFixed(1)}</small></p></div>`,
         iconSize: [148, 60],
         iconAnchor: [74, 30],
       })
       L.marker([50.575, 6.105], { icon: windIcon, interactive: false }).addTo(group)
     }
-  }, [frameIndex, layers, importedTracks, connectedHotspots, nearbyTraffic])
+  }, [frameIndex, frame, flights, effisArea, effisCarriedForward, layers, importedTracks, connectedHotspots, nearbyTraffic])
 
   return (
     <div className="map-surface" aria-label="Interactive fire situation map">

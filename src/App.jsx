@@ -42,23 +42,28 @@ import {
 } from 'lucide-react'
 import MapView from './MapView'
 import {
+  buildFireFrames,
+  bundledHourlyWeather,
   events,
-  effisBurnedArea,
+  effisAreaForTimestamp,
   fireFrames,
   flights,
+  incidentAircraftMeta,
   initialLayers,
   nearbyTrafficMeta,
   normalizeNearbyTrafficSnapshot,
   sourceLinks,
 } from './data'
 
-const layerOptions = [
-  { key: 'perimeter', label: 'EFFIS fire footprint', detail: '14 Aug daily VIIRS product · ~501 ha', icon: Layers3, color: '#e96838' },
+function layerOptionsFor(effisArea, isCarriedForward) {
+  return [
+  { key: 'perimeter', label: 'EFFIS daily geometry', detail: effisArea ? `${effisArea.productDate}${isCarriedForward ? ' carried forward' : ''} · ${Math.round(effisArea.areaHa).toLocaleString('en-GB')} ha polygon` : 'No product available at selected time', icon: Layers3, color: '#e96838' },
   { key: 'hotspots', label: 'NASA hotspots', detail: 'Only after a FIRMS response', icon: Satellite, color: '#efaa3c' },
-  { key: 'aircraft', label: 'Aircraft observations', detail: 'MLAT fixes + photo evidence', icon: Helicopter, color: '#3a7fcc' },
-  { key: 'traffic', label: 'All nearby receiver traffic', detail: '116 other identifiers · optional', icon: Radio, color: '#687e8a' },
+  { key: 'aircraft', label: 'Aircraft observations', detail: 'Exact MLAT dots + gap-limited connectors', icon: Helicopter, color: '#3a7fcc' },
+  { key: 'traffic', label: 'All nearby receiver traffic', detail: `${nearbyTrafficMeta.aircraftCount} other identifiers · optional`, icon: Radio, color: '#687e8a' },
   { key: 'wind', label: 'Wind at Drossart', detail: '10 m hourly model value', icon: Wind, color: '#4f9e90' },
-]
+  ]
+}
 
 const OBSERVATION_RECENCY_MS = 5 * 60 * 1000
 
@@ -123,20 +128,30 @@ function LayerToggle({ item, checked, onChange }) {
   )
 }
 
-function MiniAreaChart({ currentIndex }) {
+function MiniAreaChart({ currentIndex, frames }) {
   const width = 660
   const height = 44
-  const max = 110
-  const points = fireFrames.map((frame, index) => {
-    const x = (index / (fireFrames.length - 1)) * width
+  const reportedValues = frames.map((frame) => frame.reportedHa).filter(Number.isFinite)
+  const max = Math.max(1, ...reportedValues) * 1.12
+  const points = frames.map((frame, index) => {
+    if (frame.reportedHa === frames[index - 1]?.reportedHa) return null
+    const x = (index / (frames.length - 1)) * width
     if (!Number.isFinite(frame.reportedHa)) return null
     const y = height - (frame.reportedHa / max) * (height - 5)
     return [x, y, index]
   }).filter(Boolean)
   const visible = points.filter((point) => point[2] <= currentIndex)
-  const path = visible.map(([x, y], index) => `${index === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ')
-  const area = visible.length >= 2 ? `${path} L${visible.at(-1)[0]},${height} L${visible[0][0]},${height} Z` : ''
-  const cursorX = (currentIndex / (fireFrames.length - 1)) * width
+  const cursorX = (currentIndex / (frames.length - 1)) * width
+  const path = visible.length
+    ? `${visible.reduce((result, [x, y], index) => (
+      index === 0
+        ? `M${x.toFixed(1)},${y.toFixed(1)}`
+        : `${result} H${x.toFixed(1)} V${y.toFixed(1)}`
+    ), '')} H${cursorX.toFixed(1)}`
+    : ''
+  const area = visible.length
+    ? `${path} L${cursorX.toFixed(1)},${height} L${visible[0][0].toFixed(1)},${height} Z`
+    : ''
 
   return (
     <svg className="mini-area-chart" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
@@ -153,19 +168,22 @@ function MiniAreaChart({ currentIndex }) {
   )
 }
 
-function Timeline({ frameIndex, setFrameIndex, playing, setPlaying, playbackRate, setPlaybackRate }) {
-  const frame = fireFrames[frameIndex]
-  const progress = (frameIndex / (fireFrames.length - 1)) * 100
+function Timeline({ frames, frameIndex, setFrameIndex, playing, setPlaying, playbackRate, setPlaybackRate }) {
+  const frame = frames[frameIndex]
+  const progress = (frameIndex / (frames.length - 1)) * 100
   const visibleEvents = events.filter((event) => event.frame <= frameIndex)
+  const timelineTicks = Array.from({ length: 5 }, (_, index) => (
+    frames[Math.round((index / 4) * (frames.length - 1))]
+  ))
 
   return (
     <section className="timeline-panel" aria-label="Incident timeline controls">
       <div className="timeline-head">
         <div className="timeline-title">
           <span>Incident timeline</span>
-          <strong>14 Aug, 13:00</strong>
+          <strong>{frames[0].dayLabel.replace(/^0/, '')}, {frames[0].shortTime}</strong>
           <i />
-          <strong>15 Aug, 02:00 CEST</strong>
+          <strong>{frames.at(-1).dayLabel.replace(/^0/, '')}, {frames.at(-1).shortTime} CEST</strong>
         </div>
         <div className="timeline-legend">
           <span><i className="legend-line legend-line--fire" />Reported estimate</span>
@@ -188,13 +206,13 @@ function Timeline({ frameIndex, setFrameIndex, playing, setPlaying, playbackRate
         </button>
 
         <div className="timeline-track-wrap">
-          <MiniAreaChart currentIndex={frameIndex} />
+          <MiniAreaChart currentIndex={frameIndex} frames={frames} />
           <div className="event-markers" aria-hidden="true">
-            {events.map((event, index) => (
+            {events.filter((event) => event.frame < frames.length).map((event, index) => (
               <i
                 key={`${event.time}-${index}`}
                 className={`${event.type === 'aircraft' ? 'is-flight' : ''} ${event.frame <= frameIndex ? 'is-past' : ''}`}
-                style={{ left: `${(event.frame / (fireFrames.length - 1)) * 100}%` }}
+                style={{ left: `${(event.frame / (frames.length - 1)) * 100}%` }}
               />
             ))}
           </div>
@@ -202,7 +220,7 @@ function Timeline({ frameIndex, setFrameIndex, playing, setPlaying, playbackRate
             className="timeline-range"
             type="range"
             min="0"
-            max={fireFrames.length - 1}
+            max={frames.length - 1}
             step="1"
             value={frameIndex}
             onChange={(event) => {
@@ -213,11 +231,7 @@ function Timeline({ frameIndex, setFrameIndex, playing, setPlaying, playbackRate
             aria-label="Incident time"
           />
           <div className="timeline-ticks" aria-hidden="true">
-            <span>13:00</span>
-            <span>16:00</span>
-            <span>19:00</span>
-            <span>22:00</span>
-            <span>01:00</span>
+            {timelineTicks.map((tick, index) => <span key={`${tick.time}-${index}`}>{tick.shortTime}</span>)}
           </div>
           <div className="timeline-now" style={{ left: `${progress}%` }}>
             <strong>{frame.shortTime}</strong>
@@ -227,7 +241,7 @@ function Timeline({ frameIndex, setFrameIndex, playing, setPlaying, playbackRate
 
         <button
           className="step-button"
-          onClick={() => setFrameIndex(Math.min(fireFrames.length - 1, frameIndex + 1))}
+          onClick={() => setFrameIndex(Math.min(frames.length - 1, frameIndex + 1))}
           type="button"
           aria-label="Next five minutes"
         >
@@ -258,11 +272,13 @@ function SourceMark({ tone }) {
   if (tone === 'nasa') return <span className="source-monogram source-monogram--nasa">NASA</span>
   if (tone === 'effis') return <span className="source-monogram source-monogram--effis">EU</span>
   if (tone === 'weather') return <span className="source-monogram source-monogram--weather"><CloudSun size={17} /></span>
+  if (tone === 'official') return <span className="source-monogram source-monogram--rmi">LG</span>
+  if (tone === 'report') return <span className="source-monogram source-monogram--rmi">LOC</span>
   if (tone === 'rmi') return <span className="source-monogram source-monogram--rmi">RMI</span>
   return <span className="source-monogram source-monogram--adsb"><Airplay size={17} /></span>
 }
 
-function DataModal({ open, onClose, onImportTracks, importedCount, onFirmsData, connectedCount }) {
+function DataModal({ open, onClose, onImportTracks, importedCount, onFirmsData, connectedCount, frames }) {
   const [tab, setTab] = useState('connections')
   const [mapKey, setMapKey] = useState(() => localStorage.getItem('venn-firms-key') || '')
   const [keyVisible, setKeyVisible] = useState(false)
@@ -313,7 +329,7 @@ function DataModal({ open, onClose, onImportTracks, importedCount, onFirmsData, 
         const acquiredAt = new Date(acquired).getTime()
         let closestFrame = 0
         let closestDistance = Number.POSITIVE_INFINITY
-        fireFrames.forEach((item, index) => {
+        frames.forEach((item, index) => {
           const distance = Math.abs(new Date(item.time).getTime() - acquiredAt)
           if (distance < closestDistance) {
             closestDistance = distance
@@ -468,9 +484,9 @@ function DataModal({ open, onClose, onImportTracks, importedCount, onFirmsData, 
               </div>
               <div className="method-steps">
                 <article><span>01</span><div><strong>Thermal anomaly</strong><p>No marker is bundled. If FIRMS returns VIIRS data, each point remains a sensor observation rather than a burned-area polygon.</p></div></article>
-                <article><span>02</span><div><strong>Reported area</strong><p>The ~100 ha figure appears only from the cited reporting time and is never converted into a drawn shape.</p></div></article>
-                <article><span>03</span><div><strong>Satellite footprint</strong><p>The ~501 ha map shape is the real 14 August EFFIS VIIRS-derived polygon. It is a static daily algorithmic footprint, not a surveyed perimeter or five-minute progression.</p></div></article>
-                <article><span>04</span><div><strong>Aircraft observations</strong><p>G10 is shown as individual MLAT fixes. Gaps stay empty, and a marker never claims the helicopter remained airborne.</p></div></article>
+                <article><span>02</span><div><strong>Reported area</strong><p>The line is a timestamped step series: ~60 ha at 16:00, ~100 ha at 20:00, ~850 ha at 07:00, then &gt;900 ha at 11:28. Between reports it means “last reported,” not measured growth.</p></div></article>
+                <article><span>03</span><div><strong>EFFIS daily geometry</strong><p>The 14 and 15 August VIIRS-derived polygons are separate calendar-day products. Their locally calculated geometry area is not the official affected area; EFFIS provides no within-day acquisition time for five-minute animation.</p></div></article>
+                <article><span>04</span><div><strong>Aircraft observations</strong><p>G10 and G17 are shown as individual Airplanes.live MLAT fixes. Gaps stay empty, and a marker never claims a helicopter remained airborne.</p></div></article>
                 <article><span>05</span><div><strong>Nearby traffic census</strong><p>The optional traffic layer contains every other identifier seen within 5 km in either retained replay. Exact samples extend to 10 km for path context; none is assigned an incident role.</p></div></article>
               </div>
               <div className="safety-note"><ShieldAlert size={17} /><span>This viewer is informational and must not be used for evacuation or preservation-of-life decisions. Follow BE-Alert and emergency services.</span></div>
@@ -487,7 +503,7 @@ function DataModal({ open, onClose, onImportTracks, importedCount, onFirmsData, 
                   <ExternalLink size={15} />
                 </a>
               ))}
-              <div className="source-footnote"><CircleHelp size={15} /><p>A production deployment should proxy credentialed APIs server-side, archive raw responses with timestamps and expose provenance on every observation.</p></div>
+              <div className="source-footnote"><CircleHelp size={15} /><p>The production live endpoint queries fixed public ADS-B and weather sources server-side with a 60-second cache. Historical source responses remain timestamped and auditable; FIRMS still requires the viewer's own MAP_KEY.</p></div>
             </div>
           )}
         </div>
@@ -497,6 +513,8 @@ function DataModal({ open, onClose, onImportTracks, importedCount, onFirmsData, 
 }
 
 function App() {
+  const [frames, setFrames] = useState(fireFrames)
+  const framesLengthRef = useRef(fireFrames.length)
   const [frameIndex, setFrameIndex] = useState(fireFrames.length - 1)
   const [layers, setLayers] = useState(initialLayers)
   const [baseMode, setBaseMode] = useState('terrain')
@@ -511,15 +529,108 @@ function App() {
   const [nearbyTraffic, setNearbyTraffic] = useState([])
   const [trafficLoadStatus, setTrafficLoadStatus] = useState('idle')
   const [trafficLoadError, setTrafficLoadError] = useState('')
-  const frame = fireFrames[frameIndex]
-  const reportedAreaText = frame.reportedHa == null ? '—' : `~${frame.reportedHa}`
+  const [liveAircraftObservations, setLiveAircraftObservations] = useState([])
+  const [syncState, setSyncState] = useState({ status: 'loading', generatedAt: null, weatherOk: false, aircraftOk: false })
+  const frame = frames[Math.min(frameIndex, frames.length - 1)]
+  const currentEffisArea = effisAreaForTimestamp(frame.timestampMs)
+  const effisCarriedForward = currentEffisArea?.productDate === '2026-08-14'
+    && frame.timestampMs >= Date.parse('2026-08-15T00:00:00+02:00')
+  const layerOptions = useMemo(
+    () => layerOptionsFor(currentEffisArea, effisCarriedForward),
+    [currentEffisArea, effisCarriedForward],
+  )
+  const reportedAreaText = frame.reportedAreaText
+
+  const displayFlights = useMemo(() => flights.map((flight) => {
+    const live = liveAircraftObservations
+      .filter((observation) => observation.icao24 === flight.icao24)
+      .map((observation) => ({
+        observedAt: observation.observedAt,
+        timestampMs: Date.parse(observation.observedAt),
+        position: [observation.latitude, observation.longitude],
+        altitudeFt: observation.altitudeFt,
+        updateType: observation.updateType,
+      }))
+    if (!live.length) return flight
+
+    const observations = [...(flight.observations || []), ...live]
+      .sort((left, right) => left.timestampMs - right.timestampMs)
+      .filter((observation, index, all) => {
+        const previous = all[index - 1]
+        return !previous
+          || observation.timestampMs !== previous.timestampMs
+          || observation.position[0] !== previous.position[0]
+          || observation.position[1] !== previous.position[1]
+      })
+    return { ...flight, observations }
+  }), [liveAircraftObservations])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function refreshLiveSituation() {
+      try {
+        const response = await fetch('/api/live-situation', { headers: { Accept: 'application/json' } })
+        if (!response.ok) throw new Error(`Live endpoint returned ${response.status}`)
+        const snapshot = await response.json()
+        if (cancelled) return
+
+        if (snapshot.weather?.ok && snapshot.weather.rows?.length) {
+          const endMs = Date.parse(snapshot.generatedAt)
+          const nextFrames = buildFireFrames({
+            endMs,
+            weatherRows: [...bundledHourlyWeather, ...snapshot.weather.rows],
+          })
+          const previousLength = framesLengthRef.current
+          setFrameIndex((currentIndex) => (
+            currentIndex >= previousLength - 2
+              ? nextFrames.length - 1
+              : Math.min(currentIndex, nextFrames.length - 1)
+          ))
+          framesLengthRef.current = nextFrames.length
+          setFrames(nextFrames)
+        }
+
+        if (snapshot.aircraft?.ok && snapshot.aircraft.observations?.length) {
+          setLiveAircraftObservations((current) => {
+            const merged = [...current, ...snapshot.aircraft.observations]
+            const seen = new Set()
+            return merged.filter((observation) => {
+              const key = `${observation.providerId}|${observation.icao24}|${observation.observedAt}|${observation.latitude}|${observation.longitude}`
+              if (seen.has(key)) return false
+              seen.add(key)
+              return true
+            }).slice(-500)
+          })
+        }
+
+        const weatherOk = Boolean(snapshot.weather?.ok)
+        const aircraftOk = Boolean(snapshot.aircraft?.ok)
+        setSyncState({
+          status: weatherOk && aircraftOk ? 'live' : weatherOk || aircraftOk ? 'partial' : 'bundled',
+          generatedAt: snapshot.generatedAt,
+          weatherOk,
+          aircraftOk,
+        })
+      } catch {
+        if (!cancelled) setSyncState((current) => ({ ...current, status: 'bundled' }))
+      }
+    }
+
+    refreshLiveSituation()
+    const timer = window.setInterval(refreshLiveSituation, 60_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [])
 
   useEffect(() => {
     if (!playing) return undefined
     const delay = 1100 / playbackRate
     const timer = window.setInterval(() => {
       setFrameIndex((current) => {
-        if (current >= fireFrames.length - 1) {
+        if (current >= frames.length - 1) {
           setPlaying(false)
           return current
         }
@@ -527,7 +638,7 @@ function App() {
       })
     }, delay)
     return () => window.clearInterval(timer)
-  }, [playing, playbackRate])
+  }, [playing, playbackRate, frames.length])
 
   useEffect(() => {
     if ((!layers.traffic && inspectorTab !== 'traffic') || trafficLoadStatus !== 'idle') return
@@ -547,7 +658,7 @@ function App() {
     const onKeyDown = (event) => {
       if (dataOpen || ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return
       if (event.key === 'ArrowLeft') setFrameIndex((value) => Math.max(0, value - 1))
-      if (event.key === 'ArrowRight') setFrameIndex((value) => Math.min(fireFrames.length - 1, value + 1))
+      if (event.key === 'ArrowRight') setFrameIndex((value) => Math.min(frames.length - 1, value + 1))
       if (event.key === ' ') {
         event.preventDefault()
         setPlaying((value) => !value)
@@ -555,7 +666,7 @@ function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [dataOpen])
+  }, [dataOpen, frames.length])
 
   const currentEvents = useMemo(
     () => events.filter((event) => event.frame <= frameIndex).slice(-5).reverse(),
@@ -563,8 +674,8 @@ function App() {
   )
 
   const activeFlights = useMemo(
-    () => flights.filter((flight) => observationState(flight, frame).key === 'recent'),
-    [frame],
+    () => displayFlights.filter((flight) => observationState(flight, frame).key === 'recent'),
+    [displayFlights, frame],
   )
 
   const activeNearbyTraffic = useMemo(
@@ -618,7 +729,7 @@ function App() {
         </div>
 
         <div className="header-actions">
-          <div className="updated-state"><span className="live-pulse" /><div><small>DATA SNAPSHOT</small><strong>15 Aug · 02:00 CEST</strong></div></div>
+          <div className="updated-state"><span className={`live-pulse ${syncState.status === 'live' ? '' : 'is-bundled'}`} /><div><small>{syncState.status === 'live' ? 'WEATHER · LIVE ADS-B REFRESHED' : syncState.status === 'partial' ? 'PARTIAL LIVE REFRESH' : syncState.status === 'loading' ? 'CHECKING LIVE SOURCES' : 'BUNDLED SNAPSHOT'}</small><strong>{frames.at(-1).dayLabel} · {frames.at(-1).shortTime} CEST</strong></div></div>
           <button className="data-button" type="button" onClick={() => setDataOpen(true)}><Database size={15} /><span>Data & sources</span></button>
         </div>
       </header>
@@ -637,7 +748,7 @@ function App() {
             <p>Drossart · Fagne des Deux-Séries</p>
             <div className="incident-metrics">
               <div><strong>{reportedAreaText}</strong><span>reported hectares</span><small>{frame.areaLabel}</small></div>
-              <div><strong>~{Math.round(effisBurnedArea.areaHa)}</strong><span>EFFIS footprint ha</span><small>static 14 Aug product</small></div>
+              <div><strong>{currentEffisArea ? Math.round(currentEffisArea.areaHa).toLocaleString('en-GB') : '—'}</strong><span>EFFIS geometry ha</span><small>{currentEffisArea ? `${currentEffisArea.productDate}${effisCarriedForward ? ' carried forward' : ''} · not fire size` : 'no product available at this time'}</small></div>
             </div>
           </div>
 
@@ -664,13 +775,16 @@ function App() {
               <SourceMark tone="nasa" /><span><strong>FIRMS</strong><small>{connectedHotspots.length ? `${connectedHotspots.length} detections plotted` : 'No data loaded'}</small></span><em className={`health-dot ${connectedHotspots.length ? '' : 'health-dot--amber'}`} />
             </button>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
-              <SourceMark tone="effis" /><span><strong>EFFIS footprint</strong><small>14 Aug VIIRS daily polygon</small></span><em className="health-dot" />
+              <SourceMark tone="effis" /><span><strong>EFFIS daily geometry</strong><small>{currentEffisArea ? `${currentEffisArea.productDate}${effisCarriedForward ? ' carried forward' : ''} · not official fire size` : 'not yet available at selected time'}</small></span><em className="health-dot health-dot--amber" />
+            </button>
+            <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
+              <SourceMark tone="official" /><span><strong>Affected-area reports</strong><small>{frame.reportedAreaText} ha · {frame.areaLabel}</small></span><em className="health-dot health-dot--amber" />
             </button>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
               <SourceMark tone="weather" /><span><strong>Wind model</strong><small>Drossart hourly values</small></span><em className="health-dot" />
             </button>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
-              <SourceMark tone="adsb" /><span><strong>Aircraft</strong><small>{flights.length} sourced set{importedTracks.length ? ` · ${importedTracks.length} static import` : ''}</small></span><em className="health-dot" /></button>
+              <SourceMark tone="adsb" /><span><strong>Aircraft</strong><small>{displayFlights.length} sourced set{importedTracks.length ? ` · ${importedTracks.length} static import` : ''}</small></span><em className="health-dot" /></button>
             <button className="source-health-row" onClick={() => {
               setInspectorTab('traffic')
               setLayers((current) => ({ ...current, traffic: true }))
@@ -688,6 +802,10 @@ function App() {
         <main className="map-region">
           <MapView
             frameIndex={frameIndex}
+            frame={frame}
+            flights={displayFlights}
+            effisArea={currentEffisArea}
+            effisCarriedForward={effisCarriedForward}
             layers={layers}
             baseMode={baseMode}
             onMapReady={setMapActions}
@@ -703,7 +821,7 @@ function App() {
               <button className={baseMode === 'satellite' ? 'is-active' : ''} onClick={() => setBaseMode('satellite')} type="button"><Satellite size={14} /> Satellite</button>
               <button className={baseMode === 'topo' ? 'is-active' : ''} onClick={() => setBaseMode('topo')} type="button"><Mountain size={14} /> Topo</button>
             </div>
-            <div className="map-date-chip"><CalendarDays size={14} /><span>{frame.dayLabel === '14 AUG' ? 'Fri 14 Aug' : 'Sat 15 Aug'}</span><strong>{frame.shortTime}</strong></div>
+            <div className="map-date-chip"><CalendarDays size={14} /><span>{frame.dayLabel}</span><strong>{frame.shortTime}</strong></div>
           </div>
 
           <div className="map-warning">
@@ -723,6 +841,7 @@ function App() {
           <div className="map-scale-card"><span><i /> 5 km</span><small>50.548° N · 6.058° E</small></div>
 
           <Timeline
+            frames={frames}
             frameIndex={frameIndex}
             setFrameIndex={setFrameIndex}
             playing={playing}
@@ -735,7 +854,7 @@ function App() {
         <aside className="right-inspector">
           <div className="inspector-tabs">
             <button className={inspectorTab === 'situation' ? 'is-active' : ''} onClick={() => setInspectorTab('situation')} type="button">Situation</button>
-            <button className={inspectorTab === 'air' ? 'is-active' : ''} onClick={() => setInspectorTab('air')} type="button">Air ops <span>{flights.length + importedTracks.length}</span></button>
+            <button className={inspectorTab === 'air' ? 'is-active' : ''} onClick={() => setInspectorTab('air')} type="button">Air ops <span>{displayFlights.length + importedTracks.length}</span></button>
             <button className={inspectorTab === 'traffic' ? 'is-active' : ''} onClick={() => {
               setInspectorTab('traffic')
               setLayers((current) => ({ ...current, traffic: true }))
@@ -752,7 +871,7 @@ function App() {
 
               <div className="snapshot-grid">
                 <article className="snapshot-card snapshot-card--fire"><span><Flame size={15} /> REPORTED AREA</span><strong>{reportedAreaText}<small>{frame.reportedHa == null ? '' : 'ha'}</small></strong><p>{frame.areaLabel}</p></article>
-                <article className="snapshot-card snapshot-card--effis"><span><Layers3 size={15} /> EFFIS FOOTPRINT</span><strong>~{Math.round(effisBurnedArea.areaHa)}<small>ha</small></strong><p>static 14 Aug VIIRS geometry</p></article>
+                <article className="snapshot-card snapshot-card--effis"><span><Layers3 size={15} /> EFFIS DAILY GEOMETRY</span><strong>{currentEffisArea ? Math.round(currentEffisArea.areaHa).toLocaleString('en-GB') : '—'}<small>{currentEffisArea ? 'ha' : ''}</small></strong><p>{currentEffisArea ? `${currentEffisArea.productDate}${effisCarriedForward ? ' carried forward until replacement' : ''} · not official fire size` : 'no EFFIS product available at selected time'}</p></article>
                 <article className="snapshot-card"><span><Satellite size={15} /> HOTSPOTS</span><strong>{visibleHotspots}<small>pts</small></strong><p>{connectedHotspots.length ? 'NASA FIRMS connected' : 'no FIRMS data loaded'}</p></article>
                 <article className="snapshot-card"><span><Helicopter size={15} /> AIR OPS</span><strong>{activeFlights.length}<small>recent</small></strong><p>{activeFlights.length ? 'fix within previous 5 min' : 'no recent observation'}</p></article>
                 <article className="snapshot-card snapshot-card--traffic"><span><Radio size={15} /> OTHER TRAFFIC</span><strong>{trafficLoadStatus === 'loaded' ? activeNearbyTraffic.length : '—'}<small>{trafficLoadStatus === 'loaded' ? 'recent' : ''}</small></strong><p>{trafficLoadStatus === 'loaded' ? `${observedNearbyTrafficCount}/${nearbyTrafficMeta.aircraftCount} identifiers seen by this time` : 'optional replay layer not loaded'}</p></article>
@@ -767,7 +886,7 @@ function App() {
                       <path d="M12 20V4M6.5 9.5 12 4l5.5 5.5" />
                     </svg>
                   </span>
-                  <div><strong>{windCardinal(frame.windDirection)}</strong><span>from {frame.windDirection}° · arrow toward {(frame.windDirection + 180) % 360}°</span></div>
+                  <div><strong>{windCardinal(frame.windDirection)}</strong><span>from {frame.windDirection}° · wind blowing toward {(frame.windDirection + 180) % 360}°</span></div>
                   <p><strong>{frame.windSpeed.toFixed(1)}</strong><span>km/h</span><small>gusts {frame.gust.toFixed(1)}</small></p>
                 </div>
                 <div className="condition-row">
@@ -797,12 +916,12 @@ function App() {
               <div className="air-ops-summary">
                 <span className="kicker">TRACK COVERAGE</span>
                 <h2>Aerial operations</h2>
-                <p>Two police helicopters are confirmed: G10 by photo and MLAT, G12 by a timestamped landed photo. Only G10 has an incident-area receiver path.</p>
+                <p>G10 and G17 have incident-area MLAT observations; G12 is confirmed only by a timestamped 14 August photo. The 15 August heatmap replay is single-provider evidence and does not identify water pickups or drops.</p>
                 <button type="button" onClick={() => setDataOpen(true)}><FileUp size={14} /> Import tracks</button>
               </div>
 
               <div className="flight-list">
-                {[...flights, ...importedTracks].map((flight) => {
+                {[...displayFlights, ...importedTracks].map((flight) => {
                   const state = observationState(flight, frame)
                   const isActive = state.key === 'recent'
                   const hasStarted = !['future'].includes(state.key)
@@ -823,7 +942,8 @@ function App() {
                 })}
               </div>
 
-              <div className="coverage-note"><Radio size={15} /><p><strong>G12 is confirmed, but untracked here.</strong><span>A timestamped BRF photo visibly shows it landed. Its absence from receiver archives does not mean it did not fly.</span></p></div>
+              <div className="coverage-note"><Radio size={15} /><p><strong>Dots are observations; dashed lines are not flight paths.</strong><span>Airplanes.live supplied 30-second MLAT replay samples for G10 and G17 on 15 August. Straight connectors appear only across gaps ≤2 minutes and plausible speed. G12 remains photo-only near this incident.</span></p></div>
+              <div className="coverage-note"><Info size={15} /><p><strong>Wide-area checks separate this incident from nearby activity.</strong><span>{incidentAircraftMeta.negativeFindings[0]} {incidentAircraftMeta.negativeFindings[1]} The known Aachen/Walheim MLAT artifact is excluded.</span></p></div>
             </div>
           ) : (
             <div className="inspector-scroll traffic-panel">
@@ -894,6 +1014,7 @@ function App() {
         importedCount={importedTracks.length}
         onFirmsData={setConnectedHotspots}
         connectedCount={connectedHotspots.length}
+        frames={frames}
       />
     </div>
   )

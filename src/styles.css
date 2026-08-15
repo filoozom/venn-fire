@@ -184,6 +184,11 @@ button {
   box-shadow: 0 0 0 4px rgba(44, 167, 120, 0.11);
 }
 
+.live-pulse.is-bundled {
+  background: #d39a2f;
+  box-shadow: 0 0 0 4px rgba(211, 154, 47, 0.12);
+}
+
 .updated-state > div {
   display: flex;
   flex-direction: column;
@@ -946,7 +951,7 @@ button {
 }
 
 .fire-perimeter-line {
-  filter: drop-shadow(0 2px 4px rgba(157, 56, 25, 0.26));
+  filter: drop-shadow(0 2px 4px rgba(145, 91, 31, 0.22));
 }
 
 .hotspot-pulse {
