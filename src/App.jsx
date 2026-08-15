@@ -47,6 +47,8 @@ import {
   fireFrames,
   flights,
   initialLayers,
+  nearbyTrafficMeta,
+  normalizeNearbyTrafficSnapshot,
   sourceLinks,
 } from './data'
 
@@ -54,6 +56,7 @@ const layerOptions = [
   { key: 'perimeter', label: 'EFFIS fire footprint', detail: '14 Aug daily VIIRS product · ~501 ha', icon: Layers3, color: '#e96838' },
   { key: 'hotspots', label: 'NASA hotspots', detail: 'Only after a FIRMS response', icon: Satellite, color: '#efaa3c' },
   { key: 'aircraft', label: 'Aircraft observations', detail: 'MLAT fixes + photo evidence', icon: Helicopter, color: '#3a7fcc' },
+  { key: 'traffic', label: 'All nearby receiver traffic', detail: '116 other identifiers · optional', icon: Radio, color: '#687e8a' },
   { key: 'wind', label: 'Wind at Drossart', detail: '10 m hourly model value', icon: Wind, color: '#4f9e90' },
 ]
 
@@ -62,6 +65,14 @@ const OBSERVATION_RECENCY_MS = 5 * 60 * 1000
 function windCardinal(deg) {
   const names = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
   return names[Math.round(deg / 22.5) % 16]
+}
+
+function localClock(timestamp) {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Brussels',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(timestamp))
 }
 
 function observationState(flight, frame) {
@@ -234,7 +245,7 @@ function Timeline({ frameIndex, setFrameIndex, playing, setPlaying, playbackRate
 
       <div className="timeline-foot">
         <span><Radio size={12} /> Five-minute timeline · {visibleEvents.length} sourced updates visible</span>
-        <span className="reconstruction-note"><Info size={12} /> Dashed aircraft links join only plausible adjacent fixes; gaps stay open. Icons appear only within five minutes of a fix.</span>
+        <span className="reconstruction-note"><Info size={12} /> Paths join only adjacent, plausible source fixes; gaps stay open. The optional traffic layer never implies an incident role.</span>
         <a className="apyos-credit" href="https://apyos.com" target="_blank" rel="noreferrer">
           Developed by <strong>Apyos</strong><ExternalLink size={11} />
         </a>
@@ -460,6 +471,7 @@ function DataModal({ open, onClose, onImportTracks, importedCount, onFirmsData, 
                 <article><span>02</span><div><strong>Reported area</strong><p>The ~100 ha figure appears only from the cited reporting time and is never converted into a drawn shape.</p></div></article>
                 <article><span>03</span><div><strong>Satellite footprint</strong><p>The ~501 ha map shape is the real 14 August EFFIS VIIRS-derived polygon. It is a static daily algorithmic footprint, not a surveyed perimeter or five-minute progression.</p></div></article>
                 <article><span>04</span><div><strong>Aircraft observations</strong><p>G10 is shown as individual MLAT fixes. Gaps stay empty, and a marker never claims the helicopter remained airborne.</p></div></article>
+                <article><span>05</span><div><strong>Nearby traffic census</strong><p>The optional traffic layer contains every other identifier seen within 5 km in either retained replay. Exact samples extend to 10 km for path context; none is assigned an incident role.</p></div></article>
               </div>
               <div className="safety-note"><ShieldAlert size={17} /><span>This viewer is informational and must not be used for evacuation or preservation-of-life decisions. Follow BE-Alert and emergency services.</span></div>
             </div>
@@ -496,6 +508,9 @@ function App() {
   const [mobileLayersOpen, setMobileLayersOpen] = useState(false)
   const [importedTracks, setImportedTracks] = useState([])
   const [connectedHotspots, setConnectedHotspots] = useState([])
+  const [nearbyTraffic, setNearbyTraffic] = useState([])
+  const [trafficLoadStatus, setTrafficLoadStatus] = useState('idle')
+  const [trafficLoadError, setTrafficLoadError] = useState('')
   const frame = fireFrames[frameIndex]
   const reportedAreaText = frame.reportedHa == null ? '—' : `~${frame.reportedHa}`
 
@@ -513,6 +528,20 @@ function App() {
     }, delay)
     return () => window.clearInterval(timer)
   }, [playing, playbackRate])
+
+  useEffect(() => {
+    if ((!layers.traffic && inspectorTab !== 'traffic') || trafficLoadStatus !== 'idle') return
+    setTrafficLoadStatus('loading')
+    import('./nearbyTrafficSnapshot.json')
+      .then((module) => {
+        setNearbyTraffic(normalizeNearbyTrafficSnapshot(module.default))
+        setTrafficLoadStatus('loaded')
+      })
+      .catch((error) => {
+        setTrafficLoadError(error.message)
+        setTrafficLoadStatus('error')
+      })
+  }, [layers.traffic, inspectorTab])
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -536,6 +565,22 @@ function App() {
   const activeFlights = useMemo(
     () => flights.filter((flight) => observationState(flight, frame).key === 'recent'),
     [frame],
+  )
+
+  const activeNearbyTraffic = useMemo(
+    () => nearbyTraffic
+      .filter((flight) => observationState(flight, frame).key === 'recent')
+      .sort((left, right) => (
+        (left.classification === 'low-level' ? 0 : 1) - (right.classification === 'low-level' ? 0 : 1)
+        || (observationState(right, frame).latest?.altitudeFt ?? Number.POSITIVE_INFINITY)
+          - (observationState(left, frame).latest?.altitudeFt ?? Number.POSITIVE_INFINITY)
+      )),
+    [frame, nearbyTraffic],
+  )
+
+  const observedNearbyTrafficCount = useMemo(
+    () => nearbyTraffic.filter((flight) => flight.observations[0]?.timestampMs <= frame.timestampMs).length,
+    [frame, nearbyTraffic],
   )
 
   const visibleHotspots = connectedHotspots.filter((spot) => spot.frame <= frameIndex).length
@@ -580,6 +625,9 @@ function App() {
 
       <div className="workspace">
         <aside className={`left-sidebar ${mobileLayersOpen ? 'is-mobile-open' : ''}`}>
+          <button className="mobile-sidebar-close" type="button" onClick={() => setMobileLayersOpen(false)}>
+            <span>Close layers</span><X size={17} />
+          </button>
           <div className="incident-card">
             <div className="incident-card-head">
               <span className="active-tag"><i /> INCIDENT RECORD</span>
@@ -601,7 +649,10 @@ function App() {
                   key={item.key}
                   item={item}
                   checked={layers[item.key]}
-                  onChange={() => setLayers((value) => ({ ...value, [item.key]: !value[item.key] }))}
+                  onChange={() => {
+                    setLayers((value) => ({ ...value, [item.key]: !value[item.key] }))
+                    setMobileLayersOpen(false)
+                  }}
                 />
               ))}
             </div>
@@ -620,6 +671,12 @@ function App() {
             </button>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
               <SourceMark tone="adsb" /><span><strong>Aircraft</strong><small>{flights.length} sourced set{importedTracks.length ? ` · ${importedTracks.length} static import` : ''}</small></span><em className="health-dot" /></button>
+            <button className="source-health-row" onClick={() => {
+              setInspectorTab('traffic')
+              setLayers((current) => ({ ...current, traffic: true }))
+            }} type="button">
+              <SourceMark tone="adsb" /><span><strong>Area traffic</strong><small>{nearbyTrafficMeta.aircraftCount} other identifiers · 2 replays</small></span><em className="health-dot" />
+            </button>
           </div>
 
           <div className="emergency-note">
@@ -636,6 +693,7 @@ function App() {
             onMapReady={setMapActions}
             importedTracks={importedTracks}
             connectedHotspots={connectedHotspots}
+            nearbyTraffic={nearbyTraffic}
           />
 
           <div className="map-topbar">
@@ -678,6 +736,10 @@ function App() {
           <div className="inspector-tabs">
             <button className={inspectorTab === 'situation' ? 'is-active' : ''} onClick={() => setInspectorTab('situation')} type="button">Situation</button>
             <button className={inspectorTab === 'air' ? 'is-active' : ''} onClick={() => setInspectorTab('air')} type="button">Air ops <span>{flights.length + importedTracks.length}</span></button>
+            <button className={inspectorTab === 'traffic' ? 'is-active' : ''} onClick={() => {
+              setInspectorTab('traffic')
+              setLayers((current) => ({ ...current, traffic: true }))
+            }} type="button">Traffic <span>{nearbyTrafficMeta.aircraftCount}</span></button>
           </div>
 
           {inspectorTab === 'situation' ? (
@@ -692,7 +754,8 @@ function App() {
                 <article className="snapshot-card snapshot-card--fire"><span><Flame size={15} /> REPORTED AREA</span><strong>{reportedAreaText}<small>{frame.reportedHa == null ? '' : 'ha'}</small></strong><p>{frame.areaLabel}</p></article>
                 <article className="snapshot-card snapshot-card--effis"><span><Layers3 size={15} /> EFFIS FOOTPRINT</span><strong>~{Math.round(effisBurnedArea.areaHa)}<small>ha</small></strong><p>static 14 Aug VIIRS geometry</p></article>
                 <article className="snapshot-card"><span><Satellite size={15} /> HOTSPOTS</span><strong>{visibleHotspots}<small>pts</small></strong><p>{connectedHotspots.length ? 'NASA FIRMS connected' : 'no FIRMS data loaded'}</p></article>
-                <article className="snapshot-card"><span><Helicopter size={15} /> AIRCRAFT</span><strong>{activeFlights.length}<small>recent</small></strong><p>{activeFlights.length ? 'fix within previous 5 min' : 'no recent observation'}</p></article>
+                <article className="snapshot-card"><span><Helicopter size={15} /> AIR OPS</span><strong>{activeFlights.length}<small>recent</small></strong><p>{activeFlights.length ? 'fix within previous 5 min' : 'no recent observation'}</p></article>
+                <article className="snapshot-card snapshot-card--traffic"><span><Radio size={15} /> OTHER TRAFFIC</span><strong>{trafficLoadStatus === 'loaded' ? activeNearbyTraffic.length : '—'}<small>{trafficLoadStatus === 'loaded' ? 'recent' : ''}</small></strong><p>{trafficLoadStatus === 'loaded' ? `${observedNearbyTrafficCount}/${nearbyTrafficMeta.aircraftCount} identifiers seen by this time` : 'optional replay layer not loaded'}</p></article>
                 <article className="snapshot-card snapshot-card--wind"><span><Wind size={15} /> WIND FROM</span><strong>{windCardinal(frame.windDirection)}<small>{frame.windDirection}°</small></strong><p>{frame.windSpeed.toFixed(1)} km/h · gust {frame.gust.toFixed(0)}</p></article>
               </div>
 
@@ -729,7 +792,7 @@ function App() {
                 </div>
               </section>
             </div>
-          ) : (
+          ) : inspectorTab === 'air' ? (
             <div className="inspector-scroll air-ops-panel">
               <div className="air-ops-summary">
                 <span className="kicker">TRACK COVERAGE</span>
@@ -761,6 +824,64 @@ function App() {
               </div>
 
               <div className="coverage-note"><Radio size={15} /><p><strong>G12 is confirmed, but untracked here.</strong><span>A timestamped BRF photo visibly shows it landed. Its absence from receiver archives does not mean it did not fly.</span></p></div>
+            </div>
+          ) : (
+            <div className="inspector-scroll traffic-panel">
+              <div className="traffic-summary">
+                <span className="kicker">RECEIVER CENSUS · 5 KM</span>
+                <h2>Nearby traffic</h2>
+                <p>Every other identifier observed within 5 km of Drossart in either retained replay. Paths use exact samples out to 10 km for context. None is classified as an incident aircraft.</p>
+                <button type="button" onClick={() => setLayers((current) => ({ ...current, traffic: !current.traffic }))}>
+                  {layers.traffic ? <EyeOff size={14} /> : <Eye size={14} />}
+                  {layers.traffic ? 'Hide traffic layer' : 'Show traffic layer'}
+                </button>
+                <div className="traffic-metrics">
+                  <span><strong>{nearbyTrafficMeta.aircraftCount}</strong><small>IDENTIFIERS</small></span>
+                  <span><strong>{nearbyTrafficMeta.lowLevelAircraftCount}</strong><small>LOW-LEVEL</small></span>
+                  <span><strong>{nearbyTrafficMeta.observationCount}</strong><small>SOURCE FIXES</small></span>
+                </div>
+              </div>
+
+              {trafficLoadStatus === 'loading' && <div className="traffic-load-state"><Activity size={16} /><span>Loading the checked-in replay snapshot…</span></div>}
+              {trafficLoadStatus === 'error' && <div className="traffic-load-state is-error"><BadgeAlert size={16} /><span>{trafficLoadError || 'The replay snapshot could not be loaded.'}</span></div>}
+
+              {trafficLoadStatus === 'loaded' && <>
+              <section className="recent-traffic">
+                <div className="section-heading"><span>AT SELECTED TIME</span><small>{activeNearbyTraffic.length} seen in prior 5 min</small></div>
+                {activeNearbyTraffic.length ? (
+                  <div className="recent-traffic-list">
+                    {activeNearbyTraffic.slice(0, 16).map((flight) => {
+                      const latest = observationState(flight, frame).latest
+                      return (
+                        <article key={flight.id}>
+                          <i style={{ '--traffic-color': flight.color }} />
+                          <span><strong>{flight.callSign || flight.registration || flight.icao24}</strong><small>{flight.classification === 'low-level' ? 'had a ≤5,000 ft sample in the scan' : 'high-altitude overflight'} · no incident role</small></span>
+                          <span><strong>{latest?.altitudeFt ?? '—'} ft</strong><small>{latest ? localClock(latest.observedAt) : '—'} CEST</small></span>
+                        </article>
+                      )
+                    })}
+                    {activeNearbyTraffic.length > 16 && <p>+{activeNearbyTraffic.length - 16} more recently observed identifiers on the map.</p>}
+                  </div>
+                ) : (
+                  <p className="traffic-empty">No retained receiver observation falls within the previous five minutes.</p>
+                )}
+              </section>
+
+              <section className="low-level-ledger">
+                <div className="section-heading"><span>LOW-LEVEL REVIEW SET</span><small>≤5,000 ft filter</small></div>
+                <div className="traffic-ledger-list">
+                  {nearbyTraffic.filter((flight) => flight.classification === 'low-level').map((flight) => (
+                    <article key={flight.id}>
+                      <div><strong>{flight.callSign || flight.registration || flight.icao24}</strong><small>{flight.registration || flight.icao24}</small></div>
+                      <p>{flight.label}<small>{localClock(flight.firstObservedAt)}–{localClock(flight.lastObservedAt)} CEST · {flight.source}</small></p>
+                      <span><strong>{flight.nearestDrossartKm.toFixed(1)} km</strong><small>closest</small></span>
+                    </article>
+                  ))}
+                </div>
+              </section>
+
+              <div className="coverage-note"><Info size={15} /><p><strong>Low altitude is a review filter, not a mission label.</strong><span>The two Cessna 208s are known parachuting aircraft; the other five have no sourced firefighting role. High-altitude traffic remains available on the map but is visually subdued.</span></p></div>
+              </>}
             </div>
           )}
         </aside>

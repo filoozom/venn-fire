@@ -13,6 +13,9 @@ import {
 } from './data'
 
 const OBSERVATION_RECENCY_MS = 5 * 60 * 1000
+const TRAFFIC_PATH_MAX_GAP_MS = 90 * 1000
+const LOW_LEVEL_TRAFFIC_MAX_SPEED_KT = 250
+const OVERFLIGHT_TRAFFIC_MAX_SPEED_KT = 700
 const INCIDENT_MAP_BOUNDS = [[50.505, 6.015], [50.58, 6.135]]
 const INCIDENT_MAP_PADDING = {
   paddingTopLeft: [18, 72],
@@ -28,15 +31,43 @@ function haversineKm(left, right) {
   return 6371.0088 * 2 * Math.asin(Math.sqrt(value))
 }
 
-function plausibleObservationLinks(observations) {
+function plausibleObservationLinks(
+  observations,
+  maxGapMs = AIRCRAFT_PATH_MAX_GAP_MS,
+  maxSpeedKt = AIRCRAFT_PATH_MAX_SPEED_KT,
+) {
   return observations.slice(1).flatMap((observation, index) => {
     const previous = observations[index]
     const elapsedMs = observation.timestampMs - previous.timestampMs
-    if (elapsedMs <= 0 || elapsedMs > AIRCRAFT_PATH_MAX_GAP_MS) return []
+    if (elapsedMs <= 0 || elapsedMs > maxGapMs) return []
     const impliedSpeedKt = haversineKm(previous, observation) / 1.852 / (elapsedMs / 3_600_000)
-    if (impliedSpeedKt > AIRCRAFT_PATH_MAX_SPEED_KT) return []
+    if (impliedSpeedKt > maxSpeedKt) return []
     return [{ previous, observation, impliedSpeedKt }]
   })
+}
+
+function plausibleObservationSegments(observations, maxGapMs, maxSpeedKt) {
+  const segments = []
+  let current = []
+  observations.forEach((observation) => {
+    const previous = current.at(-1)
+    if (!previous) {
+      current = [observation]
+      return
+    }
+    const elapsedMs = observation.timestampMs - previous.timestampMs
+    const impliedSpeedKt = elapsedMs > 0
+      ? haversineKm(previous, observation) / 1.852 / (elapsedMs / 3_600_000)
+      : Number.POSITIVE_INFINITY
+    if (elapsedMs > maxGapMs || impliedSpeedKt > maxSpeedKt) {
+      if (current.length >= 2) segments.push(current)
+      current = [observation]
+      return
+    }
+    current.push(observation)
+  })
+  if (current.length >= 2) segments.push(current)
+  return segments
 }
 
 const basemaps = {
@@ -91,6 +122,26 @@ function photoEvidenceIcon(flight) {
   })
 }
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    "'": '&#39;',
+    '"': '&quot;',
+  })[character])
+}
+
+function trafficObservationIcon(flight) {
+  const label = escapeHtml(flight.callSign || flight.registration || flight.icao24)
+  return L.divIcon({
+    className: `traffic-observation-marker traffic-observation-marker--${flight.classification}`,
+    html: `<span style="--traffic-color:${flight.color}"><i></i><b>${label}</b></span>`,
+    iconSize: [82, 24],
+    iconAnchor: [7, 12],
+  })
+}
+
 function localObservationTime(timestamp) {
   return new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Europe/Brussels',
@@ -100,7 +151,15 @@ function localObservationTime(timestamp) {
   }).format(new Date(timestamp))
 }
 
-export default function MapView({ frameIndex, layers, baseMode, onMapReady, importedTracks = [], connectedHotspots = [] }) {
+export default function MapView({
+  frameIndex,
+  layers,
+  baseMode,
+  onMapReady,
+  importedTracks = [],
+  connectedHotspots = [],
+  nearbyTraffic = [],
+}) {
   const nodeRef = useRef(null)
   const mapRef = useRef(null)
   const tileRef = useRef(null)
@@ -250,6 +309,62 @@ export default function MapView({ frameIndex, layers, baseMode, onMapReady, impo
       })
     }
 
+    if (layers.traffic) {
+      nearbyTraffic.forEach((flight) => {
+        const visible = flight.observations.filter((observation) => observation.timestampMs <= frame.timestampMs)
+        if (!visible.length) return
+        const lowLevel = flight.classification === 'low-level'
+        const maxSpeedKt = lowLevel ? LOW_LEVEL_TRAFFIC_MAX_SPEED_KT : OVERFLIGHT_TRAFFIC_MAX_SPEED_KT
+        const identifier = escapeHtml(flight.callSign || flight.registration || flight.icao24)
+        const sourceName = escapeHtml(flight.source)
+        const corroboration = flight.observedBy.length > 1
+          ? `${flight.observedBy.length}-provider replay cross-check`
+          : 'single retained replay source'
+
+        plausibleObservationSegments(visible, TRAFFIC_PATH_MAX_GAP_MS, maxSpeedKt)
+          .forEach((segment) => {
+            const first = segment[0]
+            const last = segment.at(-1)
+            const altitudes = segment.map((observation) => observation.altitudeFt).filter(Number.isFinite)
+            const altitudeRange = altitudes.length
+              ? `${Math.min(...altitudes)}–${Math.max(...altitudes)} ft`
+              : 'altitude unavailable'
+            L.polyline(segment.map((observation) => observation.position), {
+              color: flight.color,
+              weight: lowLevel ? 1.7 : 1,
+              opacity: lowLevel ? 0.68 : 0.34,
+              dashArray: lowLevel ? '4 4' : '2 5',
+              interactive: true,
+            })
+              .bindTooltip(`<strong>${identifier}: receiver-observed path segment</strong><br>${localObservationTime(first.observedAt)}–${localObservationTime(last.observedAt)} CEST · ${segment.length} exact samples · ${altitudeRange}<br><small>${sourceName}; adjacent samples joined only across ≤90 s and plausible speed · no incident role inferred</small>`, { sticky: true })
+              .addTo(group)
+          })
+
+        visible.filter((observation) => observation.distanceDrossartKm <= 5).forEach((observation) => {
+          L.circleMarker(observation.position, {
+            radius: lowLevel ? 2.7 : 1.7,
+            color: lowLevel ? '#fff4dd' : '#e5edf1',
+            weight: lowLevel ? 0.9 : 0.5,
+            fillColor: flight.color,
+            fillOpacity: lowLevel ? 0.72 : 0.40,
+          })
+            .bindTooltip(`<strong>${identifier}: nearby traffic observation</strong><br>${localObservationTime(observation.observedAt)} CEST · ${observation.altitudeFt ?? '—'} ft · ${observation.distanceDrossartKm.toFixed(1)} km from Drossart<br><small>${sourceName} replay sample · ${corroboration} · no incident role inferred</small>`, { direction: 'top' })
+            .addTo(group)
+        })
+
+        const latest = visible.at(-1)
+        const age = frame.timestampMs - latest.timestampMs
+        if (age >= 0 && age <= OBSERVATION_RECENCY_MS) {
+          L.marker(latest.position, {
+            icon: trafficObservationIcon(flight),
+            zIndexOffset: lowLevel ? 520 : 360,
+          })
+            .bindTooltip(`<strong>${identifier}: recently observed traffic</strong><br>${localObservationTime(latest.observedAt)} CEST · ${latest.altitudeFt ?? '—'} ft<br><small>Observation within the preceding five minutes; current position or airborne status is not asserted.</small>`, { direction: 'top', offset: [0, -10] })
+            .addTo(group)
+        }
+      })
+    }
+
     if (layers.aircraft) {
       ;[...flights, ...importedTracks].forEach((flight) => {
         const visibleEvidence = (flight.evidenceObservations || [])
@@ -319,7 +434,7 @@ export default function MapView({ frameIndex, layers, baseMode, onMapReady, impo
       })
       L.marker([50.575, 6.105], { icon: windIcon, interactive: false }).addTo(group)
     }
-  }, [frameIndex, layers, importedTracks, connectedHotspots])
+  }, [frameIndex, layers, importedTracks, connectedHotspots, nearbyTraffic])
 
   return (
     <div className="map-surface" aria-label="Interactive fire situation map">

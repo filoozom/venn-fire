@@ -1,3 +1,5 @@
+import nearbyTrafficSummary from './nearbyTrafficSummary.json'
+
 const CENTER = [50.54762, 6.05757]
 const FIVE_MINUTES_MS = 5 * 60 * 1000
 export const AIRCRAFT_PATH_MAX_GAP_MS = 2 * 60 * 1000
@@ -65,6 +67,50 @@ function frameAt(isoTimestamp) {
 // There is no bundled FIRMS result. Detections are shown only after a real API
 // response is loaded in the browser.
 export const hotspots = []
+
+export const nearbyTrafficMeta = {
+  schemaVersion: nearbyTrafficSummary.schemaVersion,
+  generatedAt: nearbyTrafficSummary.generatedAt,
+  incidentDate: nearbyTrafficSummary.incidentDate,
+  selection: nearbyTrafficSummary.selection,
+  sources: nearbyTrafficSummary.sources,
+  aircraftCount: nearbyTrafficSummary.aircraftCount,
+  lowLevelAircraftCount: nearbyTrafficSummary.lowLevelAircraftCount,
+  overflightAircraftCount: nearbyTrafficSummary.overflightAircraftCount,
+  observationCount: nearbyTrafficSummary.observationCount,
+  interpretation: nearbyTrafficSummary.interpretation,
+}
+
+// Union of every non-incident identifier observed within 5 km of Drossart in
+// either retained receiver replay. Geometry is kept to exact source samples
+// within 10 km for entry/exit context. G10 is excluded because its more strongly
+// sourced incident representation is maintained separately below.
+export function normalizeNearbyTrafficSnapshot(snapshot) {
+  const trafficSourceById = Object.fromEntries(snapshot.sources.map((source) => [source.id, source]))
+  return snapshot.aircraft.map((aircraft) => {
+    const source = trafficSourceById[aircraft.geometrySource]
+    return {
+      ...aircraft,
+      label: aircraft.description || aircraft.aircraftType || 'Unclassified receiver-observed aircraft',
+      type: 'traffic',
+      color: aircraft.classification === 'low-level' ? '#9b6b20' : '#657b88',
+      status: `${aircraft.missionStatus}; ${aircraft.classification === 'low-level' ? 'altitude-filtered nearby traffic' : 'high-altitude overflight'}`,
+      source: source?.name || aircraft.geometrySource,
+      sourceUrl: source?.website || null,
+      pathMethod: aircraft.classification === 'low-level'
+        ? 'Exact replay samples; links require ≤90 s gap and ≤250 kt implied speed'
+        : 'Exact replay samples; links require ≤90 s gap and ≤700 kt implied speed',
+      observations: aircraft.observations.map((observation) => ({
+        observedAt: observation.observedAt,
+        timestampMs: Date.parse(observation.observedAt),
+        position: [observation.latitude, observation.longitude],
+        altitudeFt: observation.altitudeFt,
+        distanceDrossartKm: observation.distanceDrossartKm,
+        updateType: 'receiver replay snapshot',
+      })),
+    }
+  })
+}
 
 // Exact Airplanes.live MLAT observations inside the broad incident search area.
 // They are points, not an interpolated path. The map may join two consecutive
@@ -251,6 +297,13 @@ export const sourceLinks = [
     tone: 'adsb',
   },
   {
+    name: 'ADSB.lol',
+    detail: 'Independent historical receiver-replay cross-check',
+    cadence: '10 s retained replay slices',
+    url: 'https://www.adsb.lol/docs/open-data/historical/',
+    tone: 'adsb',
+  },
+  {
     name: 'Federal Police',
     detail: 'Official G10 fleet identity',
     cadence: 'Reference',
@@ -291,6 +344,7 @@ export const initialLayers = {
   perimeter: true,
   hotspots: true,
   aircraft: true,
+  traffic: false,
   wind: true,
   protected: false,
 }

@@ -10,6 +10,7 @@ An evidence-first, time-based incident viewer for the 14 August 2026 fire near D
 - The official Copernicus EFFIS near-real-time VIIRS-derived polygon for 14 August is bundled as a separate static reference footprint. Its geometry measures approximately `501 ha` locally. EFFIS generates this product automatically from 375 m active-fire detections; it is not a field-surveyed incident perimeter, is not used by EFFIS for burned-area statistics, and has no within-day timestamps for five-minute progression.
 - Twenty-one exact Airplanes.live MLAT fixes for Belgian Federal Police helicopter G10 (`44c1e5`) in the broad incident area. Dashed straight connectors appear only between consecutive fixes at most two minutes apart and implying at most 160 knots; gaps remain open and the result is never presented as a continuous route or airborne status.
 - Photo identification of both reported helicopters: a BRF incident image visibly shows G10 airborne at 15:37:08 CEST, and another visibly shows G12 landed at 16:30:54 CEST. The times come from intact image EXIF. The G12 map marker uses the photographer's embedded GPS position and is labelled as a photo location, not an aircraft fix.
+- An optional census of every other transponder identifier observed within 5 km of Drossart in either of two retained receiver replays. It contains 116 identifiers and 1,372 exact source fixes within a 10 km context radius. Seven identifiers met a broad low-altitude review threshold; 109 were high-altitude overflights. No traffic entry is labelled as an incident aircraft.
 - Hourly Open-Meteo wind, gust, temperature and humidity model values for the Drossart grid point (`50.548° N, 6.061° E`). Five-minute frames retain the applicable hourly source value.
 - No placeholder FIRMS hotspots. VIIRS detections appear only after NASA returns data for a user-supplied `MAP_KEY`.
 - Static GeoJSON/CSV import for additional tracks. Untimed imports are explicitly static and do not create aircraft status.
@@ -100,6 +101,28 @@ The scan downloads roughly 350 MB of replay tiles but retains only in-bounds obs
 The ADSB.lol cross-check retained 2,868 in-bounds observations from 304 identifiers. It published daily trace files for G10 and G12 only, but neither trace contained an incident-area position; the other five known police helicopter hexes returned no daily trace. Its nine low-altitude area candidates resolve to fixed-wing aircraft except private EC120 OO-STX, whose only area observation was about 17 km from Drossart. The second incident helicopter is therefore identified as G12 from photography, not from a receiver track.
 
 Airplanes.live's free interface is documented for non-commercial use. Confirm permission before republishing raw data in another context, retain attribution, and do not treat coverage as complete.
+
+## Nearby receiver-traffic snapshot
+
+Build the optional all-traffic layer from the two retained scans with:
+
+```bash
+pnpm build:traffic-snapshot
+```
+
+Independently compare the generated snapshot against both retained source documents with:
+
+```bash
+pnpm verify:traffic-snapshot
+```
+
+The verifier recomputes the selected identifier union and confirms that every published timestamp, coordinate and altitude exactly matches a retained provider observation. It also checks the selected geometry source, altitude classification and aggregate counts. The ignored `.local-data` source documents must be present to run either command.
+
+The selection contains every identifier seen within 5 km of the Drossart locality by Airplanes.live or ADSB.lol between 11:00 and 22:00 UTC. G10 is then excluded because its incident representation is maintained separately. The resulting optional layer contains 116 other identifiers; 107 were independently observed inside the selection radius by both provider replays. For each identifier, the provider with more observations inside a 10 km context radius supplies the displayed geometry, avoiding duplicate or averaged positions.
+
+The seven low-altitude review entries are Cessna 208s OO-SPA and F-HSVS, Diamond DA20 D-ELZB, Cessna 150s OO-ALD and OO-FUN, Cessna 152 OO-APV, and unidentified hex `449932` with observed callsign `OOFIR`. The Cessna 208s are known parachuting aircraft. None has a sourced firefighting role. “Low altitude” means only that at least one retained observation was at or below 5,000 ft.
+
+Map points are exact observations and are never interpolated. Straight connectors are drawn only between adjacent fixes no more than 90 seconds apart and with an implied speed no greater than 250 knots for low-level traffic or 700 knots for high-altitude traffic. All other gaps stay open. A marker appears only when a source fix exists within the preceding five minutes; it does not assert that the aircraft remained airborne. The layer is off by default because most entries are unrelated overflights.
 
 ## Other public providers tested
 

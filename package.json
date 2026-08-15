@@ -12,7 +12,9 @@
     "import:public-adsb": "node scripts/import-public-adsb-traces.mjs",
     "import:effis": "node scripts/import-effis-burned-area.mjs",
     "scan:aircraft": "node scripts/extract-adsb-replay.mjs",
-    "enrich:aircraft": "node scripts/enrich-aircraft-candidates.mjs"
+    "enrich:aircraft": "node scripts/enrich-aircraft-candidates.mjs",
+    "build:traffic-snapshot": "node scripts/build-nearby-traffic-snapshot.mjs",
+    "verify:traffic-snapshot": "node scripts/verify-nearby-traffic-snapshot.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
