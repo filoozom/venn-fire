@@ -894,7 +894,7 @@ function App() {
         </div>
 
         <div className="incident-heading">
-          <div className="incident-location"><MapPin size={14} /><span>HIGH FENS</span><i>/</i><b>EUPEN · BAELEN</b></div>
+          <div className="incident-location"><MapPin size={14} /><span>HIGH FENS</span><i>/</i><b>BAELEN · JALHAY</b></div>
           <span className="reference-badge"><Sparkles size={11} /> OBSERVATION VIEW</span>
         </div>
 
