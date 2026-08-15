@@ -24,6 +24,7 @@ import {
 } from './controlled-sources.mjs'
 import { persistFlightPoll } from './flight-history.mjs'
 import { refreshVedia } from './media-sources.mjs'
+import { refreshMunicipalUpdates } from './municipal-sources.mjs'
 
 const INCIDENT = { latitude: 50.54762, longitude: 6.05757 }
 const INCIDENT_START = '2026-08-14T11:00:00.000Z'
@@ -792,6 +793,11 @@ export const REFRESH_SOURCES = [
     coverage: 'Strict official/local affected-area reports and explicitly timestamped incident notices',
   },
   {
+    key: 'local-authority-updates', label: 'Official local-authority updates', intervalMinutes: 5, run: refreshMunicipalUpdates,
+    providerUrl: 'https://www.stavelot.be/actualites',
+    coverage: 'Incident notices from Stavelot, Malmedy, Jalhay, Baelen, Eupen, Waimes, Bütgenbach, VHP, HLZ DG and Eifel Police, with raw responses retained',
+  },
+  {
     key: 'vedia', label: 'Vedia incident reporting', intervalMinutes: 5, run: refreshVedia,
     providerUrl: 'https://www.vedia.be/jsonapi/node/content',
     coverage: 'New and revised incident articles, source summaries and publication timestamps; always labelled local media',
@@ -870,6 +876,21 @@ function registrySources(environment = process.env) {
 }
 
 const COVERAGE_GAPS = [
+  {
+    key: 'walloon-live-road-events',
+    status: 'access-not-supplied',
+    detail: 'The official DATEX II adapter is ready, but no provider credentials or authenticated agency push has been supplied.',
+  },
+  {
+    key: 'field-confirmed-fire-perimeter',
+    status: 'access-not-supplied',
+    detail: 'No fire-service or crisis-centre GeoJSON perimeter feed/export has been supplied to the ready pull/push adapter.',
+  },
+  {
+    key: 'sanitized-suppression-operations',
+    status: 'access-not-supplied',
+    detail: 'No agency-approved dispatch, water pickup/drop, closure, evacuation or aggregate-compliance feed/export has been supplied.',
+  },
   {
     key: 'historical-be-alert-before-collection',
     status: 'not-reconstructable-from-live-feed',

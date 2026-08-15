@@ -28,7 +28,7 @@ The linked serverless Postgres database is addressed through `DATABASE_URL` or `
 - `app_dataset_versions`: immutable, content-addressed history when source content changes. Retrieval timestamps are excluded from the content hash.
 - `source_refresh_runs`: one status record for every claimed source/time bucket, including unchanged polls and errors.
 - `refresh_scheduler_ticks`: one leased status row per deployment/wake-up slot, preventing duplicate queue messages from branching the refresh chain.
-- `source_artifacts`: the migrated compressed raw audit archive. The completed migration contains 147 artifacts representing 23,679,948 original bytes.
+- `source_artifacts`: the content-addressed raw audit archive, including source API/feed responses and retained Sentinel quicklook bytes. Current counts and original-byte totals are reported by the database overview.
 - `flight_import_runs` and `flight_observations`: exact, deduplicated receiver fixes retained for the incident lifetime.
 
 The repository contains no data snapshots, raw-response directory or local refresh daemon. Reviewed incident configuration and all former local snapshots were seeded into Postgres before their local removal.
@@ -66,6 +66,7 @@ The scheduler has five-minute granularity. A database lease makes repeated calls
 | adsb.fi + ADSB.lol + Airplanes.live | Exact receiver observations for the configured incident aircraft inside 10 km; providers are health-reported independently | 5 min |
 | Open-Meteo | Hourly model-grid temperature, humidity, wind and gust rows | 5 min |
 | Governor of Liège + BRF | Strictly parsed, timestamped affected-area reports and official incident events | 5 min |
+| Stavelot + Malmedy + Jalhay + Baelen + Eupen + Waimes + Bütgenbach + VHP + HLZ DG + Eifel Police | Official local-authority and emergency-service RSS/JSON/WordPress/HTML feeds; incident notices and raw source responses are retained | 5 min |
 | Vedia JSON:API | Incident-filtered article metadata, source summaries, revision timestamps and raw API audit artifacts, always labelled local media | 5 min |
 | BE-Alert CAP gateway | CAP alerts accumulated from the live feed, including records retained after expiry | 5 min |
 | Walloon DATEX II adapter | Contract-gated road incidents, congestion, works and closures by credentialed pull or authenticated push | 5 min |
@@ -130,7 +131,7 @@ Optional controlled-source variables:
 
 The source registry exposes only whether each adapter is configured; URLs issued privately by agencies, usernames, passwords, authorization headers and the ingestion token are never returned to the browser. Road pushes accept DATEX II XML, perimeter pushes accept WGS84 GeoJSON Polygon/MultiPolygon features, and operations pushes accept a publishable JSON `events` array. Raw CAD/radio traffic and personal evacuation-compliance records must not be sent; only agency-approved sanitized events and aggregate counts are accepted.
 
-Known source limits are stored in `source-registry` and shown in the Data & Sources modal: BE-Alert records that expired before collection cannot be reconstructed without an archive; analysis-ready Sentinel multispectral processing needs Copernicus OAuth credentials; raw CAD/radio is non-public and potentially sensitive; and personal-level evacuation compliance is intentionally excluded.
+Known source limits are stored in `source-registry` and shown in the Data & Sources modal. The currently unconnected data is: the official Walloon DATEX II road feed, a field-confirmed fire-service/crisis-centre perimeter and an agency-approved sanitized operations feed; each already has a five-minute pull/push adapter but still needs access or an export. BE-Alert records that expired before collection cannot be reconstructed without an archive; analysis-ready Sentinel multispectral processing needs Copernicus OAuth credentials; raw CAD/radio is non-public and potentially sensitive; and personal-level evacuation compliance is intentionally excluded.
 
 Do not add a CDN cache in front of `/api/data`, `/api/live-reports`, `/api/live-situation`, `/api/firms-situation` or `/api/refresh`.
 
@@ -141,6 +142,6 @@ Do not add a CDN cache in front of `/api/data`, `/api/live-reports`, `/api/live-
 - EFFIS is a daily algorithmic VIIRS geometry, not a field-surveyed operational perimeter or within-day progression.
 - Aircraft markers represent exact receiver observations within the preceding five minutes. Coverage gaps remain gaps; no route, water pickup or drop is inferred.
 - RMI and DWD station values remain separate from the Open-Meteo model. Near-real-time quality-control status is retained.
-- Copernicus EMS and Sentinel-2 are discovery catalogues. No EMS match means no matching activation was found in the current catalogue, not that operational mapping does not exist elsewhere. Sentinel-2 rows are product metadata, not imagery.
-- There is no configured source for a field-confirmed perimeter, fireline progression, suppression-resource dispatch, water pickup/drop events, road closures, evacuation compliance or emergency-service CAD/radio traffic.
+- Copernicus EMS is a discovery catalogue. No EMS match means no matching activation was found in the current catalogue, not that operational mapping does not exist elsewhere. Sentinel-2 records include catalogue metadata and retained public JPEG quicklooks; they are not analysis-ready multispectral bands or a derived burn product.
+- Municipal notices can report closures and evacuation guidance, but no agency feed is currently connected for a field-confirmed perimeter/fireline progression, live DATEX road state, suppression-resource dispatch, water pickup/drop events or aggregate evacuation compliance. Ready adapters remain empty until access or an agency-approved export is supplied. Raw CAD/radio and personal identities are intentionally excluded.
 - This viewer is informational, not an emergency service. Follow BE-Alert and local authorities.

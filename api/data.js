@@ -7,6 +7,7 @@ const PUBLIC_DATASET_KEYS = new Set([
   'firms',
   'incident-config',
   'media-reports',
+  'local-authority-updates',
   'official-perimeter',
   'public-alerts',
   'public-operations',

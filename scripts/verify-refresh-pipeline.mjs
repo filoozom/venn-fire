@@ -10,7 +10,19 @@ import {
   normalizePublicOperations,
 } from '../server/controlled-sources.mjs'
 import { normalizeVediaArticle } from '../server/media-sources.mjs'
+import {
+  MUNICIPAL_PROVIDERS,
+  municipalNoticeEvent,
+  normalizeButgenbachNotice,
+  normalizeHlzNotice,
+  normalizeRdfNotice,
+  normalizeWaimesNotice,
+  normalizeWordpressApiNotice,
+  parseMunicipalRdfFeed,
+  parseHlzNewsList,
+} from '../server/municipal-sources.mjs'
 import { REFRESH_SOURCES } from '../server/refresh-sources.mjs'
+import { buildEvents } from '../src/data.js'
 import {
   nextRefreshWakeAt,
   REFRESH_INTERVAL_MS,
@@ -24,6 +36,7 @@ const expectedSources = [
   'aircraft',
   'open-meteo',
   'reports',
+  'local-authority-updates',
   'vedia',
   'public-alerts',
   'road-events',
@@ -148,4 +161,167 @@ assert.equal(normalizeVediaArticle({
   },
 }, '2026-08-15T14:05:00Z'), null, 'body-only keyword overlap must not admit an unrelated article')
 
-console.log('refresh pipeline verified: 14 leased sources, five-minute grid, public and controlled adapters, semantic history, no-store APIs')
+const stavelotProvider = MUNICIPAL_PROVIDERS.find((item) => item.id === 'stavelot')
+const stavelotItems = parseMunicipalRdfFeed(`
+  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <item rdf:about="https://www.stavelot.be/actualites/incendie-fagnes">
+      <title>Incendie en cours dans les Fagnes : point de situation</title>
+      <link>https://www.stavelot.be/actualites/incendie-fagnes</link>
+      <description></description>
+      <dc:date>2026-08-15T14:45:00Z</dc:date>
+      <dc:type>News Item</dc:type>
+    </item>
+  </rdf:RDF>
+`)
+assert.equal(stavelotItems.length, 1)
+const stavelotNotice = normalizeRdfNotice(
+  stavelotItems[0],
+  stavelotProvider,
+  '2026-08-15T15:05:00Z',
+  '<div id="parent-fieldname-text"><p>Importantes fumées à Stavelot. Fermez portes et fenêtres.</p></div>',
+)
+assert.equal(stavelotNotice.publisherKind, 'official-municipal')
+assert.match(stavelotNotice.bodyText, /Fermez portes/)
+assert.equal(normalizeRdfNotice({
+  id: 'unrelated',
+  title: 'Installation de bornes de recharge',
+  url: 'https://www.stavelot.be/actualites/installation-bornes',
+  description: 'Offres à remettre en septembre',
+  publishedAt: '2026-08-15T14:45:00Z',
+}, stavelotProvider, '2026-08-15T15:05:00Z'), null)
+assert.equal(normalizeRdfNotice({
+  id: 'generic-emergency-heading',
+  title: 'Point de situation à 18 h',
+  url: 'https://www.stavelot.be/actualites/point-de-situation-18h',
+  description: '',
+  publishedAt: '2026-08-15T16:00:00Z',
+}, stavelotProvider, '2026-08-15T16:05:00Z', '<div id="parent-fieldname-text"><p>L’incendie reste en cours.</p></div>'), null,
+'a generic local fire update without explicit incident-area context must not be admitted')
+
+const waimesProvider = MUNICIPAL_PROVIDERS.find((item) => item.id === 'waimes')
+assert.equal(normalizeWaimesNotice({
+  UID: 'unrelated-waimes',
+  title: 'Enquête publique',
+  description: 'Permis pour une menuiserie à Sourbrodt',
+  effective: '2026-08-15T14:00:00Z',
+}, waimesProvider, '2026-08-15T15:05:00Z'), null)
+
+const jalhayProvider = MUNICIPAL_PROVIDERS.find((item) => item.id === 'jalhay')
+const jalhayNotice = normalizeWordpressApiNotice({
+  id: 28020,
+  date_gmt: '2026-08-15T06:32:12',
+  modified_gmt: '2026-08-15T15:51:15',
+  link: 'https://www.jalhay.be/feu-fagnes/',
+  title: { rendered: 'Incendie dans les Fagnes – [Mise à jour : 15/08 – 17h00]' },
+  excerpt: { rendered: '<p>La N68 reste fermée.</p>' },
+  content: { rendered: '<p>La N68 reste fermée. Aucune évacuation de la population n’est demandée sur le territoire de Jalhay.</p>' },
+}, jalhayProvider, '2026-08-15T16:05:00Z')
+assert.equal(jalhayNotice.publishedAt, '2026-08-15T06:32:12.000Z')
+assert.equal(jalhayNotice.effectiveAt, '2026-08-15T15:00:00.000Z')
+assert.equal(municipalNoticeEvent(jalhayNotice).type, 'closure', 'a no-evacuation notice containing road closures must remain a closure')
+
+const [rss2Item] = parseMunicipalRdfFeed(`
+  <rss><channel><item>
+    <title>Incendie dans les Fagnes</title>
+    <link>https://www.jalhay.be/feu-fagnes/</link>
+    <pubDate>Sat, 15 Aug 2026 06:32:12 +0000</pubDate>
+    <content:encoded><![CDATA[<p>La N68 est fermée.</p>]]></content:encoded>
+  </item></channel></rss>
+`)
+assert.equal(rss2Item.publishedAt, 'Sat, 15 Aug 2026 06:32:12 +0000')
+assert.equal(rss2Item.content, 'La N68 est fermée.')
+
+const eupenProvider = MUNICIPAL_PROVIDERS.find((item) => item.id === 'eupen')
+const eupenNotice = normalizeRdfNotice({
+  id: 'https://www.eupen.be/brand-im-hohen-venn/',
+  title: 'Brand im Hohen Venn',
+  url: 'https://www.eupen.be/brand-im-hohen-venn/',
+  description: '',
+  publishedAt: 'Sat, 15 Aug 2026 09:07:52 +0000',
+}, eupenProvider, '2026-08-15T12:20:00Z', `
+  <script type="application/ld+json">{"dateModified":"2026-08-15T12:16:02+00:00"}</script>
+  <article><div class="entry-content-inner">
+    <p><strong>15.8.2026, 11:50 Uhr</strong></p>
+    <p>Die N68 bleibt wegen des Brands im Hohen Venn gesperrt.</p>
+  </div></article>
+`)
+assert.equal(eupenNotice.effectiveAt, '2026-08-15T09:50:00.000Z')
+assert.equal(eupenNotice.updatedAt, '2026-08-15T12:16:02.000Z')
+assert.equal(municipalNoticeEvent(eupenNotice).type, 'closure')
+
+const zoneVhpProvider = MUNICIPAL_PROVIDERS.find((item) => item.id === 'zone-vhp')
+const zoneNotice = normalizeWordpressApiNotice({
+  id: 5200,
+  date_gmt: '2026-08-15T16:00:00',
+  modified_gmt: '2026-08-15T16:05:00',
+  link: 'https://www.zone-vhp.be/2026/08/15/incendie-hautes-fagnes/',
+  title: { rendered: 'Incendie dans les Hautes Fagnes' },
+  excerpt: { rendered: '<p>Mise à jour opérationnelle.</p>' },
+  content: { rendered: '<p>Le feu reste actif dans les Hautes Fagnes.</p>' },
+}, zoneVhpProvider, '2026-08-15T16:10:00Z')
+assert.equal(zoneNotice.publisherKind, 'official-emergency-service')
+
+const hlzProvider = MUNICIPAL_PROVIDERS.find((item) => item.id === 'hlz-dg')
+const [hlzItem] = parseHlzNewsList(`
+  <section class="newslist"><div class="newslist-item">
+    <a href="/news/brand-hohes-venn/"><span class="newslist-title">Brand im Hohen Venn</span>
+      <div class="img-wrapper"></div><p class="newslist-rawtext">Aktuelle Lage in Küchelscheid.</p></a>
+  </div></section>
+`)
+assert.equal(hlzItem.url, 'https://www.hlzdg.be/news/brand-hohes-venn/')
+const hlzNotice = normalizeHlzNotice(hlzItem, `
+  <meta property="og:publish_date" content="2026-08-15T16:30:00.0000000" />
+  <section class="newsdetail"><p class="lead">15.08.2026, 18:45 Uhr</p><p>Der Brand im Hohen Venn bleibt aktiv.</p></section>
+`, hlzProvider, '2026-08-15T16:50:00Z')
+assert.equal(hlzNotice.publishedAt, '2026-08-15T14:30:00.000Z')
+assert.equal(hlzNotice.effectiveAt, '2026-08-15T16:45:00.000Z')
+assert.equal(hlzNotice.publisherKind, 'official-emergency-service')
+
+const eifelPoliceProvider = MUNICIPAL_PROVIDERS.find((item) => item.id === 'eifel-police')
+const policeNotice = normalizeWordpressApiNotice({
+  id: 1100,
+  date_gmt: '2026-08-15T16:00:00',
+  modified_gmt: '2026-08-15T16:05:00',
+  link: 'https://eifelpolizei.be/brand-hohes-venn/',
+  title: { rendered: 'Brand im Hohen Venn' },
+  excerpt: { rendered: '<p>Polizeiliche Information.</p>' },
+  content: { rendered: '<p>Die Polizei informiert Küchelscheid und Leykaul.</p>' },
+}, eifelPoliceProvider, '2026-08-15T16:10:00Z')
+assert.equal(policeNotice.publisherKind, 'official-police')
+
+const butgenbachProvider = MUNICIPAL_PROVIDERS.find((item) => item.id === 'butgenbach')
+const butgenbachNotice = normalizeButgenbachNotice({
+  id: 33585,
+  title: 'WICHTIGE INFORMATIONEN AN DIE EINWOHNER SOWIE BESUCHER VON KÜCHELSCHEID UND LEYKAUL',
+  url: 'https://butgenbach.be/wichtige-informationen-kuechelscheid-leykaul/',
+}, `
+  <script type="application/ld+json">{"datePublished":"2026-08-15T14:50:50+00:00","dateModified":"2026-08-15T14:50:50+00:00"}</script>
+  <div class="wordpress-content card">
+    <p class="date">15. August 2026</p>
+    <div>WICHTIGE INFORMATION (15.08.26, 16:15 Uhr)</div>
+    <div>Aufgrund der aktuellen Lage im Hohen Venn bitten wir die Einwohner, sich auf eine Evakuierung vorzubereiten.</div>
+    <div>Wegen Rauch Türen und Fenster geschlossen halten.</div>
+  </div>
+  <a href="/blog/">Alle Neuigkeiten ansehen</a>
+`, butgenbachProvider, '2026-08-15T15:05:00Z')
+assert.equal(butgenbachNotice.publishedAt, '2026-08-15T14:50:50.000Z')
+assert.equal(butgenbachNotice.effectiveAt, '2026-08-15T14:15:00.000Z')
+assert.match(butgenbachNotice.bodyText, /Evakuierung vorzubereiten/)
+assert.equal(municipalNoticeEvent(butgenbachNotice).type, 'alert', 'the stored municipal event must preserve evacuation-preparation semantics')
+const [preparationEvent] = buildEvents({
+  reportRows: [],
+  baseEvents: [{
+    observedAt: butgenbachNotice.publishedAt,
+    title: butgenbachNotice.title,
+    detail: butgenbachNotice.summary,
+    type: 'alert',
+    sourceName: 'Municipality of Bütgenbach',
+    sourceUrl: butgenbachNotice.url,
+  }],
+  alerts: [],
+  timelineStartMs: Date.parse('2026-08-14T11:00:00Z'),
+  frameCount: 400,
+})
+assert.equal(preparationEvent.type, 'alert', 'evacuation preparation must not be presented as an evacuation order')
+
+console.log('refresh pipeline verified: 15 leased sources, local-authority/public/controlled adapters, five-minute grid, semantic history, no-store APIs')

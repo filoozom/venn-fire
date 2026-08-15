@@ -235,9 +235,9 @@ function classifiedEventType(content, fallback = 'alert') {
     .normalize('NFKD')
     .replace(/\p{Diacritic}/gu, '')
     .toLocaleLowerCase('en')
-  const explicitlyNotAnOrder = /aucune evacuation|no (?:population|residential) evacuation|evacuation standby/iu.test(normalized)
+  const explicitlyNotAnOrder = /aucune evacuation|no (?:population|residential) evacuation|evacuation standby|prepare for (?:a possible )?evacuation|se preparer a (?:une )?evacuation|auf eine evakuierung vor(?:zu)?bereiten|evakuierung vor(?:zu)?bereiten/iu.test(normalized)
   if (explicitlyNotAnOrder) {
-    return /cleared|seal(?:ed|s)?|must leave the (?:hohes )?venn/iu.test(normalized) ? 'closure' : 'alert'
+    return /cleared|seal(?:ed|s)?|must leave the (?:hohes )?venn|ferm|interdi|gesperrt|quittez (?:la )?zone/iu.test(normalized) ? 'closure' : 'alert'
   }
   if (/evac/iu.test(normalized)) return 'evacuation'
   if (/clos|ferm|gesperrt/iu.test(normalized)) return 'closure'
@@ -340,6 +340,7 @@ export function runtimeDataFromResponse(response) {
   const publicAlerts = optionalPayload(datasets, 'public-alerts', { alerts: [] })
   const aircraft = optionalPayload(datasets, 'aircraft', { observations: [], sources: [] })
   const mediaReports = optionalPayload(datasets, 'media-reports', { articles: [], events: [] })
+  const localAuthorityUpdates = optionalPayload(datasets, 'local-authority-updates', { notices: [], events: [] })
   const publicOperations = optionalPayload(datasets, 'public-operations', { events: [] })
   const roadEvents = optionalPayload(datasets, 'road-events', { events: [] })
   const officialPerimeter = optionalPayload(datasets, 'official-perimeter', { current: null, snapshots: [] })
@@ -373,6 +374,7 @@ export function runtimeDataFromResponse(response) {
       ...(incident.events ?? []),
       ...(reportsPayload.events ?? []),
       ...(mediaReports.events ?? []),
+      ...(localAuthorityUpdates.events ?? []),
       ...(publicOperations.events ?? []).map((event) => ({
         ...event,
         sourceName: 'Agency-approved public operations feed',
@@ -416,6 +418,7 @@ export function runtimeDataFromResponse(response) {
     aircraft,
     reports: reportsPayload,
     mediaReports,
+    localAuthorityUpdates,
     publicOperations,
     roadEvents,
     officialPerimeter,

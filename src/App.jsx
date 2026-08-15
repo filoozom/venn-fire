@@ -507,7 +507,7 @@ function DataModal({
                 <article><span>01</span><div><strong>Thermal anomaly</strong><p>FIRMS footprints appear at their exact acquisition time. VIIRS areas are confidence-sensitive footprint-union estimates; MODIS is detections-only because its pixels are too coarse at this incident scale.</p></div></article>
                 <article><span>02</span><div><strong>Reported area</strong><p>The line is a timestamped step series: official ~60, ~100 and ~850 ha updates, followed by BRF reports of &gt;900 ha at 11:28 and &gt;1,500 ha at 14:30. Between reports it means “last reported,” not measured growth.</p></div></article>
                 <article><span>03</span><div><strong>EFFIS daily geometry</strong><p>The 14 and 15 August VIIRS-derived polygons are separate calendar-day products. Their locally calculated geometry area is not the official affected area; EFFIS provides no within-day acquisition time for five-minute animation.</p></div></article>
-                <article><span>04</span><div><strong>Aircraft observations</strong><p>G10 and G17 are shown as individual Airplanes.live MLAT fixes. Gaps stay empty, and a marker never claims a helicopter remained airborne.</p></div></article>
+                <article><span>04</span><div><strong>Aircraft observations</strong><p>Identified incident aircraft are shown from exact receiver fixes returned by the independently health-checked aircraft providers. Gaps stay empty, and a marker never claims a helicopter remained airborne.</p></div></article>
                 <article><span>05</span><div><strong>Situation reports</strong><p>The Governor of Liège supplies the official 60, 100 and 850 hectare estimates. BRF’s later 900 and 1,500 hectare figures stay labelled local reporting; every step links to its own source.</p></div></article>
               </div>
               <div className="safety-note"><ShieldAlert size={17} /><span>This viewer is informational and must not be used for evacuation or preservation-of-life decisions. Follow BE-Alert and emergency services.</span></div>
@@ -530,7 +530,7 @@ function DataModal({
                         : `${source.intervalMinutes} MIN`
                 const content = (
                   <>
-                    <SourceMark tone={source.key === 'firms' ? 'nasa' : source.key === 'effis' || source.key === 'ems' || source.key === 'sentinel2' ? 'effis' : source.key.includes('meteo') || source.key === 'dwd' ? 'weather' : source.key === 'reports' || source.key === 'vedia' ? 'report' : source.access?.kind === 'controlled' ? 'official' : 'adsb'} />
+                    <SourceMark tone={source.key === 'firms' ? 'nasa' : source.key === 'effis' || source.key === 'ems' || source.key === 'sentinel2' ? 'effis' : source.key.includes('meteo') || source.key === 'dwd' ? 'weather' : source.key === 'reports' || source.key === 'vedia' ? 'report' : source.key === 'local-authority-updates' || source.access?.kind === 'controlled' ? 'official' : 'adsb'} />
                     <span><strong>{source.label}</strong><small>{source.coverage}</small></span>
                     <em>{state}</em>
                     {source.providerUrl ? <ExternalLink size={15} /> : <CircleHelp size={15} />}
@@ -600,7 +600,9 @@ function FireViewer({ runtime, databaseError }) {
   const liveAircraftObservations = runtime.aircraft.observations ?? []
   const sourceRuns = runtime.database?.sources ?? []
   const hasFailedSource = sourceRuns.some((source) => source.status === 'failed')
-  const hasPartialSource = sourceRuns.some((source) => source.metadata?.failedProviders?.length)
+  const hasPartialSource = sourceRuns.some((source) => (
+    source.metadata?.failedProviders?.length || source.metadata?.degradedProviders?.length
+  ))
   const syncState = {
     status: databaseError ? 'stale' : hasFailedSource || hasPartialSource ? 'partial' : 'live',
     generatedAt: runtime.generatedAt,
