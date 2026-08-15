@@ -38,16 +38,28 @@ function optionalPayload(datasets, key, fallback = {}) {
 export function mergeAreaReports(...reportGroups) {
   const reportsBySourceAndTime = new Map()
   reportGroups.flat().forEach((report) => {
-    const timestampMs = Number.isFinite(report?.timestampMs)
+    const fallbackTimestampMs = Number.isFinite(report?.timestampMs)
       ? report.timestampMs
       : Date.parse(report?.observedAt)
+    const effectiveTimestampMs = Number.isFinite(report?.effectiveTimestampMs)
+      ? report.effectiveTimestampMs
+      : fallbackTimestampMs
+    const parsedPublishedAtMs = Date.parse(report?.publishedAt)
+    const publishedAtMs = Number.isFinite(report?.publishedAtMs)
+      ? report.publishedAtMs
+      : Number.isFinite(parsedPublishedAtMs) ? parsedPublishedAtMs : effectiveTimestampMs
     const reportedHa = Number(report?.reportedHa)
     const source = typeof report?.source === 'string' ? report.source.trim() : ''
-    if (!Number.isFinite(timestampMs) || !Number.isFinite(reportedHa) || reportedHa <= 0 || !source) return
+    if (!Number.isFinite(effectiveTimestampMs) || !Number.isFinite(publishedAtMs)
+      || !Number.isFinite(reportedHa) || reportedHa <= 0 || !source) return
     const areaPrefix = ['~', '>', '<', '='].includes(report.areaPrefix) ? report.areaPrefix : '~'
-    reportsBySourceAndTime.set(`${source}|${timestampMs}`, {
+    reportsBySourceAndTime.set(`${source}|${effectiveTimestampMs}|${publishedAtMs}`, {
       ...report,
-      timestampMs,
+      timestampMs: effectiveTimestampMs,
+      effectiveTimestampMs,
+      effectiveAt: report.effectiveAt || new Date(effectiveTimestampMs).toISOString(),
+      publishedAtMs,
+      publishedAt: report.publishedAt || new Date(publishedAtMs).toISOString(),
       reportedHa,
       areaPrefix,
       areaLabel: typeof report.areaLabel === 'string' && report.areaLabel.trim()
@@ -59,7 +71,10 @@ export function mergeAreaReports(...reportGroups) {
   })
   const seenSourceValues = new Set()
   return [...reportsBySourceAndTime.values()]
-    .sort((left, right) => left.timestampMs - right.timestampMs)
+    .sort((left, right) => (
+      left.publishedAtMs - right.publishedAtMs
+      || left.effectiveTimestampMs - right.effectiveTimestampMs
+    ))
     .filter((report) => {
       const key = `${report.source}|${report.areaPrefix}|${report.reportedHa}`
       if (seenSourceValues.has(key)) return false
@@ -165,7 +180,7 @@ export function buildFireFrames({
           qualityStatus: dwdSnapshot.qualityStatus,
         }]
       })
-      const report = normalizedReports.findLast((item) => item.timestampMs <= timestampMs)
+      const report = normalizedReports.findLast((item) => item.publishedAtMs <= timestampMs)
       const date = new Date(timestampMs)
       return {
         time: date.toISOString(),
@@ -281,8 +296,8 @@ function normalizeTimelineEvent(event, timelineStartMs, frameCount) {
 
 export function buildEvents({ reportRows, baseEvents, alerts, timelineStartMs, frameCount }) {
   const areaEvents = mergeAreaReports(reportRows).map((report) => ({
-    frame: frameAt(report.timestampMs, timelineStartMs, frameCount),
-    time: localClockFormatter.format(new Date(report.timestampMs)),
+    frame: frameAt(report.publishedAtMs, timelineStartMs, frameCount),
+    time: localClockFormatter.format(new Date(report.publishedAtMs)),
     title: `${report.areaPrefix}${report.reportedHa.toLocaleString('en-GB')} ha reported affected`,
     detail: `${report.areaLabel} · ${report.source}`,
     type: 'area',

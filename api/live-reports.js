@@ -118,13 +118,16 @@ const PREVENTIVE_EVACUATION_AREAS = [
 
 function governorSections(html) {
   const text = htmlToSourceText(html)
-  const headingPattern = /(?:POINT DE SITUATION|D[ÉE]CLENCHEMENT PHASE PROVINCIALE)\s+(\d{1,2})\/(\d{1,2})\/(\d{4})\s*-\s*(\d{1,2})\s*[hH:]\s*(\d{2})?/gu
+  const headingPattern = /(?:POINT DE SITUATION|D[ÉE]CLENCHEMENT PHASE PROVINCIALE|INCENDIE DANS LES HAUTES FAGNES[^\n]*?COMMUNIQU[ÉE] DE PRESSE)[^\n]*?(\d{1,2})\/(\d{1,2})\/(\d{4})\s*(?:-\s*)?(\d{1,2})\s*[hH:]\s*(\d{2})?/giu
   const headings = [...text.matchAll(headingPattern)]
   return headings.flatMap((heading, index) => {
     const timestampMs = brusselsTimestamp(heading[1], heading[2], heading[3], heading[4], heading[5])
     if (!Number.isFinite(timestampMs)) return []
     return [{
       timestampMs,
+      day: heading[1],
+      month: heading[2],
+      year: heading[3],
       text: text.slice(heading.index, headings[index + 1]?.index ?? text.length),
     }]
   })
@@ -163,22 +166,52 @@ function numericAreaFromFrenchSection(section) {
   return { reportedHa: areaSquareMetres / 10_000, areaPrefix: '~' }
 }
 
+function effectiveAreaTimestamp(section, publication) {
+  const areaLine = section
+    .split('\n')
+    .find((line) => numericAreaFromFrenchSection(line))
+  const statedTime = areaLine?.match(/^[ÀA]\s+(\d{1,2})\s*[hH:]\s*(\d{2})?\b/iu)
+  if (!statedTime) return publication.timestampMs
+  const timestampMs = brusselsTimestamp(
+    publication.day,
+    publication.month,
+    publication.year,
+    statedTime[1],
+    statedTime[2],
+  )
+  return Number.isFinite(timestampMs) && timestampMs <= publication.timestampMs
+    ? timestampMs
+    : publication.timestampMs
+}
+
 export function parseGovernorAreaReports(html) {
-  return governorSections(html).flatMap(({ timestampMs, text }) => {
+  return governorSections(html).flatMap((publication) => {
+    const { timestampMs: publishedAtMs, text } = publication
     const area = numericAreaFromFrenchSection(text)
     if (!area) return []
-    const time = clockLabel(timestampMs)
+    const effectiveTimestampMs = effectiveAreaTimestamp(text, publication)
+    const effectiveTime = clockLabel(effectiveTimestampMs)
+    const publicationTime = clockLabel(publishedAtMs)
+    const separatelyTimed = effectiveTimestampMs !== publishedAtMs
     return [{
-      timestampMs,
-      observedAt: new Date(timestampMs).toISOString(),
+      timestampMs: effectiveTimestampMs,
+      observedAt: new Date(effectiveTimestampMs).toISOString(),
+      effectiveTimestampMs,
+      effectiveAt: new Date(effectiveTimestampMs).toISOString(),
+      publishedAtMs,
+      publishedAt: new Date(publishedAtMs).toISOString(),
       ...area,
-      areaLabel: `official estimate at ${time} CEST`,
+      areaLabel: separatelyTimed
+        ? `official estimate for ${effectiveTime} CEST, published at ${publicationTime} CEST`
+        : `official estimate at ${effectiveTime} CEST`,
       source: 'Governor of Liège',
       sourceUrl: GOVERNOR_SOURCE_URL,
       sourceKind: 'official',
-      timestampBasis: 'dated situation-heading on source page',
+      timestampBasis: separatelyTimed
+        ? 'effective time stated with the area figure; publication time from dated bulletin heading'
+        : 'dated situation-heading on source page',
     }]
-  }).sort((left, right) => left.timestampMs - right.timestampMs)
+  }).sort((left, right) => left.publishedAtMs - right.publishedAtMs)
 }
 
 export function parseGovernorSituationEvents(html) {
@@ -325,7 +358,10 @@ export async function loadAreaReports(
     result.status === 'fulfilled' ? result.value.areaReports : []
   ))
   const reportsBySourceAndTime = new Map()
-  areaReports.forEach((report) => reportsBySourceAndTime.set(`${report.source}|${report.timestampMs}`, report))
+  areaReports.forEach((report) => {
+    const publishedAtMs = Number.isFinite(report.publishedAtMs) ? report.publishedAtMs : report.timestampMs
+    reportsBySourceAndTime.set(`${report.source}|${report.timestampMs}|${publishedAtMs}`, report)
+  })
   const eventsById = new Map()
   results.flatMap((result) => (
     result.status === 'fulfilled' ? result.value.events : []
@@ -334,7 +370,10 @@ export async function loadAreaReports(
   return {
     ok: sourceStatus.some((source) => source.ok),
     complete: sourceStatus.every((source) => source.ok),
-    areaReports: [...reportsBySourceAndTime.values()].sort((left, right) => left.timestampMs - right.timestampMs),
+    areaReports: [...reportsBySourceAndTime.values()].sort((left, right) => (
+      (left.publishedAtMs ?? left.timestampMs) - (right.publishedAtMs ?? right.timestampMs)
+      || left.timestampMs - right.timestampMs
+    )),
     events: [...eventsById.values()].sort((left, right) => left.timestampMs - right.timestampMs),
     sources: sourceStatus,
   }

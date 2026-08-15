@@ -213,15 +213,32 @@ async function refreshOpenMeteo({ requestedAtMs, query }) {
 function mergeAreaReports(previous, incoming) {
   const bySourceAndTime = new Map()
   for (const report of [...(previous || []), ...(incoming || [])]) {
-    const timestampMs = Number.isFinite(report?.timestampMs)
+    const fallbackTimestampMs = Number.isFinite(report?.timestampMs)
       ? report.timestampMs
       : Date.parse(report?.observedAt)
-    if (!Number.isFinite(timestampMs) || !Number.isFinite(Number(report?.reportedHa)) || !report?.source) continue
-    bySourceAndTime.set(`${report.source}|${timestampMs}`, { ...report, timestampMs })
+    const effectiveTimestampMs = Number.isFinite(report?.effectiveTimestampMs)
+      ? report.effectiveTimestampMs
+      : fallbackTimestampMs
+    const publishedAtMs = Number.isFinite(report?.publishedAtMs)
+      ? report.publishedAtMs
+      : Date.parse(report?.publishedAt) || effectiveTimestampMs
+    if (!Number.isFinite(effectiveTimestampMs) || !Number.isFinite(publishedAtMs)
+      || !Number.isFinite(Number(report?.reportedHa)) || !report?.source) continue
+    bySourceAndTime.set(`${report.source}|${effectiveTimestampMs}|${publishedAtMs}`, {
+      ...report,
+      timestampMs: effectiveTimestampMs,
+      effectiveTimestampMs,
+      effectiveAt: report.effectiveAt || new Date(effectiveTimestampMs).toISOString(),
+      publishedAtMs,
+      publishedAt: report.publishedAt || new Date(publishedAtMs).toISOString(),
+    })
   }
   const seenValues = new Set()
   return [...bySourceAndTime.values()]
-    .sort((left, right) => left.timestampMs - right.timestampMs)
+    .sort((left, right) => (
+      left.publishedAtMs - right.publishedAtMs
+      || left.effectiveTimestampMs - right.effectiveTimestampMs
+    ))
     .filter((report) => {
       const key = `${report.source}|${report.areaPrefix}|${report.reportedHa}`
       if (seenValues.has(key)) return false

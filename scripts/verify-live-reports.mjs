@@ -6,7 +6,7 @@ import liveReportsHandler, {
   parseGovernorAreaReports,
   parseGovernorSituationEvents,
 } from '../api/live-reports.js'
-import { buildEvents } from '../src/data.js'
+import { buildEvents, buildFireFrames } from '../src/data.js'
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
@@ -16,6 +16,9 @@ assert(typeof liveReportsHandler === 'function', 'Vercel /api/live-reports has n
 
 const governorFixture = `
   <main>
+    <h2>INCENDIE DANS LES HAUTES FAGNES - COMMUNIQUE DE PRESSE DU GOUVERNEUR FF. - SAMEDI 15/08/2026 21H</h2>
+    <p>À la suite du déclenchement de la phase provinciale, les autorités restent pleinement mobilisées.</p>
+    <p>À 18h00 ce samedi 15 août, la superficie touchée par l'incendie est estimée à environ 2 700 hectares.</p>
     <h2>POINT DE SITUATION 15/08/2026 - 16H00</h2>
     <p>Message : ordre d'évacuation préventif</p>
     <p>En raison des vents changeants et de l'importante fumée présente dans la zone, il est demandé aux habitants des rues suivantes d'évacuer leur domicile à titre préventif.</p>
@@ -33,16 +36,44 @@ const governorFixture = `
 `
 
 const governorReports = parseGovernorAreaReports(governorFixture)
-assert(governorReports.length === 3, `Expected three Governor reports, got ${governorReports.length}`)
+assert(governorReports.length === 4, `Expected four Governor reports, got ${governorReports.length}`)
 assert(
   JSON.stringify(governorReports.map(({ reportedHa, areaPrefix }) => [reportedHa, areaPrefix]))
-    === JSON.stringify([[60, '~'], [100, '~'], [850, '~']]),
+    === JSON.stringify([[60, '~'], [100, '~'], [850, '~'], [2700, '~']]),
   `Governor hectare parsing changed: ${JSON.stringify(governorReports)}`,
 )
 assert(
   governorReports[2].timestampMs === Date.parse('2026-08-15T07:00:00+02:00'),
   'Governor report was not linked to its bulletin time',
 )
+const governor2700 = governorReports[3]
+assert(governor2700.timestampMs === Date.parse('2026-08-15T18:00:00+02:00'), '2,700 ha was not linked to its stated 18:00 effective time')
+assert(governor2700.publishedAtMs === Date.parse('2026-08-15T21:00:00+02:00'), '2,700 ha lost its 21:00 publication time')
+assert(
+  governor2700.areaLabel === 'official estimate for 18:00 CEST, published at 21:00 CEST',
+  `The dual-time label is unclear: ${governor2700.areaLabel}`,
+)
+
+const availabilityFrames = buildFireFrames({
+  timelineStartMs: Date.parse('2026-08-15T18:25:00+02:00'),
+  endMs: Date.parse('2026-08-15T21:00:00+02:00'),
+  weatherRows: [],
+  reportRows: [
+    {
+      timestampMs: Date.parse('2026-08-15T18:30:00+02:00'),
+      reportedHa: 2000,
+      areaPrefix: '>',
+      areaLabel: 'BRF page update at 18:30 CEST',
+      source: 'BRF',
+    },
+    governor2700,
+  ],
+  dwdSnapshot: { stations: [], observations: [] },
+  center: [50.54762, 6.05757],
+})
+const areaAt = (timestamp) => availabilityFrames.find((frame) => frame.timestampMs === Date.parse(timestamp))
+assert(areaAt('2026-08-15T20:55:00+02:00')?.reportedHa === 2000, 'The official figure must not appear before its 21:00 publication')
+assert(areaAt('2026-08-15T21:00:00+02:00')?.reportedHa === 2700, 'The latest frame did not switch to the official 2,700 ha figure')
 
 const governorEvents = parseGovernorSituationEvents(governorFixture)
 assert(governorEvents.length === 1, `Expected one strict Governor evacuation event, got ${governorEvents.length}`)
@@ -68,6 +99,8 @@ const timelineEvents = buildEvents({
 const timelineEvacuation = timelineEvents.find((event) => event.id === evacuation.id)
 assert(timelineEvacuation?.time === '16:00', 'The retained evacuation was not placed at 16:00 on the UI timeline')
 assert(timelineEvacuation?.frame === 324, 'The retained evacuation was not mapped to its exact five-minute frame')
+const officialAreaEvent = timelineEvents.find((event) => event.type === 'area' && event.title === '~2,700 ha reported affected')
+assert(officialAreaEvent?.time === '21:00', 'The 18:00 effective figure must enter the incident log at its 21:00 publication time')
 
 const classifiedEvents = buildEvents({
   reportRows: [],
@@ -145,7 +178,7 @@ const partial = await loadAreaReports([
   return governorFixture
 })
 assert(partial.ok && !partial.complete, 'One healthy report source should be explicitly partial')
-assert(partial.areaReports.length === 3, 'Healthy reports were lost when another source failed')
+assert(partial.areaReports.length === 4, 'Healthy reports were lost when another source failed')
 assert(partial.events.length === 1, 'The strict Governor evacuation event was not returned by the poller')
 assert(partial.sources.filter((source) => source.ok).length === 1, 'Report source health is wrong')
 

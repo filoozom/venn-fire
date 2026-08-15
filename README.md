@@ -68,7 +68,7 @@ The scheduler has five-minute granularity. A database lease makes repeated calls
 | Airplanes.live + ADSB.lol completed traces | Previous-day full-trace reconciliation for all three aircraft; exact in-radius fixes and raw trace files retained | 6 h |
 | Airplanes.live live API | Access-health check retained while the provider rejects server traffic, without consuming its limited allowance on repeated HTTP 403 responses | 60 min |
 | Open-Meteo | Hourly model-grid temperature, humidity, wind and gust rows | 5 min |
-| Governor of Liège + BRF | Strictly parsed, timestamped affected-area reports and official incident events | 5 min |
+| Governor of Liège + BRF | Strictly parsed affected-area reports and official incident events; stated effective time and bulletin publication time are retained separately | 5 min |
 | Stavelot + Malmedy + Jalhay + Baelen + Eupen + Waimes + Bütgenbach + VHP + HLZ DG + Eifel Police | Official local-authority and emergency-service RSS/JSON/WordPress/HTML feeds; incident notices and raw source responses are retained | 5 min |
 | Vedia JSON:API | Incident-filtered article metadata, source summaries, revision timestamps and raw API audit artifacts, always labelled local media | 5 min |
 | BE-Alert CAP gateway | CAP alerts accumulated from the live feed, including records retained after expiry | 5 min |
