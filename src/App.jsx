@@ -43,6 +43,7 @@ import {
 import MapView from './MapView'
 import {
   areaReports,
+  buildEvents,
   buildFireFrames,
   bundledWeatherRows,
   dwdWindStations,
@@ -290,10 +291,10 @@ function MiniAreaChart({ currentIndex, frames }) {
   )
 }
 
-function Timeline({ frames, frameIndex, setFrameIndex, playing, setPlaying, playbackRate, setPlaybackRate }) {
+function Timeline({ frames, timelineEvents, frameIndex, setFrameIndex, playing, setPlaying, playbackRate, setPlaybackRate }) {
   const frame = frames[frameIndex]
   const progress = (frameIndex / (frames.length - 1)) * 100
-  const visibleEvents = events.filter((event) => event.frame <= frameIndex)
+  const visibleEvents = timelineEvents.filter((event) => event.frame <= frameIndex)
   const timelineTicks = Array.from({ length: 5 }, (_, index) => (
     frames[Math.round((index / 4) * (frames.length - 1))]
   ))
@@ -330,7 +331,7 @@ function Timeline({ frames, frameIndex, setFrameIndex, playing, setPlaying, play
         <div className="timeline-track-wrap">
           <MiniAreaChart currentIndex={frameIndex} frames={frames} />
           <div className="event-markers" aria-hidden="true">
-            {events.filter((event) => event.frame < frames.length).map((event, index) => (
+            {timelineEvents.filter((event) => event.frame < frames.length).map((event, index) => (
               <i
                 key={`${event.time}-${index}`}
                 className={`${event.type === 'aircraft' ? 'is-flight' : ''} ${event.frame <= frameIndex ? 'is-past' : ''}`}
@@ -560,6 +561,7 @@ function DataModal({ open, onClose, onImportTracks, importedCount, firmsState, f
 
 function App() {
   const [frames, setFrames] = useState(fireFrames)
+  const [displayEvents, setDisplayEvents] = useState(events)
   const framesLengthRef = useRef(fireFrames.length)
   const [frameIndex, setFrameIndex] = useState(fireFrames.length - 1)
   const [layers, setLayers] = useState(INITIAL_LAYER_STATE)
@@ -639,6 +641,7 @@ function App() {
             liveAreaReportsRef.current,
             snapshot.reports.areaReports,
           )
+          setDisplayEvents(buildEvents(mergeAreaReports(areaReports, liveAreaReportsRef.current)))
         }
 
         if (weatherOk || reportsOk) {
@@ -777,11 +780,11 @@ function App() {
     // their source links. The list scrolls instead.
     // Sorted, not reversed: the source array is not in chronological order, so
     // reversing it produced a list that only looked ordered.
-    () => events
+    () => displayEvents
       .filter((event) => event.frame <= frameIndex)
       .slice()
       .sort((left, right) => right.frame - left.frame),
-    [frameIndex],
+    [displayEvents, frameIndex],
   )
 
   const nearbyWindReadings = useMemo(() => [
@@ -1083,6 +1086,7 @@ function App() {
 
           <Timeline
             frames={frames}
+            timelineEvents={displayEvents}
             frameIndex={frameIndex}
             setFrameIndex={setFrameIndex}
             playing={playing}
@@ -1150,7 +1154,7 @@ function App() {
               </div>
 
               <section className="event-log">
-                <div className="section-heading"><span>INCIDENT LOG</span><small>{events.filter((event) => event.frame <= frameIndex).length} visible</small></div>
+                <div className="section-heading"><span>INCIDENT LOG</span><small>{displayEvents.filter((event) => event.frame <= frameIndex).length} visible</small></div>
                 <div className="event-list">
                   {currentEvents.map((event, index) => {
                     const Icon = iconForEvent(event.type)

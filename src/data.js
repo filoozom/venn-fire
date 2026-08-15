@@ -585,17 +585,20 @@ const narrativeEvents = [
 // its entries from them. They used to be written twice -- once for the card and
 // chart, once by hand for the log -- and drifted: the >1,500 ha update reached
 // the card but never the log.
-const areaReportEvents = areaReports.map((report) => ({
-  frame: frameAt(new Date(report.timestampMs).toISOString()),
-  time: localClockFormatter.format(new Date(report.timestampMs)),
-  title: `${report.areaPrefix}${report.reportedHa.toLocaleString('en-GB')} ha reported affected`,
-  detail: `${report.areaLabel} · ${report.source}`,
-  type: 'area',
-  sourceUrl: report.sourceUrl,
-  sourceName: `${report.source}, ${report.areaLabel}`,
-}))
+export function buildEvents(reportRows = areaReports) {
+  const areaReportEvents = mergeAreaReports(reportRows).map((report) => ({
+    frame: frameAt(new Date(report.timestampMs).toISOString()),
+    time: localClockFormatter.format(new Date(report.timestampMs)),
+    title: `${report.areaPrefix}${report.reportedHa.toLocaleString('en-GB')} ha reported affected`,
+    detail: `${report.areaLabel} · ${report.source}`,
+    type: 'area',
+    sourceUrl: report.sourceUrl,
+    sourceName: `${report.source}, ${report.areaLabel}`,
+  }))
+  return [...areaReportEvents, ...narrativeEvents]
+}
 
-export const events = [...areaReportEvents, ...narrativeEvents]
+export const events = buildEvents()
 
 
 // No hand-drawn reserve polygon is bundled. The OpenStreetMap basemap remains the

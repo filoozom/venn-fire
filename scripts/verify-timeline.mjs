@@ -76,6 +76,12 @@ Object.entries(expected).forEach(([key, value]) => {
   if (normalized !== value) throw new Error(`${key}: expected ${value}, got ${normalized}`)
 })
 
+await selectTime('2026-08-15T14:30:00+02:00')
+const bundledLatestAreaLogEntries = await page.getByText('>1,500 ha reported affected', { exact: true }).count()
+if (bundledLatestAreaLogEntries !== 1) {
+  throw new Error(`Bundled >1,500 ha report reached the card but not exactly one log entry (${bundledLatestAreaLogEntries})`)
+}
+
 // Each EFFIS product is gated on its own product date, never on retrievedAt.
 // Our fetch time must not decide when published data appears on the timeline:
 // gating on it made the 15 August product surface only from 11:33 CEST, and any
@@ -141,12 +147,16 @@ const reportWithoutWeather = {
   area: await livePage.locator('.snapshot-card--fire strong').innerText(),
   latestFrame: await livePage.locator('.updated-state strong').innerText(),
   syncLabel: await livePage.locator('.updated-state small').innerText(),
+  logEntries: await livePage.getByText('>1,600 ha reported affected', { exact: true }).count(),
 }
 if (!reportWithoutWeather.latestFrame.includes('15:10')) {
   throw new Error(`Live report did not advance the timeline: ${JSON.stringify(reportWithoutWeather)}`)
 }
+if (reportWithoutWeather.logEntries !== 1) {
+  throw new Error(`Live report reached the card but not exactly one log entry: ${JSON.stringify(reportWithoutWeather)}`)
+}
 if (liveErrors.length) throw new Error(`Live-report browser errors: ${liveErrors.join(' | ')}`)
 if (errors.length) throw new Error(`Browser errors: ${errors.join(' | ')}`)
 
-console.log(JSON.stringify({ states, effisOn14August, effisOn15August, unrelatedTrafficControls, officialSourceLinks, chartBounds, reportWithoutWeather }, null, 2))
+console.log(JSON.stringify({ states, bundledLatestAreaLogEntries, effisOn14August, effisOn15August, unrelatedTrafficControls, officialSourceLinks, chartBounds, reportWithoutWeather }, null, 2))
 await browser.close()
