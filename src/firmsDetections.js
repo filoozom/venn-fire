@@ -14,7 +14,8 @@ const FIRMS_API_ROOT = 'https://firms.modaps.eosdis.nasa.gov/api/area/csv'
 const FIRMS_KEY_URL = 'https://firms.modaps.eosdis.nasa.gov/api/map_key/'
 const FIRMS_SOURCE_URL = 'https://firms.modaps.eosdis.nasa.gov/'
 
-// FIRMS caps a single area request at 10 days.
+// FIRMS caps a single area request at 10 days for the polar products. The
+// geostationary product rejects anything over 2, so the cap is per sensor.
 const MAX_DAY_RANGE = 10
 
 // Each sensor is a separate published product from a separate spacecraft, so
@@ -24,6 +25,7 @@ const MAX_DAY_RANGE = 10
 export const FIRMS_SENSORS = [
   {
     key: 'viirsSnpp',
+    providesArea: true,
     apiSource: 'VIIRS_SNPP_NRT',
     name: 'VIIRS Suomi-NPP',
     platform: 'Suomi NPP',
@@ -37,6 +39,7 @@ export const FIRMS_SENSORS = [
   },
   {
     key: 'viirsNoaa20',
+    providesArea: true,
     apiSource: 'VIIRS_NOAA20_NRT',
     name: 'VIIRS NOAA-20',
     platform: 'NOAA-20',
@@ -49,6 +52,7 @@ export const FIRMS_SENSORS = [
   },
   {
     key: 'viirsNoaa21',
+    providesArea: true,
     apiSource: 'VIIRS_NOAA21_NRT',
     name: 'VIIRS NOAA-21',
     platform: 'NOAA-21',
@@ -61,6 +65,7 @@ export const FIRMS_SENSORS = [
   },
   {
     key: 'modis',
+    providesArea: false,
     apiSource: 'MODIS_NRT',
     name: 'MODIS Terra/Aqua',
     platform: 'Terra and Aqua',
@@ -70,6 +75,27 @@ export const FIRMS_SENSORS = [
     tone: 'nasa',
     cadence: 'Up to 4 overpasses per day at this latitude',
     retirementNote: 'MODIS pixels are 1 km nominal; footprint estimates are correspondingly coarser.',
+  },
+  {
+    // FIRMS files the geostationary product under GOES_NRT, but over Europe it
+    // returns Meteosat: Met12 is MTG-I1, Met9 and Met10 are the older MSG
+    // spacecraft. It is the only source here that observes continuously rather
+    // than at overpasses.
+    key: 'meteosat',
+    apiSource: 'GOES_NRT',
+    name: 'Meteosat (geostationary)',
+    platform: 'Met12 / Met10 / Met9',
+    instrument: 'GEO',
+    // Nominal at nadir. At 50.5 N the pixel is foreshortened to roughly 3x6 km,
+    // which is why this sensor never yields an area figure.
+    nominalResolutionM: 3000,
+    providesArea: false,
+    // FIRMS rejects a longer window for this product.
+    maxDayRange: 2,
+    color: '#7f9bb5',
+    tone: 'nasa',
+    cadence: 'Continuous; about one scan every 10 minutes',
+    retirementNote: 'Pixels are roughly 3x6 km at this latitude. Detections and FRP only; no area is derived from them.',
   },
 ]
 
@@ -176,8 +202,14 @@ export function buildFirmsRequests({ mapKey, bbox, startDate, dayRange = 2, sens
   if (!mapKey) throw new Error('A FIRMS MAP_KEY is required')
   if (!bbox || bbox.length !== 4) throw new Error('bbox must be [minLon, minLat, maxLon, maxLat]')
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate ?? '')) throw new Error('startDate must be YYYY-MM-DD')
-  if (!Number.isInteger(dayRange) || dayRange < 1 || dayRange > MAX_DAY_RANGE) {
-    throw new Error(`dayRange must be an integer between 1 and ${MAX_DAY_RANGE}`)
+  if (!Number.isInteger(dayRange) || dayRange < 1) {
+    throw new Error('dayRange must be a positive integer')
+  }
+  for (const sensor of sensors) {
+    const cap = sensor.maxDayRange ?? MAX_DAY_RANGE
+    if (dayRange > cap) {
+      throw new Error(`${sensor.name} accepts a dayRange of at most ${cap}, received ${dayRange}`)
+    }
   }
 
   const area = bbox.join(',')
@@ -190,9 +222,28 @@ export function buildFirmsRequests({ mapKey, bbox, startDate, dayRange = 2, sens
   }))
 }
 
-function normaliseConfidence(rawValue, instrument) {
+function labelForPercent(percent, rawValue) {
+  if (!Number.isFinite(percent)) return { label: 'unknown', rank: 0, raw: rawValue }
+  if (percent >= 80) return { label: 'high', rank: 3, raw: rawValue }
+  if (percent >= 30) return { label: 'nominal', rank: 2, raw: rawValue }
+  return { label: 'low', rank: 1, raw: rawValue }
+}
+
+function normaliseConfidence(rawValue, instrument, satellite) {
   const value = String(rawValue ?? '').trim().toLowerCase()
   if (!value) return { label: 'unknown', rank: 0, raw: rawValue ?? null }
+
+  if (instrument === 'GEO') {
+    // The two Meteosat generations disagree on units: MTG (Met12) publishes a
+    // 0-1 fraction, the older MSG spacecraft (Met9, Met10) publish 0-100. Both
+    // were confirmed against a day of real detections. Keying on the spacecraft
+    // rather than on the magnitude matters, because a genuine 1 percent from an
+    // MSG satellite would otherwise be read as total certainty.
+    const number = Number(value)
+    if (!Number.isFinite(number)) return { label: 'unknown', rank: 0, raw: rawValue }
+    const isFractionalScale = /^met1[1-9]|mtg/i.test(String(satellite ?? ''))
+    return labelForPercent(isFractionalScale ? number * 100 : number, number)
+  }
 
   if (instrument === 'MODIS') {
     // MODIS publishes a 0-100 integer.
@@ -273,7 +324,7 @@ export function parseFirmsCsv(csvText, sensor) {
       trackKm: hasPublishedFootprint ? trackKm : nominalKm,
       footprintSource: hasPublishedFootprint ? 'published' : 'nominal',
       acquiredAt: toIsoTimestamp(cells[dateIndex], cells[timeIndex]),
-      confidence: normaliseConfidence(cells[confidenceIndex], sensor.instrument),
+      confidence: normaliseConfidence(cells[confidenceIndex], sensor.instrument, cells[satelliteIndex]),
       frpMw: Number.isFinite(Number(cells[frpIndex])) ? Number(cells[frpIndex]) : null,
       brightnessK: Number.isFinite(Number(cells[brightnessIndex])) ? Number(cells[brightnessIndex]) : null,
       dayNight: cells[dayNightIndex]?.trim() || null,
