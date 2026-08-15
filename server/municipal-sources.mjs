@@ -68,7 +68,8 @@ export const MUNICIPAL_PROVIDERS = [
     municipality: 'Bütgenbach',
     name: 'Municipality of Bütgenbach',
     format: 'wordpress',
-    endpoint: 'https://butgenbach.be/wp-json/wp/v2/search?per_page=100&subtype=post',
+    endpoint: 'https://www.butgenbach.be/?rest_route=/wp/v2/search&per_page=100&subtype=post',
+    detailEndpoint: 'https://www.butgenbach.be/?p=',
     publicUrl: 'https://butgenbach.be/blog/',
     trustedHost: 'butgenbach.be',
   },
@@ -311,7 +312,7 @@ export function normalizeWordpressApiNotice(item, provider, retrievedAt) {
     bodyText,
     url: item?.link,
     publishedAt,
-    effectiveAt: frenchNoticeDate(`${title} ${bodyText}`, publishedAt),
+    effectiveAt: frenchNoticeDate(`${title} ${bodyText}`, publishedAt) || germanNoticeDate(`${title} ${bodyText}`),
     updatedAt: wordpressUtcTimestamp(item?.modified_gmt || item?.modified || item?.date_gmt || item?.date),
     firstRetrievedAt: retrievedAt,
     lastRetrievedAt: retrievedAt,
@@ -586,8 +587,8 @@ async function refreshButgenbach(provider, retrievedAt, query, previousProvider 
   }
   const candidates = [...candidatesById.values()].slice(0, 15)
   const details = await Promise.allSettled(candidates.map(async (item) => {
-    const url = trustedArticleUrl(item?.url, provider)
-    if (!url) throw new Error('Bütgenbach returned an untrusted article URL')
+    if (!Number.isFinite(Number(item?.id))) throw new Error('Bütgenbach returned an invalid post id')
+    const url = `${provider.detailEndpoint}${Number(item.id)}`
     const article = await fetchBody(url, { accept: 'text/html' })
     await archiveBody({ providerId: provider.id, url, ...article, retrievedAt }, query)
     return normalizeButgenbachNotice(item, article.body, provider, retrievedAt)
