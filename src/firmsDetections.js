@@ -66,6 +66,9 @@ export const FIRMS_SENSORS = [
   {
     key: 'modis',
     providesArea: false,
+    displayMode: 'footprint',
+    pixelSizeLabel: '1 km nominal pixel',
+    areaExclusionReason: 'MODIS pixels are too coarse for an area estimate at this incident scale.',
     apiSource: 'MODIS_NRT',
     name: 'MODIS Terra/Aqua',
     platform: 'Terra and Aqua',
@@ -90,6 +93,9 @@ export const FIRMS_SENSORS = [
     // which is why this sensor never yields an area figure.
     nominalResolutionM: 3000,
     providesArea: false,
+    displayMode: 'centroid',
+    pixelSizeLabel: 'roughly 3 × 6 km at 50.5°N',
+    areaExclusionReason: 'Meteosat scan/track dimensions are not published by FIRMS and its pixels are too coarse for an area estimate.',
     // FIRMS rejects a longer window for this product.
     maxDayRange: 2,
     color: '#7f9bb5',
@@ -444,20 +450,25 @@ export function meetsConfidence(detection, minimumConfidence = 'low') {
 
 export function summarizeSensorDetections({ sensor, detections, skippedRows = 0, requestUrl, retrievedAt, minimumConfidence = 'low', origin }) {
   const retained = detections.filter((detection) => meetsConfidence(detection, minimumConfidence))
+  const providesArea = sensor.providesArea === true
 
   const confidenceCounts = { low: 0, nominal: 0, high: 0, unknown: 0 }
   for (const detection of detections) confidenceCounts[detection.confidence.label] += 1
 
   const timestamps = retained.map((detection) => detection.acquiredAt).sort()
   const frpValues = retained.map((detection) => detection.frpMw).filter((value) => Number.isFinite(value))
-  const area = estimateFootprintArea(retained, { origin })
-  const nominalFootprintHa = (sensor.nominalResolutionM / 1000) ** 2 * 100
+  const area = providesArea ? estimateFootprintArea(retained, { origin }) : null
+  const nominalFootprintHa = providesArea
+    ? (sensor.nominalResolutionM / 1000) ** 2 * 100
+    : null
 
   // The published pixel dimensions grow with scan angle, so an overpass near the
   // swath edge inflates every footprint. Reporting the observed mean pixel
   // against the nominal one makes that inflation visible instead of burying it
   // inside the hectare figure.
-  const observedPixelAreas = retained.map((detection) => detection.scanKm * detection.trackKm * 100)
+  const observedPixelAreas = providesArea
+    ? retained.map((detection) => detection.scanKm * detection.trackKm * 100)
+    : []
   const meanPixelHa = observedPixelAreas.length
     ? observedPixelAreas.reduce((total, value) => total + value, 0) / observedPixelAreas.length
     : null
@@ -465,24 +476,28 @@ export function summarizeSensorDetections({ sensor, detections, skippedRows = 0,
   // The same union recomputed at each confidence threshold. A single hectare
   // number would hide how strongly the figure depends on a threshold choice, so
   // all three travel together and the caller states which one it displays.
-  const areaHaByConfidence = {}
-  for (const level of ['low', 'nominal', 'high']) {
-    areaHaByConfidence[level] = estimateFootprintArea(
-      detections.filter((detection) => meetsConfidence(detection, level)),
-      { origin },
-    ).unionHa
+  const areaHaByConfidence = providesArea ? {} : null
+  if (providesArea) {
+    for (const level of ['low', 'nominal', 'high']) {
+      areaHaByConfidence[level] = estimateFootprintArea(
+        detections.filter((detection) => meetsConfidence(detection, level)),
+        { origin },
+      ).unionHa
+    }
   }
 
   // The same union using nominal pixels instead of the published ones, which
   // isolates how much of the estimate comes from scan-angle growth alone.
-  const nominalPixelAreaHa = estimateFootprintArea(
-    retained.map((detection) => ({
-      ...detection,
-      scanKm: sensor.nominalResolutionM / 1000,
-      trackKm: sensor.nominalResolutionM / 1000,
-    })),
-    { origin },
-  ).unionHa
+  const nominalPixelAreaHa = providesArea
+    ? estimateFootprintArea(
+        retained.map((detection) => ({
+          ...detection,
+          scanKm: sensor.nominalResolutionM / 1000,
+          trackKm: sensor.nominalResolutionM / 1000,
+        })),
+        { origin },
+      ).unionHa
+    : null
 
   return {
     sensorKey: sensor.key,
@@ -491,6 +506,11 @@ export function summarizeSensorDetections({ sensor, detections, skippedRows = 0,
     instrument: sensor.instrument,
     nominalResolutionM: sensor.nominalResolutionM,
     color: sensor.color,
+    providesArea,
+    areaDerivationAllowed: providesArea,
+    areaExclusionReason: providesArea ? null : sensor.areaExclusionReason,
+    displayMode: sensor.displayMode ?? 'footprint',
+    pixelSizeLabel: sensor.pixelSizeLabel ?? `${sensor.nominalResolutionM} m nominal pixel`,
 
     detectionCount: retained.length,
     droppedByConfidence: detections.length - retained.length,
@@ -503,19 +523,21 @@ export function summarizeSensorDetections({ sensor, detections, skippedRows = 0,
     maxFrpMw: frpValues.length ? Math.max(...frpValues) : null,
 
     // The estimate and its label travel together.
-    areaHa: area.unionHa,
-    areaMethod: area.method,
-    areaIsEstimate: true,
-    areaLabel: `${sensor.name} detection footprint (estimate)`,
-    areaDisclaimer: 'Derived from thermal-anomaly footprints. Not a burned area, not a perimeter and not an official affected-area figure.',
-    footprintSumHa: area.sumHa,
-    footprintOverlapFactor: area.overlapFactor,
+    areaHa: area?.unionHa ?? null,
+    areaMethod: area?.method ?? null,
+    areaIsEstimate: providesArea ? true : null,
+    areaLabel: providesArea ? `${sensor.name} detection footprint (estimate)` : `${sensor.name} detections only`,
+    areaDisclaimer: providesArea
+      ? 'Derived from thermal-anomaly footprints. Not a burned area, not a perimeter and not an official affected-area figure.'
+      : sensor.areaExclusionReason,
+    footprintSumHa: area?.sumHa ?? null,
+    footprintOverlapFactor: area?.overlapFactor ?? null,
     singlePixelHa: nominalFootprintHa,
     meanPixelHa,
-    pixelInflationFactor: meanPixelHa ? meanPixelHa / nominalFootprintHa : null,
+    pixelInflationFactor: meanPixelHa && nominalFootprintHa ? meanPixelHa / nominalFootprintHa : null,
     areaHaByConfidence,
     nominalPixelAreaHa,
-    gridCellM: area.gridCellM,
+    gridCellM: area?.gridCellM ?? null,
 
     source: 'NASA FIRMS',
     sourceUrl: FIRMS_SOURCE_URL,
@@ -530,12 +552,13 @@ export function summarizeSensorDetections({ sensor, detections, skippedRows = 0,
 export function firmsSourceEntry(summaries) {
   const plotted = summaries.reduce((total, summary) => total + summary.detectionCount, 0)
   const connected = summaries.filter((summary) => summary.detectionCount > 0)
+  const areaCapable = connected.filter((summary) => summary.providesArea)
   return {
     name: 'NASA FIRMS',
     detail: plotted
-      ? `${plotted} detections from ${connected.length} sensor${connected.length === 1 ? '' : 's'}; hectares are derived estimates`
+      ? `${plotted} detections from ${connected.length} sensor${connected.length === 1 ? '' : 's'}; area is derived only for ${areaCapable.length} VIIRS product${areaCapable.length === 1 ? '' : 's'}`
       : 'No detections in the selected snapshot or server response',
-    cadence: 'Roughly 6 to 10 overpasses per day, about 3 h latency',
+    cadence: 'Polar overpasses plus roughly ten-minute geostationary scans; provider latency varies',
     url: FIRMS_SOURCE_URL,
     tone: 'nasa',
   }

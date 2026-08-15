@@ -10,6 +10,7 @@ import {
   estimateFootprintArea,
   footprintOutlineRings,
   parseFirmsCsv,
+  summarizeSensorDetections,
 } from '../src/firmsDetections.js'
 
 let failures = 0
@@ -91,6 +92,18 @@ check('malformed row skipped, not guessed', parsed.skippedRows, 1)
 check('zero pixel dimensions fall back to nominal', geo.detections[0].scanKm, 3)
 check('the fallback is flagged', geo.detections[0].footprintSource, 'nominal')
 check('published dimensions are kept', parsed.detections[0].scanKm, 0.375)
+
+const geoSummary = summarizeSensorDetections({
+  sensor: meteosat,
+  detections: geo.detections,
+  minimumConfidence: 'low',
+  origin: { latitude: 50.54762, longitude: 6.05757 },
+})
+check('geostationary summary forbids area derivation', geoSummary.areaDerivationAllowed, false)
+check('geostationary summary contains no hectare figure', geoSummary.areaHa, null)
+check('geostationary confidence areas are suppressed', geoSummary.areaHaByConfidence, null)
+check('geostationary mean pixel hectares are suppressed', geoSummary.meanPixelHa, null)
+check('geostationary renders as an exact centroid', geoSummary.displayMode, 'centroid')
 
 // A 375 m pixel is 14.0625 ha, and the grid union reproduces it exactly.
 const single = estimateFootprintArea([parsed.detections[0]], { origin: parsed.detections[0] })

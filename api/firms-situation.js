@@ -117,6 +117,10 @@ export async function loadFirms({ mapKey, requestedAtMs, includeRaw = false, fet
       ...detection,
       footprint: detectionFootprint(detection),
       meetsMinimumConfidence: meetsConfidence(detection, MINIMUM_CONFIDENCE),
+      providesArea: request.sensor.providesArea === true,
+      displayMode: request.sensor.displayMode ?? 'footprint',
+      pixelSizeLabel: request.sensor.pixelSizeLabel ?? `${request.sensor.nominalResolutionM} m nominal pixel`,
+      areaExclusionReason: request.sensor.areaExclusionReason ?? null,
     })))
     sources.push(publicSensorStatus(request, true, null, {
       statusCode: result.statusCode,
@@ -174,9 +178,10 @@ export async function loadFirms({ mapKey, requestedAtMs, includeRaw = false, fet
     interpretation: [
       'Every coordinate is an exact NASA FIRMS detection centroid; no position is interpolated.',
       `Only detections within ${INCIDENT_RADIUS_KM} km of Drossart are returned.`,
-      'A detection is a thermal anomaly at the moment of overpass, not a burned-area polygon.',
+      'A detection is a thermal anomaly at the moment of a polar overpass or geostationary scan, not a burned-area polygon.',
       'Per-sensor hectare values are footprint-union estimates and must never be added together.',
-      'MODIS pixels are too coarse for an area figure at this incident scale; clients must suppress its hectare estimate.',
+      'Only sensors with providesArea=true may expose a hectare estimate. MODIS and Meteosat are detections-only.',
+      'Meteosat scan and track are zero in FIRMS. It is rendered as an exact centroid, not as a guessed footprint.',
       ...FOOTPRINT_ESTIMATE_CAVEATS,
     ],
   }

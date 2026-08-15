@@ -280,23 +280,35 @@ export default function MapView({
     firmsDetections.forEach((detection) => {
       const style = FIRMS_CONFIDENCE_STYLE[detection.confidence.label] ?? FIRMS_CONFIDENCE_STYLE.unknown
       const age = frameIndex - detection.frame
-      L.polygon(detection.footprint, {
-        color: style.color,
-        weight: style.weight,
-        opacity: style.opacity,
-        fillColor: style.color,
-        fillOpacity: Math.max(style.fillOpacity * 0.4, style.fillOpacity - age * 0.004),
-      })
-        .bindTooltip(
-          `<strong>${detection.confidence.label} confidence</strong><br>`
-          + `${detection.sensorName} · ${detection.frpMw ?? '—'} MW FRP<br>`
-          + `${Math.round(detection.scanKm * detection.trackKm * 100)} ha sensor pixel`
-          + `${detection.corroboratingSensors > 1 ? `<br>${detection.corroboratingSensors} satellites saw this cell` : ''}`
-          + `<br><small>NASA FIRMS · ${detection.acquiredAt.replace('T', ' ').slice(0, 16)} UTC</small>`
-          + '<br><small>Thermal anomaly, not a burned-area polygon</small>',
-          { direction: 'top' },
-        )
-        .addTo(group)
+      const fillOpacity = Math.max(style.fillOpacity * 0.4, style.fillOpacity - age * 0.004)
+      const layer = detection.displayMode === 'centroid'
+        ? L.circleMarker(detection.position, {
+            color: style.color,
+            weight: style.weight + 0.5,
+            opacity: style.opacity,
+            fillColor: style.color,
+            fillOpacity,
+            radius: 4 + Math.max(0, detection.confidence.rank ?? 0),
+          })
+        : L.polygon(detection.footprint, {
+            color: style.color,
+            weight: style.weight,
+            opacity: style.opacity,
+            fillColor: style.color,
+            fillOpacity,
+          })
+      const pixelDetail = detection.providesArea
+        ? `${Math.round(detection.scanKm * detection.trackKm * 100)} ha sensor pixel`
+        : `${detection.pixelSizeLabel} · detections only, no area derived`
+      layer.bindTooltip(
+        `<strong>${detection.confidence.label} confidence</strong><br>`
+        + `${detection.sensorName}${detection.satellite ? ` · ${detection.satellite}` : ''} · ${detection.frpMw ?? '—'} MW FRP<br>`
+        + pixelDetail
+        + `${detection.corroboratingSensors > 1 ? `<br>${detection.corroboratingSensors} satellites saw this cell` : ''}`
+        + `<br><small>NASA FIRMS · ${detection.acquiredAt.replace('T', ' ').slice(0, 16)} UTC</small>`
+        + `<br><small>${detection.displayMode === 'centroid' ? 'Exact detection centroid; no scan/track footprint published' : 'Thermal anomaly, not a burned-area polygon'}</small>`,
+        { direction: 'top' },
+      ).addTo(group)
     })
 
     // One dissolved boundary around the best-estimate detections, drawn after the

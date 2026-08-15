@@ -565,9 +565,10 @@ async function refreshDwd({ requestedAtMs, query }) {
   return { itemCount: observations.length, metadata: { changed: stored.changed } }
 }
 
-function firmsDetectionKey(detection) {
+export function firmsDetectionKey(detection) {
   return [
     detection.sensorKey,
+    detection.satellite || 'unknown-platform',
     detection.acquiredAt,
     Number(detection.latitude).toFixed(6),
     Number(detection.longitude).toFixed(6),
@@ -599,7 +600,27 @@ async function refreshFirms({ requestedAtMs, query, bucketAt }) {
   incomingPayload.sensors.forEach((sensor) => summaries.set(sensor.sensorKey, sensor))
   const sensors = FIRMS_SENSORS.flatMap((sensor) => {
     const summary = summaries.get(sensor.key)
-    return summary ? [summary] : []
+    if (!summary) return []
+    if (sensor.providesArea) return [{ ...summary, providesArea: true, areaDerivationAllowed: true }]
+    return [{
+      ...summary,
+      providesArea: false,
+      areaDerivationAllowed: false,
+      areaExclusionReason: sensor.areaExclusionReason,
+      areaHa: null,
+      areaMethod: null,
+      areaIsEstimate: null,
+      areaLabel: `${sensor.name} detections only`,
+      areaDisclaimer: sensor.areaExclusionReason,
+      footprintSumHa: null,
+      footprintOverlapFactor: null,
+      singlePixelHa: null,
+      meanPixelHa: null,
+      pixelInflationFactor: null,
+      areaHaByConfidence: null,
+      nominalPixelAreaHa: null,
+      gridCellM: null,
+    }]
   })
   const payload = { ...previous, ...incomingPayload, sensors, detections }
   const stored = await saveDataset({ key: 'firms', payload }, query)
@@ -963,7 +984,7 @@ export const REFRESH_SOURCES = [
   {
     key: 'firms', label: 'NASA FIRMS detections', intervalMinutes: 15, run: refreshFirms,
     providerUrl: 'https://firms.modaps.eosdis.nasa.gov/',
-    coverage: 'Exact VIIRS and MODIS thermal detections from four satellite products',
+    coverage: 'Exact VIIRS and MODIS thermal detections plus GOES_NRT Meteosat scan centroids from five products',
   },
   {
     key: 'effis', label: 'Copernicus EFFIS daily geometry', intervalMinutes: 360, run: refreshEffis,

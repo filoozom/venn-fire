@@ -36,6 +36,9 @@ jobs:
       - name: Verify leased refresh pipeline and durable flight history
         run: pnpm verify:refresh && pnpm verify:flight-history
 
+      - name: Verify FIRMS sensor capabilities and parsing
+        run: pnpm verify:firms-sensors
+
       - name: Verify live area-report parsers
         run: pnpm verify:live-reports
 

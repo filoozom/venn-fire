@@ -70,11 +70,6 @@ const FIRMS_CONFIDENCE_LEVELS = [
   { key: 'firmsConfidence:low', level: 'low', label: 'Low confidence' },
 ]
 
-// A MODIS pixel on these overpasses averaged around 500 ha, which is more than
-// half the reported fire. Its detections are shown; no hectare figure is derived
-// from them, because a number at that pixel size carries no information.
-const AREA_CAPABLE_SENSORS = new Set(['viirsSnpp', 'viirsNoaa20', 'viirsNoaa21'])
-
 const FIRMS_LAYER_DEFAULTS = {
   ...Object.fromEntries(FIRMS_SENSORS.map((sensor) => [FIRMS_LAYER_KEYS[sensor.key], sensor.key !== 'modis'])),
   'firmsConfidence:high': true,
@@ -118,7 +113,9 @@ function layerOptionsFor(effisArea, isCarriedForward, firmsSummaries = [], frame
       key: FIRMS_LAYER_KEYS[sensor.key],
       label: sensor.name,
       detail: summary
-        ? `${summary.detectionCount} detections · ${pixel ? `${Math.round(pixel)} ha mean pixel` : `${sensor.nominalResolutionM} m nominal`}${AREA_CAPABLE_SENSORS.has(sensor.key) ? '' : ' · no area derived'}`
+        ? sensor.providesArea
+          ? `${summary.detectionCount} detections · ${pixel ? `${Math.round(pixel)} ha mean pixel` : `${sensor.nominalResolutionM} m nominal`}`
+          : `${summary.detectionCount} detections · ${sensor.pixelSizeLabel ?? `${sensor.nominalResolutionM} m nominal pixel`} · detections only, no area`
         : 'No detections in the database',
       icon: Satellite,
       color: sensor.color,
@@ -447,7 +444,7 @@ function DataModal({
                 <div className="connection-icon"><Satellite size={20} /></div>
                 <div className="connection-copy">
                   <div className="connection-title"><strong>NASA FIRMS</strong><span className="status-pill status-pill--connected"><Check size={11} /> DATABASE REFRESH</span></div>
-                  <p>{firmsDetectionCount} exact thermal-anomaly detections from Suomi-NPP, NOAA-20, NOAA-21 and MODIS are retained in Postgres. The Vercel refresh function merges each new overpass into that history.</p>
+                  <p>{firmsDetectionCount} exact thermal-anomaly detections from Suomi-NPP, NOAA-20, NOAA-21, MODIS and Meteosat are retained in Postgres. The Vercel refresh function merges polar overpasses and geostationary scans into that history.</p>
                   <span className="connection-meta">Checked every 5 min · provider lease 15 min · no browser-stored API key</span>
                 </div>
               </div>
@@ -504,11 +501,11 @@ function DataModal({
                 <p><strong>Different products answer different questions.</strong> The viewer keeps reported area, satellite-derived geometry, thermal detections, aircraft fixes and model weather separate.</p>
               </div>
               <div className="method-steps">
-                <article><span>01</span><div><strong>Thermal anomaly</strong><p>FIRMS footprints appear at their exact acquisition time. VIIRS areas are confidence-sensitive footprint-union estimates; MODIS is detections-only because its pixels are too coarse at this incident scale.</p></div></article>
-                <article><span>02</span><div><strong>Reported area</strong><p>The line is a timestamped step series: official ~60, ~100 and ~850 ha updates, followed by BRF reports of &gt;900 ha at 11:28 and &gt;1,500 ha at 14:30. Between reports it means “last reported,” not measured growth.</p></div></article>
+                <article><span>01</span><div><strong>Thermal anomaly</strong><p>FIRMS detections appear at their exact acquisition time. VIIRS areas are confidence-sensitive footprint-union estimates; MODIS and Meteosat are detections-only because their pixels are too coarse for an area figure here.</p></div></article>
+                <article><span>02</span><div><strong>Reported area</strong><p>The line is a timestamped step series. A figure becomes visible when published; when its stated effective time differs, both times are retained and shown. Between reports it means “last reported,” not measured growth.</p></div></article>
                 <article><span>03</span><div><strong>EFFIS daily geometry</strong><p>The 14 and 15 August VIIRS-derived polygons are separate calendar-day products. Their locally calculated geometry area is not the official affected area; EFFIS provides no within-day acquisition time for five-minute animation.</p></div></article>
                 <article><span>04</span><div><strong>Aircraft observations</strong><p>Identified incident aircraft are shown from exact receiver fixes returned by the independently health-checked aircraft providers. Gaps stay empty, and a marker never claims a helicopter remained airborne.</p></div></article>
-                <article><span>05</span><div><strong>Situation reports</strong><p>The Governor of Liège supplies the official 60, 100 and 850 hectare estimates. BRF’s later 900 and 1,500 hectare figures stay labelled local reporting; every step links to its own source.</p></div></article>
+                <article><span>05</span><div><strong>Situation reports</strong><p>The Governor of Liège page is polled every five minutes for official estimates and safety events. BRF figures remain distinctly labelled local reporting; every step links to its source.</p></div></article>
               </div>
               <div className="safety-note"><ShieldAlert size={17} /><span>This viewer is informational and must not be used for evacuation or preservation-of-life decisions. Follow BE-Alert and emergency services.</span></div>
             </div>
@@ -739,6 +736,10 @@ function FireViewer({ runtime, databaseError }) {
       ...detection,
       sensorName: sensor?.name ?? detection.sensorKey,
       sensorColor: sensor?.color ?? '#efaa3c',
+      providesArea: sensor?.providesArea === true,
+      displayMode: sensor?.displayMode ?? detection.displayMode ?? 'footprint',
+      pixelSizeLabel: sensor?.pixelSizeLabel ?? detection.pixelSizeLabel ?? `${detection.scanKm} × ${detection.trackKm} km pixel`,
+      areaExclusionReason: sensor?.areaExclusionReason ?? detection.areaExclusionReason ?? null,
       position: [detection.latitude, detection.longitude],
       frame: Math.max(0, Math.ceil((Date.parse(detection.acquiredAt) - runtime.timelineStartMs) / FIVE_MINUTES_MS)),
     }
@@ -790,7 +791,7 @@ function FireViewer({ runtime, databaseError }) {
   }).unionHa, [bestEstimateDetections, firmsData.locationReference])
 
   const firmsAreaEstimates = useMemo(() => FIRMS_SENSORS
-    .filter((sensor) => AREA_CAPABLE_SENSORS.has(sensor.key) && layers[FIRMS_LAYER_KEYS[sensor.key]])
+    .filter((sensor) => sensor.providesArea && layers[FIRMS_LAYER_KEYS[sensor.key]])
     .map((sensor) => {
       const forSensor = visibleFirmsDetections.filter((detection) => detection.sensorKey === sensor.key)
       return {
