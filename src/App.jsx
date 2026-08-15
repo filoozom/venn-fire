@@ -43,25 +43,133 @@ import {
 import MapView from './MapView'
 import {
   buildFireFrames,
-  bundledHourlyWeather,
+  bundledWeatherRows,
+  dwdWindStations,
   events,
   effisAreaForTimestamp,
   fireFrames,
+  FIVE_MINUTES_MS,
   flights,
   incidentAircraftMeta,
   initialLayers,
   nearbyTrafficMeta,
   normalizeNearbyTrafficSnapshot,
   sourceLinks,
+  TIMELINE_START_MS,
 } from './data'
+import { FIRMS_SENSORS, estimateFootprintArea } from './firmsDetections'
 
-function layerOptionsFor(effisArea, isCarriedForward) {
+// Each sensor is its own layer and each confidence level its own filter, so the
+// viewer chooses the configuration rather than inheriting a threshold we picked.
+// The hectare figure recomputes from whatever is checked; it is never a stored
+// constant.
+const FIRMS_LAYER_KEYS = Object.fromEntries(FIRMS_SENSORS.map((sensor) => [sensor.key, `firms:${sensor.key}`]))
+const FIRMS_CONFIDENCE_LEVELS = [
+  { key: 'firmsConfidence:high', level: 'high', label: 'High confidence' },
+  { key: 'firmsConfidence:nominal', level: 'nominal', label: 'Nominal confidence' },
+  { key: 'firmsConfidence:low', level: 'low', label: 'Low confidence' },
+]
+
+// A MODIS pixel on these overpasses averaged around 500 ha, which is more than
+// half the reported fire. Its detections are shown; no hectare figure is derived
+// from them, because a number at that pixel size carries no information.
+const AREA_CAPABLE_SENSORS = new Set(['viirsSnpp', 'viirsNoaa20', 'viirsNoaa21'])
+
+const FIRMS_LAYER_DEFAULTS = {
+  ...Object.fromEntries(FIRMS_SENSORS.map((sensor) => [FIRMS_LAYER_KEYS[sensor.key], sensor.key !== 'modis'])),
+  'firmsConfidence:high': true,
+  'firmsConfidence:nominal': true,
+  'firmsConfidence:low': false,
+}
+
+const DWD_WIND_LAYER_KEYS = Object.fromEntries(
+  dwdWindStations.map((station) => [station.id, `dwdWind:${station.id}`]),
+)
+const DWD_WIND_LAYER_DEFAULTS = Object.fromEntries(
+  dwdWindStations.map((station) => [DWD_WIND_LAYER_KEYS[station.id], true]),
+)
+const INITIAL_LAYER_STATE = { ...initialLayers, ...FIRMS_LAYER_DEFAULTS, ...DWD_WIND_LAYER_DEFAULTS }
+const FIRMS_REFRESH_MS = 15 * 60 * 1000
+const EMPTY_FIRMS_DATA = {
+  schemaVersion: 1,
+  generatedAt: null,
+  locationReference: {
+    name: 'Drossart locality',
+    latitude: 50.54762,
+    longitude: 6.05757,
+  },
+  sensors: [],
+  detections: [],
+}
+
+function firmsDetectionKey(detection) {
+  return [
+    detection.sensorKey,
+    detection.acquiredAt,
+    Number(detection.latitude).toFixed(6),
+    Number(detection.longitude).toFixed(6),
+  ].join('|')
+}
+
+// Live responses cover a rolling window. Merge them into the audited snapshot
+// rather than replacing history, and prefer live fields only for exact duplicate
+// observations.
+function mergeFirmsData(bundled, live) {
+  const detections = new Map(
+    bundled.detections.map((detection) => [firmsDetectionKey(detection), detection]),
+  )
+  live.detections.forEach((detection) => detections.set(firmsDetectionKey(detection), detection))
+
+  const sensorSummaries = new Map(
+    bundled.sensors.map((summary) => [summary.sensorKey, summary]),
+  )
+  live.sensors.forEach((summary) => sensorSummaries.set(summary.sensorKey, summary))
+
+  return {
+    ...bundled,
+    ...live,
+    locationReference: live.locationReference || bundled.locationReference,
+    sensors: FIRMS_SENSORS.flatMap((sensor) => {
+      const summary = sensorSummaries.get(sensor.key)
+      return summary ? [summary] : []
+    }),
+    detections: [...detections.values()].sort((left, right) => (
+      Date.parse(left.acquiredAt) - Date.parse(right.acquiredAt)
+      || left.sensorKey.localeCompare(right.sensorKey)
+    )),
+  }
+}
+
+function layerOptionsFor(effisArea, isCarriedForward, firmsSummaries = [], frame = null) {
   return [
   { key: 'perimeter', label: 'EFFIS daily geometry', detail: effisArea ? `${effisArea.productDate}${isCarriedForward ? ' carried forward' : ''} · ${Math.round(effisArea.areaHa).toLocaleString('en-GB')} ha polygon` : 'No product available at selected time', icon: Layers3, color: '#e96838' },
-  { key: 'hotspots', label: 'NASA hotspots', detail: 'Only after a FIRMS response', icon: Satellite, color: '#efaa3c' },
+  ...FIRMS_SENSORS.map((sensor) => {
+    const summary = firmsSummaries.find((entry) => entry.sensorKey === sensor.key)
+    const pixel = summary?.meanPixelHa
+    return {
+      key: FIRMS_LAYER_KEYS[sensor.key],
+      label: sensor.name,
+      detail: summary
+        ? `${summary.detectionCount} detections · ${pixel ? `${Math.round(pixel)} ha mean pixel` : `${sensor.nominalResolutionM} m nominal`}${AREA_CAPABLE_SENSORS.has(sensor.key) ? '' : ' · no area derived'}`
+        : 'No detections in the bundled snapshot',
+      icon: Satellite,
+      color: sensor.color,
+    }
+  }),
   { key: 'aircraft', label: 'Aircraft observations', detail: 'Exact MLAT dots + gap-limited connectors', icon: Helicopter, color: '#3a7fcc' },
   { key: 'traffic', label: 'All nearby receiver traffic', detail: `${nearbyTrafficMeta.aircraftCount} other identifiers · optional`, icon: Radio, color: '#687e8a' },
-  { key: 'wind', label: 'Wind at Drossart', detail: '10 m hourly model value', icon: Wind, color: '#4f9e90' },
+  { key: 'wind', label: 'Drossart model wind', detail: frame?.drossartWind ? `Open-Meteo hourly grid · ${frame.drossartWind.ageMinutes} min old` : 'No model value at selected time', icon: Wind, color: '#478fc4' },
+  { key: 'rmiWind', label: 'Mont Rigi station wind', detail: frame?.montRigiWind ? `RMI 10 min observation · ${frame.montRigiWind.ageMinutes} min old · awaiting validation` : 'No station observation within 20 min of selected time', icon: Wind, color: '#4f9e90' },
+  ...dwdWindStations.map((station) => {
+    const reading = frame?.dwdWinds?.find((item) => item.id === station.id)
+    return {
+      key: DWD_WIND_LAYER_KEYS[station.id],
+      label: `${station.name} wind`,
+      detail: reading ? `DWD 10 min · ${station.distanceKm.toFixed(1)} km away · ${reading.ageMinutes} min old · preliminary` : 'No DWD reading within 90 min of selected time',
+      icon: Wind,
+      color: '#a58ad4',
+    }
+  }),
   ]
 }
 
@@ -278,10 +386,8 @@ function SourceMark({ tone }) {
   return <span className="source-monogram source-monogram--adsb"><Airplay size={17} /></span>
 }
 
-function DataModal({ open, onClose, onImportTracks, importedCount, onFirmsData, connectedCount, frames }) {
+function DataModal({ open, onClose, onImportTracks, importedCount, firmsState, firmsDetectionCount }) {
   const [tab, setTab] = useState('connections')
-  const [mapKey, setMapKey] = useState(() => localStorage.getItem('venn-firms-key') || '')
-  const [keyVisible, setKeyVisible] = useState(false)
   const [status, setStatus] = useState('idle')
   const [message, setMessage] = useState('')
   const inputRef = useRef(null)
@@ -292,69 +398,6 @@ function DataModal({ open, onClose, onImportTracks, importedCount, onFirmsData, 
     window.addEventListener('keydown', closeOnEscape)
     return () => window.removeEventListener('keydown', closeOnEscape)
   }, [open, onClose])
-
-  async function testFirms() {
-    if (!mapKey.trim()) {
-      setStatus('error')
-      setMessage('Add your free FIRMS MAP_KEY first.')
-      return
-    }
-    localStorage.setItem('venn-firms-key', mapKey.trim())
-    setStatus('loading')
-    setMessage('Checking the FIRMS area service…')
-    const endpoint = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${mapKey.trim()}/VIIRS_SNPP_NRT/5.90,50.50,6.16,50.66/2/2026-08-14`
-    try {
-      const response = await fetch(endpoint)
-      if (!response.ok) throw new Error(`FIRMS returned ${response.status}`)
-      const csv = await response.text()
-      const rows = csv.trim().split(/\r?\n/)
-      const headers = (rows.shift() || '').split(',').map((value) => value.trim().toLowerCase())
-      const indexOf = (...names) => headers.findIndex((value) => names.includes(value))
-      const latitudeIndex = indexOf('latitude')
-      const longitudeIndex = indexOf('longitude')
-      const dateIndex = indexOf('acq_date')
-      const timeIndex = indexOf('acq_time')
-      const confidenceIndex = indexOf('confidence')
-      const frpIndex = indexOf('frp')
-      const instrumentIndex = indexOf('instrument')
-      const satelliteIndex = indexOf('satellite')
-      if (latitudeIndex < 0 || longitudeIndex < 0) throw new Error('FIRMS response did not contain coordinates')
-
-      const detections = rows.map((row) => {
-        const cells = row.split(',').map((value) => value.trim())
-        const latitude = Number(cells[latitudeIndex])
-        const longitude = Number(cells[longitudeIndex])
-        const rawTime = (cells[timeIndex] || '0000').padStart(4, '0')
-        const acquired = `${cells[dateIndex] || '2026-08-14'}T${rawTime.slice(0, 2)}:${rawTime.slice(2, 4)}:00Z`
-        const acquiredAt = new Date(acquired).getTime()
-        let closestFrame = 0
-        let closestDistance = Number.POSITIVE_INFINITY
-        frames.forEach((item, index) => {
-          const distance = Math.abs(new Date(item.time).getTime() - acquiredAt)
-          if (distance < closestDistance) {
-            closestDistance = distance
-            closestFrame = index
-          }
-        })
-        return {
-          position: [latitude, longitude],
-          frame: closestFrame,
-          confidence: (cells[confidenceIndex] || 'nominal').toLowerCase(),
-          sensor: `${cells[satelliteIndex] || 'VIIRS'} ${cells[instrumentIndex] || ''}`.trim(),
-          frp: Number(cells[frpIndex]) || null,
-          acquired: acquired.replace('T', ' ').replace(':00Z', ' UTC'),
-          connected: true,
-        }
-      }).filter((spot) => Number.isFinite(spot.position[0]) && Number.isFinite(spot.position[1]))
-
-      onFirmsData(detections)
-      setStatus('success')
-      setMessage(`${detections.length} VIIRS records returned and plotted for the map extent.`)
-    } catch (error) {
-      setStatus('error')
-      setMessage(`${error.message}. The key was saved; a server proxy may be needed if the browser blocks CORS.`)
-    }
-  }
 
   async function importFile(file) {
     if (!file) return
@@ -429,20 +472,9 @@ function DataModal({ open, onClose, onImportTracks, importedCount, onFirmsData, 
               <div className="connection-card connection-card--primary">
                 <div className="connection-icon"><Satellite size={20} /></div>
                 <div className="connection-copy">
-                  <div className="connection-title"><strong>NASA FIRMS</strong><span className={`status-pill ${connectedCount ? 'status-pill--connected' : 'status-pill--key'}`}>{connectedCount ? <><Check size={11} /> {connectedCount} plotted</> : 'MAP_KEY required'}</span></div>
-                  <p>Query VIIRS S-NPP detections inside the Eupen–High Fens map extent. The key is stored only in this browser.</p>
-                  <div className="key-input">
-                    <input
-                      type={keyVisible ? 'text' : 'password'}
-                      value={mapKey}
-                      onChange={(event) => setMapKey(event.target.value)}
-                      placeholder="Paste your free FIRMS MAP_KEY"
-                      autoComplete="off"
-                    />
-                    <button type="button" onClick={() => setKeyVisible((value) => !value)} aria-label={keyVisible ? 'Hide map key' : 'Show map key'}>{keyVisible ? <EyeOff size={16} /> : <Eye size={16} />}</button>
-                    <button className="connect-button" onClick={testFirms} type="button" disabled={status === 'loading'}>{status === 'loading' ? 'Checking…' : 'Save & test'}</button>
-                  </div>
-                  <a className="inline-link" href="https://firms.modaps.eosdis.nasa.gov/api/map_key/" target="_blank" rel="noreferrer">Request a free key <ExternalLink size={12} /></a>
+                  <div className="connection-title"><strong>NASA FIRMS</strong><span className="status-pill status-pill--connected"><Check size={11} /> {firmsState.status === 'live' ? 'SERVER REFRESH' : 'AUDITED SNAPSHOT'}</span></div>
+                  <p>{firmsDetectionCount} exact thermal-anomaly detections from Suomi-NPP, NOAA-20, NOAA-21 and MODIS are bundled. {firmsState.status === 'live' ? 'A server-side refresh has been merged into that historical record.' : 'The audited snapshot remains available without a viewer key.'}</p>
+                  <span className="connection-meta">15 km incident filter · acquisition times preserved · no browser-stored API key</span>
                 </div>
               </div>
 
@@ -460,9 +492,9 @@ function DataModal({ open, onClose, onImportTracks, importedCount, onFirmsData, 
                 <div className="connection-card">
                   <span className="connection-icon connection-icon--weather"><Wind size={20} /></span>
                   <span className="connection-copy">
-                    <span className="connection-title"><strong>Local weather</strong><span className="status-pill status-pill--connected"><Check size={11} /> Seeded</span></span>
-                    <p>Hourly 10 m wind, gust, temperature and humidity for the Drossart model grid point at 50.548° N, 6.061° E.</p>
-                    <span className="connection-meta">Open-Meteo · Europe/Brussels</span>
+                    <span className="connection-title"><strong>Mont Rigi weather</strong><span className="status-pill status-pill--key">AWAITING QC</span></span>
+                    <p>Ten-minute measurements from RMI station 6494, 4.2 km from Drossart. RMI has not yet quality-validated any field in this near-real-time window.</p>
+                    <span className="connection-meta">Official RMI station observations · Open-Meteo hourly model fallback</span>
                   </span>
                 </div>
               </div>
@@ -483,7 +515,7 @@ function DataModal({ open, onClose, onImportTracks, importedCount, onFirmsData, 
                 <p><strong>Different products answer different questions.</strong> The viewer keeps reported area, satellite-derived geometry, thermal detections, aircraft fixes and model weather separate.</p>
               </div>
               <div className="method-steps">
-                <article><span>01</span><div><strong>Thermal anomaly</strong><p>No marker is bundled. If FIRMS returns VIIRS data, each point remains a sensor observation rather than a burned-area polygon.</p></div></article>
+                <article><span>01</span><div><strong>Thermal anomaly</strong><p>FIRMS footprints appear at their exact acquisition time. VIIRS areas are confidence-sensitive footprint-union estimates; MODIS is detections-only because its pixels are too coarse at this incident scale.</p></div></article>
                 <article><span>02</span><div><strong>Reported area</strong><p>The line is a timestamped step series: ~60 ha at 16:00, ~100 ha at 20:00, ~850 ha at 07:00, then &gt;900 ha at 11:28. Between reports it means “last reported,” not measured growth.</p></div></article>
                 <article><span>03</span><div><strong>EFFIS daily geometry</strong><p>The 14 and 15 August VIIRS-derived polygons are separate calendar-day products. Their locally calculated geometry area is not the official affected area; EFFIS provides no within-day acquisition time for five-minute animation.</p></div></article>
                 <article><span>04</span><div><strong>Aircraft observations</strong><p>G10 and G17 are shown as individual Airplanes.live MLAT fixes. Gaps stay empty, and a marker never claims a helicopter remained airborne.</p></div></article>
@@ -503,7 +535,7 @@ function DataModal({ open, onClose, onImportTracks, importedCount, onFirmsData, 
                   <ExternalLink size={15} />
                 </a>
               ))}
-              <div className="source-footnote"><CircleHelp size={15} /><p>The production live endpoint queries fixed public ADS-B and weather sources server-side with a 60-second cache. Historical source responses remain timestamped and auditable; FIRMS still requires the viewer's own MAP_KEY.</p></div>
+              <div className="source-footnote"><CircleHelp size={15} /><p>Historical source responses remain timestamped and auditable. FIRMS uses a bundled reviewed snapshot and an optional server-side refresh; no key is sent to or stored by the viewer.</p></div>
             </div>
           )}
         </div>
@@ -516,7 +548,7 @@ function App() {
   const [frames, setFrames] = useState(fireFrames)
   const framesLengthRef = useRef(fireFrames.length)
   const [frameIndex, setFrameIndex] = useState(fireFrames.length - 1)
-  const [layers, setLayers] = useState(initialLayers)
+  const [layers, setLayers] = useState(INITIAL_LAYER_STATE)
   const [baseMode, setBaseMode] = useState('terrain')
   const [playing, setPlaying] = useState(false)
   const [playbackRate, setPlaybackRate] = useState(1)
@@ -525,7 +557,8 @@ function App() {
   const [mapActions, setMapActions] = useState(null)
   const [mobileLayersOpen, setMobileLayersOpen] = useState(false)
   const [importedTracks, setImportedTracks] = useState([])
-  const [connectedHotspots, setConnectedHotspots] = useState([])
+  const [firmsData, setFirmsData] = useState(EMPTY_FIRMS_DATA)
+  const [firmsState, setFirmsState] = useState({ status: 'checking', generatedAt: null })
   const [nearbyTraffic, setNearbyTraffic] = useState([])
   const [trafficLoadStatus, setTrafficLoadStatus] = useState('idle')
   const [trafficLoadError, setTrafficLoadError] = useState('')
@@ -536,8 +569,8 @@ function App() {
   const effisCarriedForward = currentEffisArea?.productDate === '2026-08-14'
     && frame.timestampMs >= Date.parse('2026-08-15T00:00:00+02:00')
   const layerOptions = useMemo(
-    () => layerOptionsFor(currentEffisArea, effisCarriedForward),
-    [currentEffisArea, effisCarriedForward],
+    () => layerOptionsFor(currentEffisArea, effisCarriedForward, firmsData.sensors, frame),
+    [currentEffisArea, effisCarriedForward, firmsData.sensors, frame],
   )
   const reportedAreaText = frame.reportedAreaText
 
@@ -579,7 +612,7 @@ function App() {
           const endMs = Date.parse(snapshot.generatedAt)
           const nextFrames = buildFireFrames({
             endMs,
-            weatherRows: [...bundledHourlyWeather, ...snapshot.weather.rows],
+            weatherRows: [...bundledWeatherRows, ...snapshot.weather.rows],
           })
           const previousLength = framesLengthRef.current
           setFrameIndex((currentIndex) => (
@@ -619,6 +652,50 @@ function App() {
 
     refreshLiveSituation()
     const timer = window.setInterval(refreshLiveSituation, 60_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    let bundledSnapshot = null
+
+    async function refreshFirms() {
+      try {
+        if (!bundledSnapshot) {
+          const module = await import('./firmsDetectionsSnapshot.json')
+          bundledSnapshot = module.default
+          if (!cancelled) {
+            setFirmsData(bundledSnapshot)
+            setFirmsState({ status: 'bundled', configured: false, generatedAt: bundledSnapshot.generatedAt })
+          }
+        }
+        const response = await fetch('/api/firms-situation', { headers: { Accept: 'application/json' } })
+        if (!response.ok) throw new Error(`FIRMS endpoint returned ${response.status}`)
+        const payload = await response.json()
+        if (cancelled) return
+        if (!payload.ok || !Array.isArray(payload.detections) || !Array.isArray(payload.sensors)) {
+          setFirmsState({
+            status: 'bundled',
+            configured: Boolean(payload.configured),
+            generatedAt: bundledSnapshot.generatedAt,
+          })
+          return
+        }
+        setFirmsData(mergeFirmsData(bundledSnapshot, payload))
+        setFirmsState({ status: 'live', configured: true, generatedAt: payload.generatedAt })
+      } catch {
+        if (!cancelled && bundledSnapshot) {
+          setFirmsData(bundledSnapshot)
+          setFirmsState({ status: 'bundled', configured: false, generatedAt: bundledSnapshot.generatedAt })
+        }
+      }
+    }
+
+    refreshFirms()
+    const timer = window.setInterval(refreshFirms, FIRMS_REFRESH_MS)
     return () => {
       cancelled = true
       window.clearInterval(timer)
@@ -673,6 +750,31 @@ function App() {
     [frameIndex],
   )
 
+  const nearbyWindReadings = useMemo(() => [
+    ...(frame.drossartWind ? [{
+      id: 'drossart-grid',
+      name: 'Drossart grid',
+      distanceLabel: 'incident locality',
+      status: 'Open-Meteo model',
+      color: '#72b7e6',
+      ...frame.drossartWind,
+    }] : []),
+    ...(frame.montRigiWind ? [{
+      id: 'mont-rigi',
+      name: 'Mont Rigi',
+      distanceLabel: '4.2 km',
+      status: 'RMI · awaiting validation',
+      color: '#8fd7c7',
+      ...frame.montRigiWind,
+    }] : []),
+    ...(frame.dwdWinds || []).map((reading) => ({
+      ...reading,
+      distanceLabel: `${reading.distanceKm.toFixed(1)} km`,
+      status: 'DWD · preliminary',
+      color: '#b9a0e8',
+    })),
+  ], [frame])
+
   const activeFlights = useMemo(
     () => displayFlights.filter((flight) => observationState(flight, frame).key === 'recent'),
     [displayFlights, frame],
@@ -694,7 +796,65 @@ function App() {
     [frame, nearbyTraffic],
   )
 
-  const visibleHotspots = connectedHotspots.filter((spot) => spot.frame <= frameIndex).length
+  // Bundled and live FIRMS detections, placed on the five-minute timeline by their exact
+  // acquisition time. A detection appears from its overpass onward; it is never
+  // back-dated and never interpolated between overpasses.
+  const firmsDetections = useMemo(() => firmsData.detections.map((detection) => {
+    const sensor = FIRMS_SENSORS.find((entry) => entry.key === detection.sensorKey)
+    return {
+      ...detection,
+      sensorName: sensor?.name ?? detection.sensorKey,
+      sensorColor: sensor?.color ?? '#efaa3c',
+      position: [detection.latitude, detection.longitude],
+      frame: Math.max(0, Math.ceil((Date.parse(detection.acquiredAt) - TIMELINE_START_MS) / FIVE_MINUTES_MS)),
+    }
+  }), [firmsData.detections])
+
+  const activeConfidenceLevels = useMemo(
+    () => FIRMS_CONFIDENCE_LEVELS.filter((entry) => layers[entry.key]).map((entry) => entry.level),
+    [layers],
+  )
+
+  const firmsDetectionsAtTime = useMemo(
+    () => firmsDetections.filter((detection) => detection.frame <= frameIndex),
+    [firmsDetections, frameIndex],
+  )
+
+  const visibleFirmsDetections = useMemo(() => firmsDetectionsAtTime.filter((detection) => (
+    layers[FIRMS_LAYER_KEYS[detection.sensorKey]]
+      && activeConfidenceLevels.includes(detection.confidence.label)
+  )), [firmsDetectionsAtTime, layers, activeConfidenceLevels])
+
+  // The estimate is recomputed here from the checked sensors and checked
+  // confidence levels rather than read from a stored figure, so what is shown
+  // always matches what is drawn. Sensors are estimated separately and never
+  // summed: the same ground seen by two satellites is two observations.
+  const firmsAreaEstimates = useMemo(() => FIRMS_SENSORS
+    .filter((sensor) => AREA_CAPABLE_SENSORS.has(sensor.key) && layers[FIRMS_LAYER_KEYS[sensor.key]])
+    .map((sensor) => {
+      const forSensor = visibleFirmsDetections.filter((detection) => detection.sensorKey === sensor.key)
+      return {
+        sensorKey: sensor.key,
+        name: sensor.name,
+        color: sensor.color,
+        detectionCount: forSensor.length,
+        areaHa: estimateFootprintArea(forSensor, {
+          origin: {
+            latitude: firmsData.locationReference.latitude,
+            longitude: firmsData.locationReference.longitude,
+          },
+        }).unionHa,
+      }
+    })
+    .filter((estimate) => estimate.detectionCount > 0), [visibleFirmsDetections, layers, firmsData.locationReference])
+
+  // A range across sensors, never an average or a total. Independent sensors
+  // disagreeing is information, not noise to be smoothed away.
+  const firmsAreaRange = useMemo(() => {
+    if (!firmsAreaEstimates.length) return null
+    const values = firmsAreaEstimates.map((estimate) => estimate.areaHa)
+    return { min: Math.min(...values), max: Math.max(...values), sensorCount: values.length }
+  }, [firmsAreaEstimates])
 
   function importTracks(tracks) {
     const colors = ['#168aad', '#c15f9a', '#7c9f35', '#d47f28']
@@ -753,7 +913,7 @@ function App() {
           </div>
 
           <div className="sidebar-section layers-section">
-            <div className="section-heading"><span>MAP LAYERS</span><button type="button" onClick={() => setLayers(initialLayers)} aria-label="Reset map layers"><RotateCcw size={13} /></button></div>
+            <div className="section-heading"><span>MAP LAYERS</span><button type="button" onClick={() => setLayers(INITIAL_LAYER_STATE)} aria-label="Reset map layers"><RotateCcw size={13} /></button></div>
             <div className="layer-list">
               {layerOptions.map((item) => (
                 <LayerToggle
@@ -767,12 +927,37 @@ function App() {
                 />
               ))}
             </div>
+
+            <div className="section-heading section-heading--sub"><span>FIRMS CONFIDENCE</span></div>
+            <div className="layer-checkboxes">
+              {FIRMS_CONFIDENCE_LEVELS.map((entry) => {
+                const count = firmsDetectionsAtTime.filter((detection) => detection.confidence.label === entry.level).length
+                return (
+                  <label className="layer-checkbox" key={entry.key}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(layers[entry.key])}
+                      onChange={() => setLayers((value) => ({ ...value, [entry.key]: !value[entry.key] }))}
+                    />
+                    <span>{entry.label}</span>
+                    <em>{count}</em>
+                  </label>
+                )
+              })}
+            </div>
+            <p className="layer-note">
+              {firmsAreaRange
+                ? (firmsAreaRange.sensorCount > 1
+                  ? `Detection-footprint estimate ${Math.round(firmsAreaRange.min).toLocaleString('en-GB')}–${Math.round(firmsAreaRange.max).toLocaleString('en-GB')} ha across ${firmsAreaRange.sensorCount} sensors, at the selected confidence levels. Not a burned area.`
+                  : `Detection-footprint estimate ${Math.round(firmsAreaRange.max).toLocaleString('en-GB')} ha at the selected confidence levels. Not a burned area.`)
+                : 'No FIRMS detections at the selected sensors, confidence levels and time.'}
+            </p>
           </div>
 
           <div className="sidebar-section source-summary">
             <div className="section-heading"><span>SOURCE HEALTH</span><button type="button" onClick={() => setDataOpen(true)}>Manage</button></div>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
-              <SourceMark tone="nasa" /><span><strong>FIRMS</strong><small>{connectedHotspots.length ? `${connectedHotspots.length} detections plotted` : 'No data loaded'}</small></span><em className={`health-dot ${connectedHotspots.length ? '' : 'health-dot--amber'}`} />
+              <SourceMark tone="nasa" /><span><strong>FIRMS</strong><small>{`${firmsData.detections.length} exact detections · ${visibleFirmsDetections.length} shown · ${firmsState.status === 'live' ? 'server refreshed' : 'audited snapshot'}`}</small></span><em className={`health-dot ${firmsState.status === 'live' ? '' : 'health-dot--amber'}`} />
             </button>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
               <SourceMark tone="effis" /><span><strong>EFFIS daily geometry</strong><small>{currentEffisArea ? `${currentEffisArea.productDate}${effisCarriedForward ? ' carried forward' : ''} · not official fire size` : 'not yet available at selected time'}</small></span><em className="health-dot health-dot--amber" />
@@ -781,7 +966,7 @@ function App() {
               <SourceMark tone="official" /><span><strong>Affected-area reports</strong><small>{frame.reportedAreaText} ha · {frame.areaLabel}</small></span><em className="health-dot health-dot--amber" />
             </button>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
-              <SourceMark tone="weather" /><span><strong>Wind model</strong><small>Drossart hourly values</small></span><em className="health-dot" />
+              <SourceMark tone={frame.weatherSourceKind === 'station-observation' ? 'rmi' : 'weather'} /><span><strong>{frame.weatherSourceKind === 'station-observation' ? 'Mont Rigi station' : 'Wind model fallback'}</strong><small>{frame.weatherSourceKind === 'station-observation' ? `10 min observation · ${frame.weatherAgeMinutes} min old · awaiting RMI validation` : 'Open-Meteo hourly grid value'}</small></span><em className={`health-dot ${frame.weatherSourceKind === 'station-observation' ? 'health-dot--amber' : ''}`} />
             </button>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
               <SourceMark tone="adsb" /><span><strong>Aircraft</strong><small>{displayFlights.length} sourced set{importedTracks.length ? ` · ${importedTracks.length} static import` : ''}</small></span><em className="health-dot" /></button>
@@ -810,7 +995,7 @@ function App() {
             baseMode={baseMode}
             onMapReady={setMapActions}
             importedTracks={importedTracks}
-            connectedHotspots={connectedHotspots}
+            firmsDetections={visibleFirmsDetections}
             nearbyTraffic={nearbyTraffic}
           />
 
@@ -872,14 +1057,14 @@ function App() {
               <div className="snapshot-grid">
                 <article className="snapshot-card snapshot-card--fire"><span><Flame size={15} /> REPORTED AREA</span><strong>{reportedAreaText}<small>{frame.reportedHa == null ? '' : 'ha'}</small></strong><p>{frame.areaLabel}</p></article>
                 <article className="snapshot-card snapshot-card--effis"><span><Layers3 size={15} /> EFFIS DAILY GEOMETRY</span><strong>{currentEffisArea ? Math.round(currentEffisArea.areaHa).toLocaleString('en-GB') : '—'}<small>{currentEffisArea ? 'ha' : ''}</small></strong><p>{currentEffisArea ? `${currentEffisArea.productDate}${effisCarriedForward ? ' carried forward until replacement' : ''} · not official fire size` : 'no EFFIS product available at selected time'}</p></article>
-                <article className="snapshot-card"><span><Satellite size={15} /> HOTSPOTS</span><strong>{visibleHotspots}<small>pts</small></strong><p>{connectedHotspots.length ? 'NASA FIRMS connected' : 'no FIRMS data loaded'}</p></article>
+                <article className="snapshot-card"><span><Satellite size={15} /> HOTSPOTS</span><strong>{visibleFirmsDetections.length}<small>px</small></strong><p>{firmsAreaRange ? `${firmsAreaRange.sensorCount > 1 ? `${Math.round(firmsAreaRange.min).toLocaleString('en-GB')}–${Math.round(firmsAreaRange.max).toLocaleString('en-GB')}` : Math.round(firmsAreaRange.max).toLocaleString('en-GB')} ha footprint estimate · not fire size` : 'no detections at this time'}</p></article>
                 <article className="snapshot-card"><span><Helicopter size={15} /> AIR OPS</span><strong>{activeFlights.length}<small>recent</small></strong><p>{activeFlights.length ? 'fix within previous 5 min' : 'no recent observation'}</p></article>
                 <article className="snapshot-card snapshot-card--traffic"><span><Radio size={15} /> OTHER TRAFFIC</span><strong>{trafficLoadStatus === 'loaded' ? activeNearbyTraffic.length : '—'}<small>{trafficLoadStatus === 'loaded' ? 'recent' : ''}</small></strong><p>{trafficLoadStatus === 'loaded' ? `${observedNearbyTrafficCount}/${nearbyTrafficMeta.aircraftCount} identifiers seen by this time` : 'optional replay layer not loaded'}</p></article>
-                <article className="snapshot-card snapshot-card--wind"><span><Wind size={15} /> WIND FROM</span><strong>{windCardinal(frame.windDirection)}<small>{frame.windDirection}°</small></strong><p>{frame.windSpeed.toFixed(1)} km/h · gust {frame.gust.toFixed(0)}</p></article>
+                <article className="snapshot-card snapshot-card--wind"><span><Wind size={15} /> WIND FROM</span><strong>{windCardinal(frame.windDirection)}<small>{frame.windDirection.toFixed(0)}°</small></strong><p>{frame.windSpeed.toFixed(1)} km/h · gust {frame.gust.toFixed(0)} · {frame.weatherSourceKind === 'station-observation' ? 'station obs.' : 'model'}</p></article>
               </div>
 
               <div className="conditions-card">
-                <div className="section-heading"><span>FIRE WEATHER</span><small>10 m · hourly model</small></div>
+                <div className="section-heading"><span>FIRE WEATHER</span><small>{frame.weatherSourceKind === 'station-observation' ? `Mont Rigi · 10 min · ${frame.weatherAgeMinutes} min old` : 'Drossart · hourly model fallback'}</small></div>
                 <div className="wind-hero">
                   <span className="big-wind-arrow" title={`Wind travelling toward ${(frame.windDirection + 180) % 360}°`}>
                     <svg viewBox="0 0 24 24" style={{ '--wind-rotation': `${(frame.windDirection + 180) % 360}deg` }} aria-hidden="true">
@@ -891,7 +1076,24 @@ function App() {
                 </div>
                 <div className="condition-row">
                   <span><ThermometerSun size={15} /> Temperature<strong>{frame.temperature.toFixed(1)}°C</strong></span>
-                  <span><Droplets size={15} /> Humidity<strong>{frame.humidity}%</strong></span>
+                  <span><Droplets size={15} /> Humidity<strong>{frame.humidity.toFixed(1)}%</strong></span>
+                </div>
+                <p className={`weather-provenance ${frame.weatherSourceKind === 'station-observation' ? 'is-unvalidated' : ''}`}>
+                  {frame.weatherSourceKind === 'station-observation'
+                    ? `RMI station 6494, ${frame.weatherStationDistanceKm} km from Drossart. Near-real-time measurement awaiting RMI quality validation; conditions at the fire may differ.`
+                    : 'Open-Meteo model-grid fallback, not a station measurement.'}
+                </p>
+                <div className="wind-source-comparison">
+                  <div className="wind-source-comparison__head"><strong>Nearby wind sources</strong><small>independent · never blended</small></div>
+                  {nearbyWindReadings.map((reading) => (
+                    <div className="wind-source-reading" key={reading.id}>
+                      <span className="wind-source-reading__arrow" style={{ '--source-color': reading.color, '--wind-rotation': `${(reading.windDirection + 180) % 360}deg` }}>
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20V4M6.5 9.5 12 4l5.5 5.5" /></svg>
+                      </span>
+                      <span><strong>{reading.name}</strong><small>{reading.distanceLabel} · {reading.status}</small></span>
+                      <span><strong>{windCardinal(reading.windDirection)} <small>from</small></strong><small>{reading.windSpeed.toFixed(1)} km/h · {reading.ageMinutes} min old</small></span>
+                    </div>
+                  ))}
                 </div>
               </div>
 
@@ -1012,9 +1214,8 @@ function App() {
         onClose={() => setDataOpen(false)}
         onImportTracks={importTracks}
         importedCount={importedTracks.length}
-        onFirmsData={setConnectedHotspots}
-        connectedCount={connectedHotspots.length}
-        frames={frames}
+        firmsState={firmsState}
+        firmsDetectionCount={firmsData.detections.length}
       />
     </div>
   )

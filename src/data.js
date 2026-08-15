@@ -1,9 +1,12 @@
 import nearbyTrafficSummary from './nearbyTrafficSummary.json'
 import incidentAircraftSnapshot from './incidentAircraftSnapshot.json'
+import montRigiSnapshot from './montRigiObservations.json'
+import dwdWindSnapshot from './dwdWindObservations.json'
 import { effisAreaForTimestamp, effisBurnedArea, effisBurnedAreas } from './effisBurnedArea'
 
 const CENTER = [50.54762, 6.05757]
 export const FIVE_MINUTES_MS = 5 * 60 * 1000
+const RMI_STATION_MAX_AGE_MS = 20 * 60 * 1000
 export const AIRCRAFT_PATH_MAX_GAP_MS = 2 * 60 * 1000
 export const AIRCRAFT_PATH_MAX_SPEED_KT = 160
 export const TIMELINE_START_MS = Date.parse('2026-08-14T13:00:00+02:00')
@@ -46,7 +49,48 @@ export const bundledHourlyWeather = bundledHourlyWeatherValues.map((weather, ind
   timestampMs: TIMELINE_START_MS + index * 60 * 60 * 1000,
   observedAt: new Date(TIMELINE_START_MS + index * 60 * 60 * 1000).toISOString(),
   source: 'Open-Meteo hourly model',
+  sourceKind: 'model',
+  cadenceMinutes: 60,
+  validationStatus: 'not-applicable',
+  stationPosition: [50.548, 6.061],
 }))
+
+// Exact ten-minute automatic-weather-station values published by RMI for Mont
+// Rigi, 4.2 km from Drossart. RMI had not yet quality-validated any field in
+// this near-real-time window, so that status travels into every timeline frame.
+export const bundledRmiWeather = montRigiSnapshot.observations.map((observation) => ({
+  observedAt: observation.observedAt,
+  timestampMs: Date.parse(observation.observedAt),
+  windSpeed: observation.wind_speed_10m_kmh,
+  windDirection: observation.wind_direction,
+  gust: observation.wind_gusts_speed_kmh,
+  humidity: observation.humidity_rel_shelter_avg,
+  temperature: observation.temp_dry_shelter_avg,
+  source: 'RMI Mont Rigi automatic weather station',
+  sourceKind: 'station-observation',
+  cadenceMinutes: montRigiSnapshot.cadenceMinutes,
+  validationStatus: montRigiSnapshot.validationStatus,
+  stationName: montRigiSnapshot.station.name,
+  stationDistanceKm: montRigiSnapshot.station.distanceKmFromDrossart,
+  stationPosition: [montRigiSnapshot.station.latitude, montRigiSnapshot.station.longitude],
+  fieldValidation: {
+    windSpeed: observation.wind_speed_10m_validated,
+    windDirection: observation.wind_direction_validated,
+    gust: observation.wind_gusts_speed_validated,
+    humidity: observation.humidity_rel_shelter_avg_validated,
+    temperature: observation.temp_dry_shelter_avg_validated,
+  },
+}))
+
+export const bundledWeatherRows = [...bundledHourlyWeather, ...bundledRmiWeather]
+
+export const dwdWindStations = dwdWindSnapshot.stations
+const dwdWindRowsByStation = Object.fromEntries(dwdWindStations.map((station) => [
+  station.id,
+  dwdWindSnapshot.observations
+    .filter((observation) => observation.stationId === station.id)
+    .map((observation) => ({ ...observation, timestampMs: Date.parse(observation.observedAt) })),
+]))
 
 export const areaReports = [
   {
@@ -110,12 +154,17 @@ function normalizedWeatherRows(weatherRows) {
       timestampMs: Number.isFinite(weather.timestampMs) ? weather.timestampMs : Date.parse(weather.observedAt),
     }))
     .filter((weather) => Number.isFinite(weather.timestampMs))
-    .sort((left, right) => left.timestampMs - right.timestampMs)
+    .sort((left, right) => (
+      left.timestampMs - right.timestampMs
+      // Prefer a station observation to a model value at the same timestamp.
+      || (left.sourceKind === 'station-observation' ? 1 : 0)
+        - (right.sourceKind === 'station-observation' ? 1 : 0)
+    ))
 }
 
 export function buildFireFrames({
   endMs = BUNDLED_TIMELINE_END_MS,
-  weatherRows = bundledHourlyWeather,
+  weatherRows = bundledWeatherRows,
 } = {}) {
   const boundedEndMs = Math.max(
     TIMELINE_START_MS,
@@ -127,7 +176,36 @@ export function buildFireFrames({
     { length: Math.floor((boundedEndMs - TIMELINE_START_MS) / FIVE_MINUTES_MS) + 1 },
     (_, index) => {
       const timestampMs = TIMELINE_START_MS + index * FIVE_MINUTES_MS
-      const weather = normalizedWeather.findLast((row) => row.timestampMs <= timestampMs) || normalizedWeather[0]
+      const modelWeather = normalizedWeather.findLast((row) => (
+        row.sourceKind !== 'station-observation' && row.timestampMs <= timestampMs
+      )) || normalizedWeather.find((row) => row.sourceKind !== 'station-observation')
+      const stationWeather = normalizedWeather.findLast((row) => (
+        row.sourceKind === 'station-observation' && row.timestampMs <= timestampMs
+      ))
+      const stationAgeMs = stationWeather ? timestampMs - stationWeather.timestampMs : Number.POSITIVE_INFINITY
+      const currentStationWeather = stationAgeMs <= RMI_STATION_MAX_AGE_MS ? stationWeather : null
+      const weather = currentStationWeather || modelWeather || normalizedWeather[0]
+      const dwdWinds = dwdWindStations.flatMap((station) => {
+        const observation = dwdWindRowsByStation[station.id]
+          .findLast((row) => row.timestampMs <= timestampMs)
+        if (!observation || timestampMs - observation.timestampMs > 90 * 60 * 1000) return []
+        return [{
+          id: station.id,
+          name: station.name,
+          position: [station.latitude, station.longitude],
+          distanceKm: station.distanceKm,
+          altitudeM: station.altitudeM,
+          observedAt: observation.observedAt,
+          ageMinutes: Math.max(0, Math.round((timestampMs - observation.timestampMs) / 60_000)),
+          windSpeed: observation.windSpeedKmh,
+          windDirection: observation.windDirection,
+          gust: null,
+          source: 'DWD ten-minute station observation',
+          sourceKind: 'dwd-station-observation',
+          qualityLevel: observation.qualityLevel,
+          qualityStatus: dwdWindSnapshot.qualityStatus,
+        }]
+      })
       const report = areaReports.findLast((item) => item.timestampMs <= timestampMs)
       const date = new Date(timestampMs)
       return {
@@ -144,6 +222,38 @@ export function buildFireFrames({
         confidence: report ? 'Reported' : 'Unknown',
         weatherObservedAt: weather?.observedAt ?? null,
         weatherSource: weather?.source ?? null,
+        weatherSourceKind: weather?.sourceKind ?? null,
+        weatherCadenceMinutes: weather?.cadenceMinutes ?? null,
+        weatherValidationStatus: weather?.validationStatus ?? null,
+        weatherFieldValidation: weather?.fieldValidation ?? null,
+        weatherStationName: weather?.stationName ?? null,
+        weatherStationDistanceKm: weather?.stationDistanceKm ?? null,
+        weatherPosition: weather?.stationPosition ?? CENTER,
+        weatherAgeMinutes: weather?.timestampMs == null
+          ? null
+          : Math.max(0, Math.round((timestampMs - weather.timestampMs) / 60_000)),
+        drossartWind: modelWeather ? {
+          position: modelWeather.stationPosition ?? [50.548, 6.061],
+          observedAt: modelWeather.observedAt,
+          ageMinutes: Math.max(0, Math.round((timestampMs - modelWeather.timestampMs) / 60_000)),
+          windSpeed: modelWeather.windSpeed,
+          windDirection: modelWeather.windDirection,
+          gust: modelWeather.gust,
+          source: modelWeather.source,
+          sourceKind: 'model',
+        } : null,
+        montRigiWind: currentStationWeather ? {
+          position: currentStationWeather.stationPosition,
+          observedAt: currentStationWeather.observedAt,
+          ageMinutes: Math.max(0, Math.round(stationAgeMs / 60_000)),
+          windSpeed: currentStationWeather.windSpeed,
+          windDirection: currentStationWeather.windDirection,
+          gust: currentStationWeather.gust,
+          source: currentStationWeather.source,
+          sourceKind: 'station-observation',
+          validationStatus: currentStationWeather.validationStatus,
+        } : null,
+        dwdWinds,
         windSpeed: weather?.windSpeed ?? 0,
         windDirection: weather?.windDirection ?? 0,
         gust: weather?.gust ?? 0,
@@ -162,10 +272,6 @@ function frameAt(isoTimestamp) {
     Math.ceil((Date.parse(isoTimestamp) - TIMELINE_START_MS) / FIVE_MINUTES_MS),
   ))
 }
-
-// There is no bundled FIRMS result. Detections are shown only after a real API
-// response is loaded in the browser.
-export const hotspots = []
 
 export const nearbyTrafficMeta = {
   schemaVersion: nearbyTrafficSummary.schemaVersion,
@@ -518,16 +624,30 @@ export const sourceLinks = [
     tone: 'report',
   },
   {
+    name: 'DWD nearby wind stations',
+    detail: 'Ten-minute observations from Aachen-Orsbach, Kall-Sistig and Roth bei Prüm, the complete DWD set within 40 km',
+    cadence: '10 min values · preliminary recent/now feeds',
+    url: dwdWindSnapshot.source.documentationUrl,
+    tone: 'weather',
+  },
+  {
+    name: 'RMI Mont Rigi station 6494',
+    detail: 'Ten-minute station observations 4.2 km from Drossart; this near-real-time window is still awaiting RMI quality validation',
+    cadence: '10 min · none of the bundled fields yet validated',
+    url: montRigiSnapshot.source.requestUrl,
+    tone: 'rmi',
+  },
+  {
     name: 'Open-Meteo',
-    detail: 'Hourly model at Drossart (50.548 N, 6.061 E)',
-    cadence: 'Hourly model values',
+    detail: 'Hourly Drossart grid model retained as fallback outside station coverage',
+    cadence: 'Hourly model fallback',
     url: 'https://open-meteo.com/',
     tone: 'weather',
   },
   {
     name: 'NASA FIRMS',
-    detail: 'No bundled detections; connect a MAP_KEY to query',
-    cadence: 'Observation dependent',
+    detail: 'Audited thermal-anomaly snapshot from four sensors; VIIRS hectares are confidence-sensitive footprint estimates',
+    cadence: 'Satellite overpasses · server refresh every 15 min when configured',
     url: 'https://firms.modaps.eosdis.nasa.gov/',
     tone: 'nasa',
   },
@@ -535,10 +655,10 @@ export const sourceLinks = [
 
 export const initialLayers = {
   perimeter: true,
-  hotspots: true,
   aircraft: true,
   traffic: false,
   wind: true,
+  rmiWind: true,
   protected: false,
 }
 

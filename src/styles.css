@@ -965,44 +965,6 @@ button {
   50% { filter: drop-shadow(0 0 8px rgba(255, 72, 34, 0.9)); }
 }
 
-.fire-area-marker {
-  width: auto !important;
-  height: auto !important;
-  background: transparent;
-  border: 0;
-}
-
-.fire-area-marker > div {
-  display: flex;
-  flex-direction: column;
-  min-width: 154px;
-  padding: 7px 9px;
-  color: #fff;
-  background: rgba(65, 34, 24, 0.88);
-  border: 1px solid rgba(255, 180, 135, 0.4);
-  border-radius: 7px;
-  box-shadow: 0 5px 15px rgba(70, 36, 22, 0.25);
-  backdrop-filter: blur(7px);
-}
-
-.fire-area-marker span {
-  color: #f6b493;
-  font-size: 9px;
-  font-weight: 900;
-  letter-spacing: 0.12em;
-}
-
-.fire-area-marker strong {
-  margin-top: 1px;
-  font-size: 16px;
-}
-
-.fire-area-marker small {
-  margin-top: 2px;
-  color: rgba(255, 255, 255, 0.66);
-  font-size: 9.5px;
-}
-
 .aircraft-map-marker {
   background: transparent;
   border: 0;
@@ -1150,7 +1112,7 @@ button {
   display: flex;
   align-items: center;
   gap: 7px;
-  min-width: 136px;
+  min-width: 168px;
   padding: 7px 9px;
   color: #eefbf7;
   background: rgba(25, 60, 51, 0.87);
@@ -1179,7 +1141,7 @@ button {
 
 .wind-compass path {
   fill: none;
-  stroke: #8fd7c7;
+  stroke: var(--wind-accent, #8fd7c7);
   stroke-width: 1.9;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -1192,17 +1154,68 @@ button {
 }
 
 .wind-map-card b {
-  color: #8fd7c7;
-  font-size: 9px;
+  color: var(--wind-accent, #8fd7c7);
+  font-size: 11px;
 }
 
 .wind-map-card strong {
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .wind-map-card small {
   color: rgba(255, 255, 255, 0.65);
+  font-size: 10px;
+}
+
+.wind-source-marker {
+  width: auto !important;
+  height: auto !important;
+  background: transparent;
+  border: 0;
+}
+
+.wind-source-marker > span {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  color: var(--wind-accent);
+  background: rgba(20, 48, 42, 0.58);
+  border: 1px solid color-mix(in srgb, var(--wind-accent) 72%, transparent);
+  border-radius: 50%;
+  box-shadow: 0 3px 9px rgba(18, 42, 36, 0.18);
+  backdrop-filter: blur(3px);
+}
+
+.wind-source-marker svg {
+  width: 25px;
+  height: 25px;
+  transform: rotate(var(--wind-rotation));
+  transform-origin: center;
+}
+
+.wind-source-marker path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.wind-source-marker b {
+  position: absolute;
+  top: 32px;
+  left: 50%;
+  padding: 1px 4px;
+  color: #f2fbf8;
+  background: rgba(19, 42, 37, 0.58);
+  border-radius: 3px;
   font-size: 9px;
+  line-height: 1.25;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  transform: translateX(-50%);
 }
 
 .leaflet-tooltip {
@@ -1865,7 +1878,7 @@ button {
 
 .wind-hero > div span {
   color: rgba(255, 255, 255, 0.5);
-  font-size: 9.5px;
+  font-size: 11px;
 }
 
 .wind-hero > p {
@@ -1884,13 +1897,13 @@ button {
 
 .wind-hero > p span {
   color: rgba(255, 255, 255, 0.65);
-  font-size: 9px;
+  font-size: 10.5px;
 }
 
 .wind-hero > p small {
   grid-column: span 2;
   color: rgba(255, 255, 255, 0.48);
-  font-size: 9px;
+  font-size: 10.5px;
 }
 
 .condition-row {
@@ -3138,4 +3151,152 @@ button.connection-card--upload {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* FIRMS configuration checkboxes in the map-layer panel. */
+.section-heading--sub {
+  margin-top: 14px;
+  opacity: 0.72;
+}
+
+.layer-checkboxes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.layer-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 13.5px;
+  transition: background 0.15s ease;
+}
+
+.layer-checkbox:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.layer-checkbox input {
+  accent-color: #efaa3c;
+  cursor: pointer;
+  margin: 0;
+}
+
+.layer-checkbox span {
+  flex: 1;
+}
+
+.layer-checkbox em {
+  font-style: normal;
+  opacity: 0.55;
+  font-variant-numeric: tabular-nums;
+  font-size: 12.5px;
+}
+
+.layer-note {
+  margin: 9px 2px 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  opacity: 0.62;
+}
+
+.weather-provenance {
+  margin: 9px 0 0;
+  padding: 8px 9px;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 7px;
+  font-size: 11.5px;
+  line-height: 1.42;
+}
+
+.weather-provenance.is-unvalidated {
+  color: #ffe4af;
+  border: 1px solid rgba(255, 202, 112, 0.28);
+}
+
+.wind-source-comparison {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.wind-source-comparison__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 2px;
+  color: #f1faf7;
+  font-size: 12px;
+}
+
+.wind-source-comparison__head small {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 10.5px;
+}
+
+.wind-source-reading {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 6px;
+  background: rgba(255, 255, 255, 0.045);
+  border-radius: 6px;
+}
+
+.wind-source-reading > span:not(.wind-source-reading__arrow) {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.wind-source-reading > span:last-child {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.wind-source-reading strong {
+  color: #f4fbf9;
+  font-size: 11.5px;
+}
+
+.wind-source-reading strong small,
+.wind-source-reading > span > small {
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.53);
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wind-source-reading__arrow {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: var(--source-color);
+  border: 1px solid color-mix(in srgb, var(--source-color) 58%, transparent);
+  border-radius: 50%;
+}
+
+.wind-source-reading__arrow svg {
+  width: 19px;
+  height: 19px;
+  transform: rotate(var(--wind-rotation));
+}
+
+.wind-source-reading__arrow path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }

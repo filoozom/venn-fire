@@ -99,6 +99,23 @@ function windCardinal(deg) {
   return names[Math.round(deg / 22.5) % 16]
 }
 
+function windMapIcon({ label, wind, accent }) {
+  return L.divIcon({
+    className: 'wind-source-marker',
+    html: `<span style="--wind-accent:${accent}"><svg viewBox="0 0 24 24" style="--wind-rotation:${(wind.windDirection + 180) % 360}deg" aria-hidden="true"><path d="M12 20V4M6.5 9.5 12 4l5.5 5.5"/></svg><b>${label}</b></span>`,
+    iconSize: [42, 42],
+    iconAnchor: [21, 21],
+  })
+}
+
+function windTooltip({ name, wind, source, status, distanceKm = 0 }) {
+  const gust = Number.isFinite(wind.gust) ? ` · gust ${wind.gust.toFixed(1)} km/h` : ''
+  return `<strong>${escapeHtml(name)}</strong><br>`
+    + `Wind from ${windCardinal(wind.windDirection)} (${wind.windDirection.toFixed(0)}°), blowing toward ${windCardinal((wind.windDirection + 180) % 360)}<br>`
+    + `${wind.windSpeed.toFixed(1)} km/h${gust} · ${wind.ageMinutes} min old<br>`
+    + `<small>${escapeHtml(source)}${distanceKm ? ` · ${distanceKm.toFixed(1)} km from Drossart` : ''}${status ? ` · ${escapeHtml(status)}` : ''}</small>`
+}
+
 function aircraftIcon(flight, heading = 0) {
   const planePath = '<path d="M12 2l2 7 7 3v2l-7-1.5V18l2 2v1l-4-1-4 1v-1l2-2v-5.5L3 14v-2l7-3 2-7z" fill="currentColor"/>'
   const helicopterPath = '<path d="M3 7.5h18M12 7.5V5m-1-1h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M8.5 9h7.4c1.7 0 3.1 1.3 3.1 3v.5H8.5a3.5 3.5 0 010-7h2v3.5z" fill="currentColor"/><path d="M8 13.5l-2 3m9-3 2 3M4.5 17h13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>'
@@ -107,15 +124,6 @@ function aircraftIcon(flight, heading = 0) {
     html: `<span style="--flight-color:${flight.color};--aircraft-rotation:${heading}deg"><svg viewBox="0 0 24 24" aria-hidden="true">${flight.type === 'plane' ? planePath : helicopterPath}</svg></span>`,
     iconSize: [32, 32],
     iconAnchor: [16, 16],
-  })
-}
-
-function photoEvidenceIcon(flight) {
-  return L.divIcon({
-    className: 'photo-evidence-marker',
-    html: `<span style="--flight-color:${flight.color}"><b>${flight.callSign}</b><small>LANDED PHOTO</small></span>`,
-    iconSize: [94, 38],
-    iconAnchor: [47, 19],
   })
 }
 
@@ -158,7 +166,7 @@ export default function MapView({
   baseMode,
   onMapReady,
   importedTracks = [],
-  connectedHotspots = [],
+  firmsDetections = [],
   nearbyTraffic = [],
 }) {
   const nodeRef = useRef(null)
@@ -282,31 +290,30 @@ export default function MapView({
         .bindTooltip(`<strong>EFFIS VIIRS-derived daily geometry</strong><br>${Math.round(effisArea.areaHa).toLocaleString('en-GB')} ha calculated polygon area · ${effisArea.productLabel}<br><small>Algorithmic envelope, not the official affected-area estimate</small>`, { sticky: true })
         .addTo(group)
 
-      const labelIcon = L.divIcon({
-        className: 'fire-area-marker',
-        html: `<div><span>EFFIS · DAILY GEOMETRY</span><strong>${Math.round(effisArea.areaHa).toLocaleString('en-GB')} ha</strong><small>${effisArea.productDate}${effisCarriedForward ? ' · CARRIED FORWARD' : ''} · NOT FIRE SIZE</small></div>`,
-        iconSize: [174, 66],
-        iconAnchor: [87, 76],
-      })
-      L.marker(effisArea.labelPosition, { icon: labelIcon, interactive: false }).addTo(group)
     }
 
-    if (layers.hotspots) {
-      connectedHotspots.filter((spot) => spot.frame <= frameIndex).forEach((spot) => {
-        const age = frameIndex - spot.frame
-        const radius = spot.confidence === 'high' ? 7 : 5.5
-        L.circleMarker(spot.position, {
-          className: age <= 1 ? 'hotspot-pulse' : '',
-          radius,
-          color: age <= 2 ? '#fff3d6' : '#ffd2a6',
-          weight: 1.2,
-          fillColor: age <= 2 ? '#ff3d20' : '#db694d',
-          fillOpacity: Math.max(0.34, 0.94 - age * 0.10),
-        })
-          .bindTooltip(`<strong>${spot.sensor} detection</strong><br>${spot.confidence} confidence · ${spot.frp ?? '—'} MW FRP<br><small>NASA FIRMS · ${spot.acquired}</small>`, { direction: 'top' })
-          .addTo(group)
+    // Sensor pixel footprints, drawn at their true published size rather than as
+    // dots. The blockiness is the point: it shows the resolution the estimate is
+    // built from, so no false precision can be read off the map.
+    firmsDetections.forEach((detection) => {
+      const age = frameIndex - detection.frame
+      L.polygon(detection.footprint, {
+        color: detection.sensorColor,
+        weight: 1,
+        opacity: Math.max(0.35, 0.9 - age * 0.05),
+        fillColor: detection.sensorColor,
+        fillOpacity: Math.max(0.06, 0.28 - age * 0.02),
       })
-    }
+        .bindTooltip(
+          `<strong>${detection.sensorName}</strong><br>`
+          + `${detection.confidence.label} confidence · ${detection.frpMw ?? '—'} MW FRP<br>`
+          + `${Math.round(detection.scanKm * detection.trackKm * 100)} ha sensor pixel`
+          + `<br><small>NASA FIRMS · ${detection.acquiredAt.replace('T', ' ').slice(0, 16)} UTC</small>`
+          + '<br><small>Thermal anomaly, not a burned-area polygon</small>',
+          { direction: 'top' },
+        )
+        .addTo(group)
+    })
 
     if (layers.traffic) {
       nearbyTraffic.forEach((flight) => {
@@ -366,15 +373,6 @@ export default function MapView({
 
     if (layers.aircraft) {
       ;[...flights, ...importedTracks].forEach((flight) => {
-        const visibleEvidence = (flight.evidenceObservations || [])
-          .filter((evidence) => evidence.timestampMs <= frame.timestampMs)
-
-        visibleEvidence.filter((evidence) => evidence.cameraPosition).forEach((evidence) => {
-          L.marker(evidence.cameraPosition, { icon: photoEvidenceIcon(flight), zIndexOffset: 700 })
-            .bindTooltip(`<strong>${evidence.label}</strong><br>${localObservationTime(evidence.observedAt)} CEST<br><small>Marker is the photograph's camera GPS position, not an aircraft track fix.</small>`, { direction: 'top', offset: [0, -16] })
-            .addTo(group)
-        })
-
         if (flight.observations?.length) {
           const visible = flight.observations.filter((observation) => observation.timestampMs <= frame.timestampMs)
           if (!visible.length) return
@@ -424,16 +422,53 @@ export default function MapView({
       })
     }
 
-    if (layers.wind) {
-      const windIcon = L.divIcon({
-        className: 'wind-map-card',
-        html: `<div><span class="wind-compass"><svg viewBox="0 0 24 24" style="--wind-rotation:${(frame.windDirection + 180) % 360}deg" aria-hidden="true"><path d="M12 20V4M6.5 9.5 12 4l5.5 5.5"/></svg></span><p><b>from ${windCardinal(frame.windDirection)}</b><strong>${frame.windSpeed.toFixed(1)} km/h</strong><small>wind blowing toward ${windCardinal((frame.windDirection + 180) % 360)} · gust ${frame.gust.toFixed(1)}</small></p></div>`,
-        iconSize: [148, 60],
-        iconAnchor: [74, 30],
+    if (layers.wind && frame.drossartWind) {
+      const windIcon = windMapIcon({
+        label: 'GRID',
+        wind: frame.drossartWind,
+        accent: '#72b7e6',
       })
-      L.marker([50.575, 6.105], { icon: windIcon, interactive: false }).addTo(group)
+      L.marker(frame.drossartWind.position, { icon: windIcon })
+        .bindTooltip(windTooltip({
+          name: 'Drossart model grid',
+          wind: frame.drossartWind,
+          source: 'Open-Meteo hourly model',
+          status: 'not a station measurement',
+        }), { direction: 'top', offset: [0, -18] })
+        .addTo(group)
     }
-  }, [frameIndex, frame, flights, effisArea, effisCarriedForward, layers, importedTracks, connectedHotspots, nearbyTraffic])
+
+    if (layers.rmiWind && frame.montRigiWind) {
+      const windIcon = windMapIcon({
+        label: 'RMI',
+        wind: frame.montRigiWind,
+        accent: '#8fd7c7',
+      })
+      L.marker(frame.montRigiWind.position, { icon: windIcon })
+        .bindTooltip(windTooltip({
+          name: 'Mont Rigi station 6494',
+          wind: frame.montRigiWind,
+          source: 'RMI ten-minute observation',
+          status: 'awaiting RMI validation',
+          distanceKm: 4.2,
+        }), { direction: 'top', offset: [0, -18] })
+        .addTo(group)
+    }
+
+    ;(frame.dwdWinds || []).forEach((wind) => {
+      if (!layers[`dwdWind:${wind.id}`]) return
+      const windIcon = windMapIcon({ label: 'DWD', wind, accent: '#b9a0e8' })
+      L.marker(wind.position, { icon: windIcon })
+        .bindTooltip(windTooltip({
+          name: wind.name,
+          wind,
+          source: 'DWD ten-minute observation',
+          status: 'preliminary recent/now feed',
+          distanceKm: wind.distanceKm,
+        }), { direction: 'top', offset: [0, -18] })
+        .addTo(group)
+    })
+  }, [frameIndex, frame, flights, effisArea, effisCarriedForward, layers, importedTracks, firmsDetections, nearbyTraffic])
 
   return (
     <div className="map-surface" aria-label="Interactive fire situation map">

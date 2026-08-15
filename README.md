@@ -11,8 +11,8 @@ An evidence-first, time-based incident viewer for the 14 August 2026 fire near D
 - Thirty-two exact Airplanes.live MLAT fixes for Federal Police helicopter G10 (`44c1e5`): 21 from the audited 14 August daily trace and 11 from 15 August 30-second replay snapshots. Nineteen 15 August replay fixes are bundled for G17 (`44c1ea`). Dashed straight connectors appear only between consecutive fixes at most two minutes apart and implying at most 160 knots; every other gap stays open.
 - Photo identification of both reported helicopters: a BRF incident image visibly shows G10 airborne at 15:37:08 CEST, and another visibly shows G12 landed at 16:30:54 CEST. The times come from intact image EXIF. The G12 map marker uses the photographer's embedded GPS position and is labelled as a photo location, not an aircraft fix.
 - An optional census of every other transponder identifier observed within 5 km of Drossart in either of two retained receiver replays. It contains 116 identifiers and 1,372 exact source fixes within a 10 km context radius. Seven identifiers met a broad low-altitude review threshold; 109 were high-altitude overflights. No traffic entry is labelled as an incident aircraft.
-- Hourly Open-Meteo wind, gust, temperature and humidity model values for the Drossart grid point (`50.548° N, 6.061° E`). Five-minute frames retain the applicable hourly source value.
-- No placeholder FIRMS hotspots. VIIRS detections appear only after NASA returns data for a user-supplied `MAP_KEY`.
+- 142 exact ten-minute wind, gust, temperature and humidity observations from RMI automatic weather station MONT RIGI (`6494`), 4.2 km from Drossart, covering 14 August 13:00 through 15 August 12:30 CEST. RMI had not yet quality-validated any selected field in this near-real-time window, so every use is visibly labelled “awaiting validation.” Hourly Open-Meteo grid values remain a clearly identified fallback outside station coverage.
+- An audited NASA FIRMS snapshot with 694 exact detections within 15 km of Drossart: 36 acquired on 14 August and 658 on 15 August across VIIRS Suomi-NPP, VIIRS NOAA-20, VIIRS NOAA-21 and MODIS. Each sensor is a separate time-linked pixel-footprint layer. VIIRS footprint unions recompute from the sensor and confidence checkboxes; the UI shows a per-sensor range, never a sum or average. MODIS has no hectare display because its pixels are too coarse at this incident scale.
 - Static GeoJSON/CSV import for additional tracks. Untimed imports are explicitly static and do not create aircraft status.
 
 The 15 August G10/G17 replay is available from Airplanes.live only; ADSB.lol has no incident-area observations for either helicopter that day. It is therefore labelled single-provider evidence pending publication of the full daily traces. G12 remains supported near this incident by a timestamped 14 August photo, not receiver positions. None of this is an official mission log, and no water pickup or drop coordinates are inferred.
@@ -45,6 +45,41 @@ pnpm import:effis -- --date 2026-08-15 --output .local-data/effis/2026-08-15
 ```
 
 The importer queries the EFFIS WFS, retains the closest feature within 10 km of Drossart, calculates its geometry area and writes the source response, selected GeoJSON and manifest beneath the chosen `.local-data/effis/<date>/` directory. Those audit files are ignored by Git. Reviewed 14 and 15 August geometries are bundled in the application; updating a local import does not silently replace production data. The 15 August response contained geometry only and calculated to `4,857.041 ha`; because that conflicts with the official/reporting series, the viewer explicitly treats it as an overinclusive algorithmic geometry rather than affected-area truth.
+
+## NASA FIRMS detection import
+
+Preview all four sensor requests without a key or network access:
+
+```bash
+pnpm import:firms -- --dry-run
+```
+
+Fetch the exact CSV responses with an ephemeral NASA MAP_KEY, retaining the raw audit files below `.local-data/firms/<date>/`:
+
+```bash
+read -rsp 'NASA FIRMS MAP_KEY: ' FIRMS_MAP_KEY && echo
+export FIRMS_MAP_KEY
+pnpm import:firms -- --write-snapshot
+unset FIRMS_MAP_KEY
+pnpm verify:firms-snapshot
+```
+
+The current snapshot contains 694 source detections, all within 15 km of Drossart. The checked-in snapshot is verified point-for-point against the ignored CSV responses, including acquisition time, coordinates, confidence, FRP, scan/track dimensions and derived footprint geometry. Its default import threshold is nominal-or-higher, but the viewer exposes high, nominal and low as independent filters and recomputes the visible union from only detections acquired by the selected timeline frame.
+
+The hectare result is highly method-sensitive. Across the complete window, published-pixel VIIRS unions at nominal-or-higher confidence are approximately 2,029–3,643 ha, while high-confidence-only unions are approximately 450–942 ha. That spread is displayed because selecting high confidence merely because it resembles the reported ~850 ha would be fitting the method to the answer. Independent sensors are never added together. MODIS pixels averaged hundreds of hectares during these passes, so MODIS is detections-only and never receives a hectare figure.
+
+`/api/firms-situation` can repeat the four requests server-side over a rolling two-day window when `FIRMS_MAP_KEY` is configured in Vercel. It applies a hard 15 km radius, redacts the key from every response URL and caches for 15 minutes. The browser merges exact live duplicates into the audited snapshot instead of replacing history. Without the environment variable—or if NASA fails—the bundled snapshot remains available.
+
+## RMI Mont Rigi observation import
+
+Refresh official ten-minute station observations with:
+
+```bash
+pnpm import:rmi -- --write-snapshot
+pnpm verify:rmi-snapshot
+```
+
+The importer retains the exact WFS GeoJSON, a manifest and normalized rows below `.local-data/rmi/<date>/`. Every value retains its RMI per-field quality-control flag. In the current 142-record near-real-time window, none of the selected wind, gust, humidity, temperature or precipitation values had yet been validated by RMI. They are station measurements awaiting validation—not validated observations—and conditions 4.2 km away can differ from those at the fire front. Five-minute UI frames carry forward the latest ten-minute observation without interpolation.
 
 ## One-time FlightAware import
 
@@ -168,7 +203,9 @@ No provider failure is interpreted as proof that an aircraft did not fly. It mea
 - An aircraft icon means “observed within the previous five minutes,” never “known to still be airborne.”
 - MLAT is receiver-derived and may contain outliers. Exact observation points remain auditable; coverage gaps remain gaps.
 - NASA FIRMS detections are thermal anomalies, not burned-area polygons.
-- A FIRMS-derived hectare estimate is permitted only as its own detection-footprint union layer with named sensors, acquisition times, source URL and exact method. It is never merged into official affected-area reports or described as confirmed burned hectares.
+- A FIRMS-derived hectare estimate is permitted only as its own detection-footprint union layer with named sensors, acquisition times, source URL, selected confidence classes and exact method. It is recalculated using only observations available at the selected timeline time, never merged into official affected-area reports and never described as confirmed burned hectares.
+- FIRMS sensor figures are never added or averaged. MODIS receives no area figure; its pass-specific pixels are too coarse for this fire scale.
+- RMI Mont Rigi values are exact ten-minute station measurements, but all selected fields in the bundled near-real-time window are still awaiting RMI quality validation. Open-Meteo remains explicitly labelled model fallback data.
 - EFFIS geometry is a daily VIIRS-derived algorithmic polygon, not NASA FIRMS point data, not an operational perimeter and not a within-day five-minute series. The last product is visibly carried forward until replacement.
 - Reported fire size is a step series tied to four source times. Repeating the latest value between reports means “last reported,” not “measured continuously.”
 - The 15 August `4,857 ha` EFFIS polygon calculation is not shown as burned area; the primary affected-area figure remains the dated ~850/>900 ha reporting.
@@ -187,6 +224,7 @@ No provider failure is interpreted as proof that an aircraft did not fly. It mea
 - [BRF 14 August helicopter report](https://brf.be/regional/2099996/)
 - [Vedia incident report](https://www.vedia.be/info/incendie-dans-les-fagnes-de-100-hectares-detruits-la-phase-provinciale-declenchee/213726)
 - [NASA FIRMS](https://firms.modaps.eosdis.nasa.gov/)
+- [RMI Belgium open data](https://opendata.meteo.be/)
 - [Copernicus EFFIS rapid damage assessment](https://forest-fire.emergency.copernicus.eu/about-effis/technical-background/rapid-damage-assessment)
 - [Copernicus EFFIS data and services](https://forest-fire.emergency.copernicus.eu/applications/data-and-services)
 - [Open-Meteo](https://open-meteo.com/)
@@ -197,4 +235,4 @@ No provider failure is interpreted as proof that an aircraft did not fly. It mea
 
 Production is hosted at [venn-fire.vercel.app](https://venn-fire.vercel.app).
 
-Vercel deploys `main` automatically with `pnpm build`, output directory `dist`, and Node.js 22. Pull requests receive preview deployments. `api/live-situation.js` is a same-origin, fixed-source serverless function with a 60-second CDN cache; it reads public adsb.fi, ADSB.lol and Open-Meteo endpoints and contains no API key.
+Vercel deploys `main` automatically with `pnpm build`, output directory `dist`, and Node.js 22. Pull requests receive preview deployments. `api/live-situation.js` is a same-origin, fixed-source serverless function with a 60-second CDN cache; it reads public adsb.fi, ADSB.lol and Open-Meteo endpoints and contains no API key. `api/firms-situation.js` is isolated behind a 15-minute cache and reads `FIRMS_MAP_KEY` only from the server environment; the key is never returned to the browser or stored in the repository.
