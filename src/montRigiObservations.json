@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-15T12:07:43.826Z",
+  "generatedAt": "2026-08-15T12:37:43.622Z",
   "source": {
     "name": "Royal Meteorological Institute of Belgium (RMI) open data",
     "url": "https://opendata.meteo.be/",
     "endpoint": "https://opendata.meteo.be/service/ows",
     "featureType": "aws:aws_10min",
-    "requestUrl": "https://opendata.meteo.be/service/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=aws%3Aaws_10min&outputFormat=application%2Fjson&count=1000&sortBy=timestamp&CQL_FILTER=code%3D6494+AND+timestamp+DURING+2026-08-14T11%3A00%3A00Z%2F2026-08-15T12%3A07%3A43.825Z"
+    "requestUrl": "https://opendata.meteo.be/service/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=aws%3Aaws_10min&outputFormat=application%2Fjson&count=1000&sortBy=timestamp&CQL_FILTER=code%3D6494+AND+timestamp+DURING+2026-08-14T11%3A00%3A00Z%2F2026-08-15T12%3A37%3A43.622Z"
   },
   "station": {
     "code": 6494,
@@ -2630,6 +2630,57 @@
       "precip_quantity_validated": false,
       "wind_speed_10m_kmh": 10.0058904,
       "wind_gusts_speed_kmh": 21.591334800000002
+    },
+    {
+      "observedAt": "2026-08-15T12:10:00Z",
+      "wind_speed_10m": 3.475107,
+      "wind_speed_10m_validated": false,
+      "wind_direction": 287.842919,
+      "wind_direction_validated": false,
+      "wind_gusts_speed": 6.29643,
+      "wind_gusts_speed_validated": false,
+      "humidity_rel_shelter_avg": 52.213252,
+      "humidity_rel_shelter_avg_validated": false,
+      "temp_dry_shelter_avg": 23.677099,
+      "temp_dry_shelter_avg_validated": false,
+      "precip_quantity": 0,
+      "precip_quantity_validated": false,
+      "wind_speed_10m_kmh": 12.5103852,
+      "wind_gusts_speed_kmh": 22.667148
+    },
+    {
+      "observedAt": "2026-08-15T12:20:00Z",
+      "wind_speed_10m": 3.697442,
+      "wind_speed_10m_validated": false,
+      "wind_direction": 282.763382,
+      "wind_direction_validated": false,
+      "wind_gusts_speed": 6.714802,
+      "wind_gusts_speed_validated": false,
+      "humidity_rel_shelter_avg": 55.044345,
+      "humidity_rel_shelter_avg_validated": false,
+      "temp_dry_shelter_avg": 22.940004,
+      "temp_dry_shelter_avg_validated": false,
+      "precip_quantity": 0,
+      "precip_quantity_validated": false,
+      "wind_speed_10m_kmh": 13.3107912,
+      "wind_gusts_speed_kmh": 24.1732872
+    },
+    {
+      "observedAt": "2026-08-15T12:30:00Z",
+      "wind_speed_10m": 3.270404,
+      "wind_speed_10m_validated": false,
+      "wind_direction": 289.802577,
+      "wind_direction_validated": false,
+      "wind_gusts_speed": 6.117127,
+      "wind_gusts_speed_validated": false,
+      "humidity_rel_shelter_avg": 59.699257,
+      "humidity_rel_shelter_avg_validated": false,
+      "temp_dry_shelter_avg": 22.224103,
+      "temp_dry_shelter_avg_validated": false,
+      "precip_quantity": 0,
+      "precip_quantity_validated": false,
+      "wind_speed_10m_kmh": 11.7734544,
+      "wind_gusts_speed_kmh": 22.0216572
     }
   ]
 }

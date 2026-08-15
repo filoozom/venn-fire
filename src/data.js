@@ -395,6 +395,37 @@ export const flights = [
 ]
 
 export const events = [
+  // No town or village was evacuated. The provincial order cleared the moorland
+  // itself, and two hospitality businesses standing in it were evacuated. The
+  // commune of Baelen's explicit denial is kept alongside them, because without
+  // it the two evacuations read as the start of a residential evacuation.
+  {
+    frame: frameAt('2026-08-14T16:34:00+02:00'),
+    time: '16:34',
+    title: 'Venn ordered cleared, BE-Alert issued',
+    detail: 'Liège provincial authorities seal the Venn areas of Baelen, Jalhay, Waimes and Malmedy: everyone present must leave the Hohes Venn immediately. No residential evacuation ordered.',
+    type: 'evacuation',
+    sourceUrl: 'https://www.vrt.be/vrtnws/de/2026/08/14/brand-im-hohen-venn-in-ostbelgien-provinzialer-notfallplan-aus/',
+    sourceName: 'VRT NWS (DE), published 16:34, updated 18:34',
+  },
+  {
+    frame: frameAt('2026-08-14T17:00:00+02:00'),
+    time: '17:00',
+    title: 'Baraque Michel and Mont Rigi evacuated',
+    detail: 'The Baraque Michel restaurant and the Mont Rigi hotel-restaurant are evacuated on police instruction. Owner Nicolas Clinet: “On a commencé à évacuer les clients dès 17h.” Both are isolated businesses in the moorland, not settlements.',
+    type: 'evacuation',
+    sourceUrl: 'https://www.lavenir.net/regions/verviers/waimes/2026/08/14/le-mont-rigi-et-la-baraque-michel-evacues-a-cause-de-lincendie-dans-les-hautes-fagnes-la-nuit-va-etre-decisive-LOCGEEQ7EFFTXHCGJVWN354UVM/',
+    sourceName: 'L’Avenir, published 14 Aug 22:30',
+  },
+  {
+    frame: frameAt('2026-08-14T19:24:00+02:00'),
+    time: '19:24',
+    title: 'No population evacuation ordered',
+    detail: 'The commune of Baelen states “Aucune évacuation n’a, pour l’heure, été ordonnée à Baelen.” Only the Fagnes itself is affected by the flames.',
+    type: 'evacuation',
+    sourceUrl: 'https://www.lalibre.be/dernieres-depeches/2026/08/14/secheresse-incendie-dans-les-fagnes-aucune-evacuation-de-la-population-na-ete-ordonnee-LMPG5PIWVZF6ZFVIDQHDFKLSI4/',
+    sourceName: 'Belga via La Libre, 14 Aug 19:24',
+  },
   {
     frame: frameAt('2026-08-14T13:06:00+02:00'),
     time: '13:06',

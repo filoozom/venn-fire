@@ -34,6 +34,7 @@ import {
   RotateCcw,
   Satellite,
   ShieldAlert,
+  Siren,
   Sparkles,
   ThermometerSun,
   Wind,
@@ -221,6 +222,7 @@ function iconForEvent(type) {
   if (type === 'wind') return Wind
   if (type === 'area') return Gauge
   if (type === 'closure') return ShieldAlert
+  if (type === 'evacuation') return Siren
   if (type === 'monitor') return Eye
   return Flame
 }
@@ -741,7 +743,10 @@ function App() {
   }, [dataOpen, frames.length])
 
   const currentEvents = useMemo(
-    () => events.filter((event) => event.frame <= frameIndex).slice(-5).reverse(),
+    // Every event up to the selected time, newest first. Capping this at five hid
+    // earlier entries entirely, including the evacuation orders, and with them
+    // their source links. The list scrolls instead.
+    () => events.filter((event) => event.frame <= frameIndex).reverse(),
     [frameIndex],
   )
 
@@ -1116,11 +1121,20 @@ function App() {
                   {currentEvents.map((event, index) => {
                     const Icon = iconForEvent(event.type)
                     return (
-                      <button key={`${event.time}-${event.title}`} className={`event-row ${index === 0 ? 'is-latest' : ''}`} type="button" onClick={() => setFrameIndex(event.frame)}>
-                        <span className={`event-icon event-icon--${event.type}`}><Icon size={14} /></span>
-                        <span><strong>{event.title}</strong><small>{event.detail}</small></span>
-                        <time>{event.time}</time>
-                      </button>
+                      // The source link sits outside the button: an anchor nested
+                      // inside a button is invalid and unreachable by keyboard.
+                      <div key={`${event.time}-${event.title}`} className="event-item">
+                        <button className={`event-row ${index === 0 ? 'is-latest' : ''}`} type="button" onClick={() => setFrameIndex(event.frame)}>
+                          <span className={`event-icon event-icon--${event.type}`}><Icon size={14} /></span>
+                          <span><strong>{event.title}</strong><small>{event.detail}</small></span>
+                          <time>{event.time}</time>
+                        </button>
+                        {event.sourceUrl ? (
+                          <a className="event-source" href={event.sourceUrl} target="_blank" rel="noreferrer">
+                            {event.sourceName ?? 'Source'} <ExternalLink size={10} />
+                          </a>
+                        ) : null}
+                      </div>
                     )
                   })}
                 </div>
