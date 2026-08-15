@@ -17,6 +17,9 @@ services:
     volumes:
       # Read-only: the daemon runs these, it never edits them.
       - ./scripts:/app/scripts:ro
+      # The live-flight importer shares its audited provider normalization with
+      # the serverless live-situation route.
+      - ./api:/app/api:ro
       # Writable: bundled snapshots are rewritten in place, then verified.
       - ./src:/app/src
       # Writable: raw provider responses and the audit trail.

@@ -12,6 +12,7 @@ WORKDIR /app
 # the top for live development, which is why nothing is built at this stage.
 COPY package.json ./
 COPY scripts ./scripts
+COPY api ./api
 COPY src ./src
 
 # Importers retain raw provider responses here. Mount it to keep the audit trail
@@ -21,9 +22,9 @@ RUN mkdir -p /app/.local-data
 ENV NODE_ENV=production
 ENV TZ=UTC
 
-# A failing refresh must not look healthy. The daemon rewrites its status file on
-# every tick that does work, so a stale file means it has stopped making progress.
+# A failing flight refresh must not look healthy. Allow three five-minute cycles
+# for transient provider trouble, but require a successful scheduled import.
 HEALTHCHECK --interval=5m --timeout=10s --start-period=1m --retries=3 \
-  CMD node -e "const{statSync}=require('node:fs');const age=Date.now()-statSync('/app/.local-data/refresh-status.json').mtimeMs;if(age>3600000)process.exit(1)" || exit 1
+  CMD node -e "const{readFileSync}=require('node:fs');const s=JSON.parse(readFileSync('/app/.local-data/refresh-status.json'));const f=s.sources.find(x=>x.key==='flights');if(!f||f.status!=='ok'||Date.now()-Date.parse(f.lastSuccessAt)>900000)process.exit(1)"
 
 ENTRYPOINT ["node", "scripts/refresh-daemon.mjs"]

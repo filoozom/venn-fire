@@ -16,11 +16,20 @@
 import { spawn } from 'node:child_process'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const MINUTE = 60_000
+export const MINUTE = 60_000
 const HOUR = 60 * MINUTE
 
-const SOURCES = [
+export const SOURCES = [
+  {
+    key: 'flights',
+    label: 'Live incident-aircraft observations',
+    intervalMs: 5 * MINUTE,
+    retryIntervalMs: 5 * MINUTE,
+    reason: 'New flight information is imported every 5 minutes',
+    command: ['scripts/import-live-flights.mjs'],
+  },
   {
     key: 'rmi',
     label: 'RMI Mont Rigi observations',
@@ -71,10 +80,10 @@ const SOURCES = [
   },
 ]
 
-// Deliberately excluded: the ADS-B replay scan downloads roughly 350 MB of
-// heatmap tiles per run and rebuilds a historical record that does not change
-// once a day is complete. Live aircraft are served by the live-situation route.
-// Run `pnpm scan:aircraft` by hand when a new day needs importing.
+// Deliberately excluded: the historical ADS-B replay scan downloads roughly
+// 350 MB of heatmap tiles per run and rebuilds a record that does not change once
+// a day is complete. The lightweight live importer above retains new fixes; run
+// `pnpm scan:aircraft` by hand when a complete historical day needs importing.
 
 const DEFAULTS = {
   tickSeconds: 60,
@@ -94,6 +103,9 @@ function parseArgs(argv) {
     if (!(key in options) || value == null) throw new Error(`Unknown or incomplete argument: ${token}`)
     options[key] = key === 'tickSeconds' ? Number(value) : value
     index += 1
+  }
+  if (!Number.isFinite(options.tickSeconds) || options.tickSeconds <= 0) {
+    throw new Error('--tickSeconds must be a positive number')
   }
   return options
 }
@@ -127,13 +139,21 @@ function run(command, timeoutMs = 10 * MINUTE) {
 
 const state = new Map()
 
+function nextScheduledDueAt(previousDueAt, intervalMs, now = Date.now()) {
+  let nextDueAt = previousDueAt + intervalMs
+  if (nextDueAt <= now) {
+    nextDueAt += Math.ceil((now - nextDueAt + 1) / intervalMs) * intervalMs
+  }
+  return nextDueAt
+}
+
 async function refresh(source, options) {
   const entry = state.get(source.key)
 
   if (source.requiresEnv && !process.env[source.requiresEnv]) {
     entry.status = 'skipped'
     entry.detail = `${source.requiresEnv} is not set`
-    entry.nextDueAt = Date.now() + source.intervalMs
+    entry.nextDueAt = nextScheduledDueAt(entry.nextDueAt, source.intervalMs)
     return
   }
 
@@ -151,7 +171,8 @@ async function refresh(source, options) {
     entry.lastFailureAt = new Date().toISOString()
     // Back off on repeated failure so a broken or rate-limited source is not
     // hammered, but never past one hour.
-    const backoff = Math.min(source.intervalMs * 2 ** entry.consecutiveFailures, HOUR)
+    const backoff = source.retryIntervalMs
+      ?? Math.min(source.intervalMs * 2 ** entry.consecutiveFailures, HOUR)
     entry.nextDueAt = Date.now() + backoff
     log(`FAIL  ${source.label}: ${entry.detail} (retry in ${Math.round(backoff / MINUTE)} min)`)
     return
@@ -162,7 +183,10 @@ async function refresh(source, options) {
   entry.lastSuccessAt = new Date().toISOString()
   entry.durationMs = durationMs
   entry.detail = result.stdout.split('\n').filter(Boolean).slice(-1)[0] ?? ''
-  entry.nextDueAt = Date.now() + source.intervalMs
+  // Keep the schedule anchored to the time this run was due. Import duration
+  // therefore does not turn a five-minute cadence into five minutes plus the
+  // duration of every request.
+  entry.nextDueAt = nextScheduledDueAt(entry.nextDueAt, source.intervalMs)
 
   // A snapshot that fails its own verifier must be reported loudly: it means the
   // bundled data no longer matches the retained source responses.
@@ -180,7 +204,7 @@ async function refresh(source, options) {
   log(`ok    ${source.label} (${(durationMs / 1000).toFixed(1)}s) ${entry.detail}`)
 }
 
-async function writeStatus(options) {
+async function writeStatus(options, selected) {
   const statusPath = path.resolve(options.statusPath)
   await mkdir(path.dirname(statusPath), { recursive: true })
   await writeFile(statusPath, `${JSON.stringify({
@@ -188,7 +212,7 @@ async function writeStatus(options) {
     updatedAt: new Date().toISOString(),
     tickSeconds: options.tickSeconds,
     writeSnapshots: options.writeSnapshots,
-    sources: SOURCES.map((source) => ({
+    sources: selected.map((source) => ({
       key: source.key,
       label: source.label,
       intervalMinutes: source.intervalMs / MINUTE,
@@ -201,11 +225,15 @@ async function writeStatus(options) {
 
 async function main() {
   const options = parseArgs(process.argv)
-  const selected = options.only
-    ? SOURCES.filter((source) => options.only.split(',').includes(source.key))
+  const requestedKeys = options.only ? options.only.split(',').filter(Boolean) : []
+  const selected = requestedKeys.length
+    ? SOURCES.filter((source) => requestedKeys.includes(source.key))
     : SOURCES
   if (!selected.length) throw new Error(`No sources matched --only ${options.only}`)
+  const unknownKeys = requestedKeys.filter((key) => !selected.some((source) => source.key === key))
+  if (unknownKeys.length) throw new Error(`Unknown sources in --only: ${unknownKeys.join(', ')}`)
 
+  const initialDueAt = Date.now()
   for (const source of selected) {
     state.set(source.key, {
       status: 'pending',
@@ -215,7 +243,7 @@ async function main() {
       lastFailureAt: null,
       durationMs: null,
       verified: null,
-      nextDueAt: 0,
+      nextDueAt: initialDueAt,
     })
   }
 
@@ -253,16 +281,23 @@ async function main() {
       if (stopping) break
       await refresh(source, options)
     }
-    if (due.length) await writeStatus(options)
+    if (due.length) await writeStatus(options, selected)
     if (options.once || stopping) break
-    await sleep(options.tickSeconds * 1000)
+    const earliestDueAt = Math.min(...selected.map((source) => state.get(source.key).nextDueAt))
+    const untilNextDueMs = Math.max(1, earliestDueAt - Date.now())
+    await sleep(Math.min(options.tickSeconds * 1000, untilNextDueMs))
   } while (!stopping)
 
-  await writeStatus(options)
+  await writeStatus(options, selected)
   log('Refresh daemon stopped')
 }
 
-main().catch((error) => {
-  console.error(error.message ?? error)
-  process.exitCode = 1
-})
+const isDirectRun = process.argv[1]
+  && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+
+if (isDirectRun) {
+  main().catch((error) => {
+    console.error(error.message ?? error)
+    process.exitCode = 1
+  })
+}

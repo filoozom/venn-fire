@@ -5,6 +5,7 @@ export const INCIDENT_AIRCRAFT = new Map([
   ['44c1ea', { callSign: 'G17', registration: 'OO-POJ' }],
 ])
 export const INCIDENT_RADIUS_KM = 10
+export const LIVE_REFRESH_SECONDS = 5 * 60
 
 export const LIVE_AIRCRAFT_PROVIDERS = [
   {
@@ -30,13 +31,18 @@ function haversineKm(latitude, longitude) {
   return 6371.0088 * 2 * Math.asin(Math.sqrt(value))
 }
 
-async function fetchJson(url) {
+async function fetchJsonResponse(url) {
   const response = await fetch(url, {
     headers: { Accept: 'application/json' },
     signal: AbortSignal.timeout(8_000),
   })
   if (!response.ok) throw new Error(`HTTP ${response.status}`)
-  return response.json()
+  const rawBody = await response.text()
+  return { payload: JSON.parse(rawBody), rawBody }
+}
+
+async function fetchJson(url) {
+  return (await fetchJsonResponse(url)).payload
 }
 
 function finiteNumber(value) {
@@ -96,10 +102,10 @@ export async function loadAircraft(
   providers = LIVE_AIRCRAFT_PROVIDERS,
   { includeRaw = false } = {},
 ) {
-  const results = await Promise.allSettled(providers.map(async (provider) => ({
-    provider,
-    payload: await fetchJson(provider.endpoint),
-  })))
+  const results = await Promise.allSettled(providers.map(async (provider) => {
+    const response = await fetchJsonResponse(provider.endpoint)
+    return { provider, ...response }
+  }))
   const sourceStatus = []
   const candidatesByHex = new Map()
 
@@ -155,7 +161,11 @@ export async function loadAircraft(
       ? {
           rawResponses: results.flatMap((result) => (
             result.status === 'fulfilled'
-              ? [{ provider: result.value.provider, payload: result.value.payload }]
+              ? [{
+                  provider: result.value.provider,
+                  payload: result.value.payload,
+                  rawBody: result.value.rawBody,
+                }]
               : []
           )),
         }
@@ -210,7 +220,10 @@ async function loadWeather() {
 export default async function handler(request, response) {
   response.setHeader('Access-Control-Allow-Origin', '*')
   response.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
-  response.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=120')
+  // Revalidate synchronously at the requested cadence. Serving stale while a
+  // background refresh runs would make a five-minute browser poll display the
+  // previous poll until ten minutes later.
+  response.setHeader('Cache-Control', `public, s-maxage=${LIVE_REFRESH_SECONDS}`)
   if (request.method === 'OPTIONS') return response.status(204).end()
   if (request.method !== 'GET') return response.status(405).json({ error: 'Method not allowed' })
 
@@ -223,7 +236,7 @@ export default async function handler(request, response) {
   return response.status(200).json({
     schemaVersion: 1,
     generatedAt: new Date(requestedAtMs).toISOString(),
-    refreshAfterSeconds: 60,
+    refreshAfterSeconds: LIVE_REFRESH_SECONDS,
     weather: weatherResult.status === 'fulfilled'
       ? { ok: true, ...weatherResult.value }
       : { ok: false, rows: [], current: null },

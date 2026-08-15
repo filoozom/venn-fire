@@ -33,5 +33,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify five-minute flight import
+        run: pnpm verify:flight-refresh
+
       - name: Build production site
         run: pnpm build

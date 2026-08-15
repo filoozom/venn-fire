@@ -5,7 +5,7 @@ An evidence-first, time-based incident viewer for the 14 August 2026 fire near D
 ## What is included
 
 - A map anchored at the reported Drossart locality (`50.54762° N, 6.05757° E`), not a guessed ignition coordinate.
-- A five-minute timeline from 14 August 13:00 through a bundled 15 August 11:45 CEST fallback. On Vercel, `/api/live-situation` advances the clock and refreshes Open-Meteo plus live incident-aircraft observations every 60 seconds behind a CDN cache.
+- A five-minute timeline from 14 August 13:00 through a bundled 15 August 11:45 CEST fallback. On Vercel, `/api/live-situation` advances the clock and imports Open-Meteo plus live incident-aircraft observations every five minutes behind a matching CDN cache.
 - A timestamped, stepwise reported-area series: `~60 ha` at 14 August 16:00, `~100 ha` at 20:00 and `~850 ha` at 15 August 07:00 from the Governor of Liège, then `>900 ha` at 11:28 from BRF. Between reports the UI means “last reported”; it never invents intermediate growth or a shape.
 - Separate Copernicus EFFIS daily VIIRS-derived polygons for 14 and 15 August. Their locally calculated geometry areas are approximately `501 ha` and `4,857 ha`. The latter sharply conflicts with field reporting and is labelled as an algorithmic geometry, never as 4,857 burned hectares. EFFIS supplies no within-day acquisition timestamp, so the last daily product is carried forward until the next retrieved product replaces it.
 - Thirty-two exact Airplanes.live MLAT fixes for Federal Police helicopter G10 (`44c1e5`): 21 from the audited 14 August daily trace and 11 from 15 August 30-second replay snapshots. Nineteen 15 August replay fixes are bundled for G17 (`44c1ea`). Dashed straight connectors appear only between consecutive fixes at most two minutes apart and implying at most 160 knots; every other gap stays open.
@@ -101,6 +101,25 @@ unset FLIGHTAWARE_API_KEY
 ```
 
 The importer checks current-month AeroAPI usage and aborts if its maximum `$0.082` request budget could exceed the Personal plan's `$5` allowance. The 15 August one-time query returned no matching recent-flight records for either registration, so AeroAPI supplied no track positions. Results are stored beneath `.local-data/flightaware/2026-08-14/` and ignored by Git. Raw responses must be deleted by the date in `manifest.json`.
+
+## Five-minute live flight import
+
+The incremental importer queries adsb.fi and ADSB.lol for the evidence-backed incident aircraft, rejects observations outside 10 km of Drossart and appends only new exact receiver fixes. It does not interpolate or average positions. Run one import with:
+
+```bash
+pnpm import:live-flights
+```
+
+Normalized JSON, GeoJSON and CSV are retained beneath `.local-data/live-flights/`; exact provider responses are compressed beneath its `raw/` directory. Repeated fixes are deduplicated and normalized observations older than 30 days are dropped from the current snapshot.
+
+Start the scheduler with:
+
+```bash
+docker compose up -d refresh
+docker compose logs -f refresh
+```
+
+The refresh daemon starts with an immediate import, then keeps flight runs anchored to a five-minute cadence. Flight failures retry after five minutes and appear in `.local-data/refresh-status.json`. The other slower sources retain provider-appropriate schedules. Verify the importer’s cadence, filtering, append and deduplication behavior with `pnpm verify:flight-refresh`.
 
 ## Airplanes.live historical import and area scan
 
@@ -235,4 +254,4 @@ No provider failure is interpreted as proof that an aircraft did not fly. It mea
 
 Production is hosted at [venn-fire.vercel.app](https://venn-fire.vercel.app).
 
-Vercel deploys `main` automatically with `pnpm build`, output directory `dist`, and Node.js 22. Pull requests receive preview deployments. `api/live-situation.js` is a same-origin, fixed-source serverless function with a 60-second CDN cache; it reads public adsb.fi, ADSB.lol and Open-Meteo endpoints and contains no API key. `api/firms-situation.js` is isolated behind a 15-minute cache and reads `FIRMS_MAP_KEY` only from the server environment; the key is never returned to the browser or stored in the repository.
+Vercel deploys `main` automatically with `pnpm build`, output directory `dist`, and Node.js 22. Pull requests receive preview deployments. `api/live-situation.js` is a same-origin, fixed-source serverless function with a five-minute CDN cache; the browser requests it immediately and every five minutes. It reads public adsb.fi, ADSB.lol and Open-Meteo endpoints and contains no API key. `api/firms-situation.js` is isolated behind a 15-minute cache and reads `FIRMS_MAP_KEY` only from the server environment; the key is never returned to the browser or stored in the repository.

@@ -110,6 +110,7 @@ const INITIAL_LAYER_STATE = {
   [FIRMS_EXTENT_KEY]: DEFAULT_FIRMS_EXTENT,
 }
 const FIRMS_REFRESH_MS = 15 * 60 * 1000
+const LIVE_SITUATION_REFRESH_MS = 5 * 60 * 1000
 const EMPTY_FIRMS_DATA = {
   schemaVersion: 1,
   generatedAt: null,
@@ -673,7 +674,7 @@ function App() {
     }
 
     refreshLiveSituation()
-    const timer = window.setInterval(refreshLiveSituation, 60_000)
+    const timer = window.setInterval(refreshLiveSituation, LIVE_SITUATION_REFRESH_MS)
     return () => {
       cancelled = true
       window.clearInterval(timer)
@@ -936,8 +937,36 @@ function App() {
             <p>Drossart · Fagne des Deux-Séries</p>
             <div className="incident-metrics">
               <div><strong>{reportedAreaText}</strong><span>reported hectares</span><small>{frame.areaLabel}</small></div>
-              <div><strong>{currentEffisArea ? Math.round(currentEffisArea.areaHa).toLocaleString('en-GB') : '—'}</strong><span>EFFIS geometry ha</span><small>{currentEffisArea ? `${currentEffisArea.productDate}${effisCarriedForward ? ' carried forward' : ''} · not fire size` : 'no product available at this time'}</small></div>
+              {/* The best estimate sits beside the reported figure. EFFIS keeps its
+                  own card below: at roughly five times the reported area it is an
+                  envelope, and giving it headline position overstated the burn. */}
+              <div><strong>{firmsAreaRange ? (firmsAreaRange.sensorCount > 1 ? `${Math.round(firmsAreaRange.min).toLocaleString('en-GB')}–${Math.round(firmsAreaRange.max).toLocaleString('en-GB')}` : Math.round(firmsAreaRange.max).toLocaleString('en-GB')) : '—'}</strong><span>satellite estimate ha</span><small>{firmsAreaRange ? `${activeExtent.label.toLowerCase()} · ${firmsAreaRange.sensorCount} sensors agree · derived` : 'no detections at the selected extent'}</small></div>
             </div>
+          </div>
+
+          <div className="sidebar-section layers-section">
+            <div className="section-heading"><span>FIRE EXTENT</span></div>
+            <div className="layer-checkboxes">
+              {FIRMS_EXTENTS.map((extent) => (
+                <label className="layer-checkbox" key={extent.key} title={extent.detail}>
+                  <input
+                    type="radio"
+                    name="firms-extent"
+                    checked={activeExtent.key === extent.key}
+                    onChange={() => setLayers((value) => ({ ...value, [FIRMS_EXTENT_KEY]: extent.key }))}
+                  />
+                  <span>{extent.label}</span>
+                  <em>{firmsDetections.filter(extent.test).length}</em>
+                </label>
+              ))}
+            </div>
+            <p className="layer-note">
+              {firmsAreaRange
+                ? (firmsAreaRange.sensorCount > 1
+                  ? `Detection-footprint estimate ${Math.round(firmsAreaRange.min).toLocaleString('en-GB')}–${Math.round(firmsAreaRange.max).toLocaleString('en-GB')} ha across ${firmsAreaRange.sensorCount} sensors, at the selected confidence levels${activeExtent.key === 'all' ? '' : `, ${activeExtent.detail.toLowerCase()}`}. Not a burned area.`
+                  : `Detection-footprint estimate ${Math.round(firmsAreaRange.max).toLocaleString('en-GB')} ha at the selected confidence levels${activeExtent.key === 'all' ? '' : `, ${activeExtent.detail.toLowerCase()}`}. Not a burned area.`)
+                : 'No FIRMS detections at the selected sensors, confidence levels and time.'}
+            </p>
           </div>
 
           <div className="sidebar-section layers-section">
@@ -974,28 +1003,7 @@ function App() {
               })}
             </div>
 
-            <div className="section-heading section-heading--sub"><span>FIRE EXTENT</span></div>
-            <div className="layer-checkboxes">
-              {FIRMS_EXTENTS.map((extent) => (
-                <label className="layer-checkbox" key={extent.key} title={extent.detail}>
-                  <input
-                    type="radio"
-                    name="firms-extent"
-                    checked={activeExtent.key === extent.key}
-                    onChange={() => setLayers((value) => ({ ...value, [FIRMS_EXTENT_KEY]: extent.key }))}
-                  />
-                  <span>{extent.label}</span>
-                  <em>{firmsDetections.filter(extent.test).length}</em>
-                </label>
-              ))}
-            </div>
-            <p className="layer-note">
-              {firmsAreaRange
-                ? (firmsAreaRange.sensorCount > 1
-                  ? `Detection-footprint estimate ${Math.round(firmsAreaRange.min).toLocaleString('en-GB')}–${Math.round(firmsAreaRange.max).toLocaleString('en-GB')} ha across ${firmsAreaRange.sensorCount} sensors, at the selected confidence levels${activeExtent.key === 'all' ? '' : `, ${activeExtent.detail.toLowerCase()}`}. Not a burned area.`
-                  : `Detection-footprint estimate ${Math.round(firmsAreaRange.max).toLocaleString('en-GB')} ha at the selected confidence levels${activeExtent.key === 'all' ? '' : `, ${activeExtent.detail.toLowerCase()}`}. Not a burned area.`)
-                : 'No FIRMS detections at the selected sensors, confidence levels and time.'}
-            </p>
+
           </div>
 
           <div className="sidebar-section source-summary">
@@ -1100,8 +1108,9 @@ function App() {
 
               <div className="snapshot-grid">
                 <article className="snapshot-card snapshot-card--fire"><span><Flame size={15} /> REPORTED AREA</span><strong>{reportedAreaText}<small>{frame.reportedHa == null ? '' : 'ha'}</small></strong><p>{frame.areaLabel}</p></article>
+                <article className="snapshot-card snapshot-card--estimate"><span><Flame size={15} /> FIRE EXTENT</span><strong>{firmsAreaRange ? (firmsAreaRange.sensorCount > 1 ? `${Math.round(firmsAreaRange.min).toLocaleString('en-GB')}–${Math.round(firmsAreaRange.max).toLocaleString('en-GB')}` : Math.round(firmsAreaRange.max).toLocaleString('en-GB')) : '—'}<small>{firmsAreaRange ? 'ha' : ''}</small></strong><p>{firmsAreaRange ? `${activeExtent.label.toLowerCase()} · ${firmsAreaRange.sensorCount} sensors agree · derived estimate` : 'no detections at the selected extent'}</p></article>
                 <article className="snapshot-card snapshot-card--effis"><span><Layers3 size={15} /> EFFIS DAILY GEOMETRY</span><strong>{currentEffisArea ? Math.round(currentEffisArea.areaHa).toLocaleString('en-GB') : '—'}<small>{currentEffisArea ? 'ha' : ''}</small></strong><p>{currentEffisArea ? `${currentEffisArea.productDate}${effisCarriedForward ? ' carried forward until replacement' : ''} · envelope containing fire activity, not burned area` : 'no EFFIS product available at selected time'}</p></article>
-                <article className="snapshot-card"><span><Satellite size={15} /> HOTSPOTS</span><strong>{visibleFirmsDetections.length}<small>px</small></strong><p>{firmsAreaRange ? `${firmsAreaRange.sensorCount > 1 ? `${Math.round(firmsAreaRange.min).toLocaleString('en-GB')}–${Math.round(firmsAreaRange.max).toLocaleString('en-GB')}` : Math.round(firmsAreaRange.max).toLocaleString('en-GB')} ha footprint estimate · not fire size` : 'no detections at this time'}</p></article>
+                <article className="snapshot-card"><span><Satellite size={15} /> HOTSPOTS</span><strong>{visibleFirmsDetections.length}<small>px</small></strong><p>{`${activeExtent.label.toLowerCase()} · exact NASA FIRMS detections`}</p></article>
                 <article className="snapshot-card"><span><Helicopter size={15} /> AIR OPS</span><strong>{activeFlights.length}<small>recent</small></strong><p>{activeFlights.length ? 'fix within previous 5 min' : 'no recent observation'}</p></article>
                 <article className="snapshot-card snapshot-card--traffic"><span><Radio size={15} /> OTHER TRAFFIC</span><strong>{trafficLoadStatus === 'loaded' ? activeNearbyTraffic.length : '—'}<small>{trafficLoadStatus === 'loaded' ? 'recent' : ''}</small></strong><p>{trafficLoadStatus === 'loaded' ? `${observedNearbyTrafficCount}/${nearbyTrafficMeta.aircraftCount} identifiers seen by this time` : 'optional replay layer not loaded'}</p></article>
                 <article className="snapshot-card snapshot-card--wind"><span><Wind size={15} /> WIND FROM</span><strong>{windCardinal(frame.windDirection)}<small>{frame.windDirection.toFixed(0)}°</small></strong><p>{frame.windSpeed.toFixed(1)} km/h · gust {frame.gust.toFixed(0)} · {frame.weatherSourceKind === 'station-observation' ? 'station obs.' : 'model'}</p></article>

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-15T11:46:54.743Z",
+  "generatedAt": "2026-08-15T11:52:25.403Z",
   "incidentDate": "2026-08-14",
   "locationReference": {
     "name": "Drossart locality (OpenStreetMap node 5770188072)",
@@ -65,7 +65,7 @@
       "sourceUrl": "https://firms.modaps.eosdis.nasa.gov/",
       "sourceKeyUrl": "https://firms.modaps.eosdis.nasa.gov/api/map_key/",
       "sourceRequestUrl": "https://firms.modaps.eosdis.nasa.gov/api/area/csv/MAP_KEY/VIIRS_SNPP_NRT/5.85,50.42,6.3,50.7/3/2026-08-14",
-      "retrievedAt": "2026-08-15T11:46:49.615Z",
+      "retrievedAt": "2026-08-15T11:52:20.234Z",
       "caveats": [
         "A detection marks a pixel that was radiating at the moment of the overpass. The published footprint is the whole sensor pixel, so a fire front far smaller than the pixel still marks the entire footprint. The estimate therefore overstates area for narrow or broken fire fronts.",
         "Only ground that was actively flaming during an overpass can be detected. Ground that ignited and burned out between overpasses is never counted, and smoke or cloud removes further detections. The estimate therefore understates area for a fast-moving fire between passes.",
@@ -118,7 +118,7 @@
       "sourceUrl": "https://firms.modaps.eosdis.nasa.gov/",
       "sourceKeyUrl": "https://firms.modaps.eosdis.nasa.gov/api/map_key/",
       "sourceRequestUrl": "https://firms.modaps.eosdis.nasa.gov/api/area/csv/MAP_KEY/VIIRS_NOAA20_NRT/5.85,50.42,6.3,50.7/3/2026-08-14",
-      "retrievedAt": "2026-08-15T11:46:51.413Z",
+      "retrievedAt": "2026-08-15T11:52:22.040Z",
       "caveats": [
         "A detection marks a pixel that was radiating at the moment of the overpass. The published footprint is the whole sensor pixel, so a fire front far smaller than the pixel still marks the entire footprint. The estimate therefore overstates area for narrow or broken fire fronts.",
         "Only ground that was actively flaming during an overpass can be detected. Ground that ignited and burned out between overpasses is never counted, and smoke or cloud removes further detections. The estimate therefore understates area for a fast-moving fire between passes.",
@@ -171,7 +171,7 @@
       "sourceUrl": "https://firms.modaps.eosdis.nasa.gov/",
       "sourceKeyUrl": "https://firms.modaps.eosdis.nasa.gov/api/map_key/",
       "sourceRequestUrl": "https://firms.modaps.eosdis.nasa.gov/api/area/csv/MAP_KEY/VIIRS_NOAA21_NRT/5.85,50.42,6.3,50.7/3/2026-08-14",
-      "retrievedAt": "2026-08-15T11:46:52.911Z",
+      "retrievedAt": "2026-08-15T11:52:23.584Z",
       "caveats": [
         "A detection marks a pixel that was radiating at the moment of the overpass. The published footprint is the whole sensor pixel, so a fire front far smaller than the pixel still marks the entire footprint. The estimate therefore overstates area for narrow or broken fire fronts.",
         "Only ground that was actively flaming during an overpass can be detected. Ground that ignited and burned out between overpasses is never counted, and smoke or cloud removes further detections. The estimate therefore understates area for a fast-moving fire between passes.",
@@ -224,7 +224,7 @@
       "sourceUrl": "https://firms.modaps.eosdis.nasa.gov/",
       "sourceKeyUrl": "https://firms.modaps.eosdis.nasa.gov/api/map_key/",
       "sourceRequestUrl": "https://firms.modaps.eosdis.nasa.gov/api/area/csv/MAP_KEY/MODIS_NRT/5.85,50.42,6.3,50.7/3/2026-08-14",
-      "retrievedAt": "2026-08-15T11:46:54.400Z",
+      "retrievedAt": "2026-08-15T11:52:25.052Z",
       "caveats": [
         "A detection marks a pixel that was radiating at the moment of the overpass. The published footprint is the whole sensor pixel, so a fire front far smaller than the pixel still marks the entire footprint. The estimate therefore overstates area for narrow or broken fire fronts.",
         "Only ground that was actively flaming during an overpass can be detected. Ground that ignited and burned out between overpasses is never counted, and smoke or cloud removes further detections. The estimate therefore understates area for a fast-moving fire between passes.",

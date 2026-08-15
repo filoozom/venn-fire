@@ -3300,3 +3300,12 @@ button.connection-card--upload {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+
+/* Best-estimate fire extent card, alongside reported area and EFFIS. */
+.snapshot-card--estimate {
+  border-color: rgba(232, 104, 56, 0.42);
+}
+
+.snapshot-card--estimate strong {
+  color: #f0865c;
+}

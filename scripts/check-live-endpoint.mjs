@@ -25,7 +25,8 @@ if (statusCode !== 200) throw new Error(`Expected HTTP 200, got ${statusCode}`)
 if (!body?.generatedAt) throw new Error('Live endpoint omitted generatedAt')
 if (!body.weather?.ok || !body.weather.rows?.length) throw new Error('Open-Meteo live refresh failed')
 if (!body.aircraft?.ok) throw new Error('Both live ADS-B provider requests failed')
-if (!String(headers['cache-control']).includes('s-maxage=60')) throw new Error('Live endpoint cache policy is missing')
+if (body.refreshAfterSeconds !== 300) throw new Error('Live flight refresh is not configured for five minutes')
+if (!String(headers['cache-control']).includes('s-maxage=300')) throw new Error('Live endpoint cache policy is not five minutes')
 
 for (const observation of body.aircraft.observations) {
   if (!['44c1e5', '44c1e8', '44c1ea'].includes(observation.icao24)) {

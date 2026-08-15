@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-15T11:46:49.373Z",
+  "generatedAt": "2026-08-15T11:52:20.039Z",
   "source": {
     "name": "Royal Meteorological Institute of Belgium (RMI) open data",
     "url": "https://opendata.meteo.be/",
     "endpoint": "https://opendata.meteo.be/service/ows",
     "featureType": "aws:aws_10min",
-    "requestUrl": "https://opendata.meteo.be/service/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=aws%3Aaws_10min&outputFormat=application%2Fjson&count=1000&sortBy=timestamp&CQL_FILTER=code%3D6494+AND+timestamp+DURING+2026-08-14T11%3A00%3A00Z%2F2026-08-15T11%3A46%3A49.372Z"
+    "requestUrl": "https://opendata.meteo.be/service/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=aws%3Aaws_10min&outputFormat=application%2Fjson&count=1000&sortBy=timestamp&CQL_FILTER=code%3D6494+AND+timestamp+DURING+2026-08-14T11%3A00%3A00Z%2F2026-08-15T11%3A52%3A20.038Z"
   },
   "station": {
     "code": 6494,
