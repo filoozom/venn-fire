@@ -77,7 +77,8 @@ const FIRMS_CONFIDENCE_LEVELS = [
 ]
 
 const FIRMS_LAYER_DEFAULTS = {
-  ...Object.fromEntries(FIRMS_SENSORS.map((sensor) => [FIRMS_LAYER_KEYS[sensor.key], sensor.key !== 'modis'])),
+  // Each sensor declares its own default; coarse ones start hidden.
+  ...Object.fromEntries(FIRMS_SENSORS.map((sensor) => [FIRMS_LAYER_KEYS[sensor.key], sensor.defaultVisible !== false])),
   'firmsConfidence:high': true,
   'firmsConfidence:nominal': true,
   'firmsConfidence:low': false,

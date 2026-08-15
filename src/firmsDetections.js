@@ -25,6 +25,7 @@ const MAX_DAY_RANGE = 10
 export const FIRMS_SENSORS = [
   {
     key: 'viirsSnpp',
+    defaultVisible: true,
     providesArea: true,
     apiSource: 'VIIRS_SNPP_NRT',
     name: 'VIIRS Suomi-NPP',
@@ -39,6 +40,7 @@ export const FIRMS_SENSORS = [
   },
   {
     key: 'viirsNoaa20',
+    defaultVisible: true,
     providesArea: true,
     apiSource: 'VIIRS_NOAA20_NRT',
     name: 'VIIRS NOAA-20',
@@ -52,6 +54,7 @@ export const FIRMS_SENSORS = [
   },
   {
     key: 'viirsNoaa21',
+    defaultVisible: true,
     providesArea: true,
     apiSource: 'VIIRS_NOAA21_NRT',
     name: 'VIIRS NOAA-21',
@@ -65,6 +68,7 @@ export const FIRMS_SENSORS = [
   },
   {
     key: 'modis',
+    defaultVisible: false,
     providesArea: false,
     displayMode: 'footprint',
     pixelSizeLabel: '1 km nominal pixel',
@@ -86,6 +90,12 @@ export const FIRMS_SENSORS = [
     // than at overpasses.
     key: 'meteosat',
     apiSource: 'GOES_NRT',
+    // Off by default. A detection locates the fire only to within its pixel, and
+    // that pixel is larger than the fire was for most of the incident.
+    defaultVisible: false,
+    // Drawn at its true computed extent, not as a point. A dot would imply a
+    // precision this sensor does not have; the rectangle is the honest picture.
+    displayMode: 'footprint',
     name: 'Meteosat (geostationary)',
     platform: 'Met12 / Met10 / Met9',
     instrument: 'GEO',
@@ -93,9 +103,11 @@ export const FIRMS_SENSORS = [
     // which is why this sensor never yields an area figure.
     nominalResolutionM: 3000,
     providesArea: false,
-    displayMode: 'centroid',
-    pixelSizeLabel: 'roughly 3 × 6 km at 50.5°N',
-    areaExclusionReason: 'Meteosat scan/track dimensions are not published by FIRMS and its pixels are too coarse for an area estimate.',
+    // Computed from the viewing geometry, not assumed: at 58.2 deg viewing zenith
+    // one MSG pixel is 3.2 x 6.1 km, about 1,970 ha. That is more ground than the
+    // whole fire was reported to cover on the morning of 15 August.
+    pixelSizeLabel: '3.2 × 6.1 km (~1,970 ha) per MSG pixel · 2.1 × 4.1 km (~880 ha) for MTG',
+    areaExclusionReason: 'A Meteosat pixel covers around 1,970 ha at this latitude, so a detection locates the fire only to within an area larger than the fire itself. FIRMS publishes no scan/track dimensions for it.',
     // FIRMS rejects a longer window for this product.
     maxDayRange: 2,
     color: '#7f9bb5',
@@ -187,6 +199,56 @@ export const FOOTPRINT_ESTIMATE_CAVEATS = [
 // pixels leave an empty one-cell seam between them: the area is understated and
 // the outline is cut by spurious slits.
 const CELL_EDGE_EPSILON_M = 1e-6
+
+// Geostationary ground-pixel geometry.
+//
+// FIRMS reports scan and track as 0 for the geostationary product, so the true
+// footprint has to be computed. It is not the nadir figure: from Belgium the
+// viewing zenith angle is about 58 degrees, which stretches the pixel along the
+// line of sight to roughly double its width.
+//
+// The result is the single most important thing to show about this sensor. One
+// MSG pixel covers around 1,970 ha -- more than the whole fire was reported to
+// be on the morning of 15 August -- so a detection locates the fire only to
+// within an area of that size.
+const EARTH_RADIUS_KM = 6378.137
+const GEOSTATIONARY_ALTITUDE_KM = 35786.0
+
+// Nadir instantaneous field of view by spacecraft generation.
+const GEOSTATIONARY_NADIR_KM = { mtg: 2, msg: 3 }
+
+function geostationaryGeneration(satellite) {
+  // Met11 onward is MTG; Met8 to Met10 are MSG.
+  return /^met1[1-9]|mtg/i.test(String(satellite ?? '')) ? 'mtg' : 'msg'
+}
+
+export function geostationaryPixelKm(satellite, latitude, longitude, subSatelliteLongitude = 0) {
+  const radians = Math.PI / 180
+  const cosPsi = Math.cos(latitude * radians) * Math.cos((longitude - subSatelliteLongitude) * radians)
+  const psi = Math.acos(Math.min(1, Math.max(-1, cosPsi)))
+  const orbitRadiusKm = EARTH_RADIUS_KM + GEOSTATIONARY_ALTITUDE_KM
+  const slantRangeKm = Math.sqrt(
+    EARTH_RADIUS_KM ** 2 + orbitRadiusKm ** 2 - 2 * EARTH_RADIUS_KM * orbitRadiusKm * cosPsi,
+  )
+  const viewingZenith = Math.asin(Math.min(1, (orbitRadiusKm / slantRangeKm) * Math.sin(psi)))
+  const nadirKm = GEOSTATIONARY_NADIR_KM[geostationaryGeneration(satellite)]
+  const angularIfov = nadirKm / GEOSTATIONARY_ALTITUDE_KM
+
+  // Across the line of sight the pixel only grows with slant range. Along it, the
+  // ground projection is stretched by the cosine of the viewing zenith angle.
+  const acrossKm = angularIfov * slantRangeKm
+  const alongKm = acrossKm / Math.cos(viewingZenith)
+
+  // The sub-satellite point sits almost due south of the incident, so the
+  // stretched axis is close to north-south. Treating it as exactly north-south
+  // is an approximation, and one that understates nothing.
+  return {
+    scanKm: acrossKm,
+    trackKm: alongKm,
+    viewingZenithDeg: viewingZenith / radians,
+    areaHa: acrossKm * alongKm * 100,
+  }
+}
 
 // WGS84 local scale, so the grid union is computed in metres rather than in
 // degrees. Both formulas are the standard truncated series.
@@ -322,13 +384,21 @@ export function parseFirmsCsv(csvText, sensor) {
     const trackKm = Number(cells[trackIndex])
     const nominalKm = sensor.nominalResolutionM / 1000
     const hasPublishedFootprint = Number.isFinite(scanKm) && Number.isFinite(trackKm) && scanKm > 0 && trackKm > 0
+    // The geostationary product publishes zeros, so its true ground pixel is
+    // computed from the viewing geometry rather than assumed to be the nadir
+    // square, which would understate the area it covers by about half.
+    const geostationaryPixel = !hasPublishedFootprint && sensor.instrument === 'GEO'
+      ? geostationaryPixelKm(cells[satelliteIndex], latitude, longitude)
+      : null
 
     detections.push({
       latitude,
       longitude,
-      scanKm: hasPublishedFootprint ? scanKm : nominalKm,
-      trackKm: hasPublishedFootprint ? trackKm : nominalKm,
-      footprintSource: hasPublishedFootprint ? 'published' : 'nominal',
+      scanKm: hasPublishedFootprint ? scanKm : (geostationaryPixel?.scanKm ?? nominalKm),
+      trackKm: hasPublishedFootprint ? trackKm : (geostationaryPixel?.trackKm ?? nominalKm),
+      footprintSource: hasPublishedFootprint
+        ? 'published'
+        : (geostationaryPixel ? 'computed-geostationary' : 'nominal'),
       acquiredAt: toIsoTimestamp(cells[dateIndex], cells[timeIndex]),
       confidence: normaliseConfidence(cells[confidenceIndex], sensor.instrument, cells[satelliteIndex]),
       frpMw: Number.isFinite(Number(cells[frpIndex])) ? Number(cells[frpIndex]) : null,

@@ -9,6 +9,7 @@ import {
   corroborateDetections,
   estimateFootprintArea,
   footprintOutlineRings,
+  geostationaryPixelKm,
   parseFirmsCsv,
   summarizeSensorDetections,
 } from '../src/firmsDetections.js'
@@ -89,8 +90,23 @@ check('malformed row skipped, not guessed', parsed.skippedRows, 1)
 
 // Geostationary rows arrive with scan/track of 0, so the footprint has to fall
 // back to the nominal pixel and say that it did.
-check('zero pixel dimensions fall back to nominal', geo.detections[0].scanKm, 3)
-check('the fallback is flagged', geo.detections[0].footprintSource, 'nominal')
+// FIRMS publishes zeros for this product, so the real ground pixel is computed
+// from the viewing geometry. Assuming the nadir square would understate the area
+// a detection actually covers by about half.
+check('zero dimensions are computed, not assumed nominal', geo.detections[0].footprintSource, 'computed-geostationary')
+check('mtg pixel is stretched north-south', geo.detections[0].trackKm > geo.detections[0].scanKm * 1.5, true)
+check('mtg pixel is about 876 ha', geo.detections[0].scanKm * geo.detections[0].trackKm * 100, 876, 5)
+check('msg pixel is about 1972 ha', geo.detections[2].scanKm * geo.detections[2].trackKm * 100, 1972, 10)
+check('msg pixel is larger than mtg', geo.detections[2].scanKm > geo.detections[0].scanKm, true)
+
+// Sanity-check the geometry itself against the known viewing angle from Belgium.
+const geoPixel = geostationaryPixelKm('Met10', 50.548, 6.058)
+check('viewing zenith from Belgium is about 58 degrees', geoPixel.viewingZenithDeg, 58.2, 0.3)
+
+// Visibility defaults: coarse sensors start hidden.
+check('geostationary is hidden by default', meteosat.defaultVisible, false)
+check('modis is hidden by default', modis.defaultVisible, false)
+check('viirs is shown by default', viirs.defaultVisible, true)
 check('published dimensions are kept', parsed.detections[0].scanKm, 0.375)
 
 const geoSummary = summarizeSensorDetections({
@@ -103,7 +119,7 @@ check('geostationary summary forbids area derivation', geoSummary.areaDerivation
 check('geostationary summary contains no hectare figure', geoSummary.areaHa, null)
 check('geostationary confidence areas are suppressed', geoSummary.areaHaByConfidence, null)
 check('geostationary mean pixel hectares are suppressed', geoSummary.meanPixelHa, null)
-check('geostationary renders as an exact centroid', geoSummary.displayMode, 'centroid')
+check('geostationary is drawn at its true extent, not as a dot', meteosat.displayMode, 'footprint')
 
 // A 375 m pixel is 14.0625 ha, and the grid union reproduces it exactly.
 const single = estimateFootprintArea([parsed.detections[0]], { origin: parsed.detections[0] })
