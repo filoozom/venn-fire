@@ -2,10 +2,12 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
     "api/refresh.js": {
-      "maxDuration": 60
+      "maxDuration": 60,
+      "regions": ["bru1"]
     },
     "api/refresh-queue.js": {
       "maxDuration": 60,
+      "regions": ["bru1"],
       "experimentalTriggers": [
         {
           "type": "queue/v2beta",
