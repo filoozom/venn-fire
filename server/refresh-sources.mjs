@@ -140,6 +140,16 @@ async function refreshAircraftTraceSource({
     { observations: result.observations },
     { databaseUrl: '', query },
   )
+  const stored = await saveDataset({
+    key: 'aircraft',
+    payload: {
+      ...previous,
+      schemaVersion: previous.schemaVersion || 1,
+      generatedAt: new Date().toISOString(),
+      observations: persisted.observations,
+      retentionPolicy: 'incident lifetime',
+    },
+  }, query)
   const healthy = result.sources.filter((source) => source.ok)
   const failed = result.sources.filter((source) => !source.ok)
   return {
@@ -159,6 +169,7 @@ async function refreshAircraftTraceSource({
       receivedObservationCount: result.observations.length,
       upsertedObservationCount: persisted.persistedObservations,
       historyObservationCount: persisted.observations.length,
+      aircraftDatasetChanged: stored.changed,
       rawArtifactCount: artifacts.length,
       rawArtifacts: artifacts.map((artifact) => artifact.artifactKey),
     },
