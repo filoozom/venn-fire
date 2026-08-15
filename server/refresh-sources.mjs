@@ -7,7 +7,6 @@ import { loadAreaReports } from '../api/live-reports.js'
 import { loadAircraft, loadWeather } from '../api/live-situation.js'
 import { FIRMS_SENSORS } from '../src/firmsDetections.js'
 import {
-  archiveAircraftResponses,
   backfillLegacyFlightHistory,
   CURRENT_AIRCRAFT_TRACE_PROVIDERS,
   HISTORICAL_AIRCRAFT_TRACE_PROVIDERS,
@@ -32,6 +31,7 @@ import {
 import { persistFlightObservations, persistFlightPoll } from './flight-history.mjs'
 import { refreshVedia } from './media-sources.mjs'
 import { refreshMunicipalUpdates } from './municipal-sources.mjs'
+import { archiveProviderResponses } from './source-artifacts.mjs'
 
 const INCIDENT = { latitude: 50.54762, longitude: 6.05757 }
 const INCIDENT_START = '2026-08-14T11:00:00.000Z'
@@ -87,7 +87,7 @@ async function refreshAircraft({ requestedAtMs, query, bucketAt }) {
   const generatedAt = new Date(requestedAtMs).toISOString()
   const backfill = await backfillLegacyFlightHistory({ requestedAtMs, query })
   const result = await loadAircraft(requestedAtMs, undefined, { includeRaw: true })
-  const artifacts = await archiveAircraftResponses({
+  const artifacts = await archiveProviderResponses({
     sourceKey: 'aircraft-live',
     bucketAt,
     responses: result.rawResponses,
@@ -126,7 +126,7 @@ async function refreshAircraftTraceSource({
   sourceKey,
 }) {
   const result = await loadAircraftTraces({ providers, date })
-  const artifacts = await archiveAircraftResponses({
+  const artifacts = await archiveProviderResponses({
     sourceKey,
     bucketAt,
     responses: result.responses,
@@ -557,29 +557,47 @@ function firmsDetectionKey(detection) {
   ].join('|')
 }
 
-async function refreshFirms({ requestedAtMs, query }) {
+async function refreshFirms({ requestedAtMs, query, bucketAt }) {
   const mapKey = process.env.FIRMS_MAP_KEY?.trim()
   if (!mapKey) throw new Error('FIRMS_MAP_KEY is not configured')
   const [incoming, previous] = await Promise.all([
-    loadFirms({ mapKey, requestedAtMs }),
+    loadFirms({ mapKey, requestedAtMs, includeRaw: true }),
     previousPayload('firms', query, { sensors: [], detections: [] }),
   ])
+  const { rawResponses, ...incomingPayload } = incoming
+  const artifacts = await archiveProviderResponses({
+    sourceKey: 'firms',
+    bucketAt,
+    responses: rawResponses,
+  }, query)
+  if (!incomingPayload.sensors.length) throw new Error('Every FIRMS sensor request failed')
   const detections = mergeRows(
     previous.detections,
-    incoming.detections,
+    incomingPayload.detections,
     firmsDetectionKey,
     (left, right) => Date.parse(left.acquiredAt) - Date.parse(right.acquiredAt)
       || left.sensorKey.localeCompare(right.sensorKey),
   )
   const summaries = new Map((previous.sensors || []).map((sensor) => [sensor.sensorKey, sensor]))
-  incoming.sensors.forEach((sensor) => summaries.set(sensor.sensorKey, sensor))
+  incomingPayload.sensors.forEach((sensor) => summaries.set(sensor.sensorKey, sensor))
   const sensors = FIRMS_SENSORS.flatMap((sensor) => {
     const summary = summaries.get(sensor.key)
     return summary ? [summary] : []
   })
-  const payload = { ...previous, ...incoming, sensors, detections }
+  const payload = { ...previous, ...incomingPayload, sensors, detections }
   const stored = await saveDataset({ key: 'firms', payload }, query)
-  return { itemCount: detections.length, metadata: { changed: stored.changed, currentWindow: incoming.detections.length } }
+  return {
+    itemCount: detections.length,
+    metadata: {
+      changed: stored.changed,
+      currentWindow: incomingPayload.detections.length,
+      latestAcquiredAt: incomingPayload.latestAcquiredAt,
+      healthySensors: incomingPayload.sources.filter((source) => source.ok).map((source) => source.sensorKey),
+      failedSensors: incomingPayload.sources.filter((source) => !source.ok).map((source) => source.sensorKey),
+      rawArtifactCount: artifacts.length,
+      rawArtifacts: artifacts.map((artifact) => artifact.artifactKey),
+    },
+  }
 }
 
 const EFFIS_SOURCE = {

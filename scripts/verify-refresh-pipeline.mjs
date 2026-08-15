@@ -5,13 +5,14 @@ import { createHmac } from 'node:crypto'
 import { gunzipSync } from 'node:zlib'
 
 import butgenbachSourceHandler, { config as butgenbachSourceConfig } from '../api/butgenbach-source.js'
+import { loadFirms } from '../api/firms-situation.js'
 import { LIVE_AIRCRAFT_PROVIDERS, normalizeAircraft } from '../api/live-situation.js'
 import {
-  buildAircraftArtifact,
   CURRENT_AIRCRAFT_TRACE_PROVIDERS,
   HISTORICAL_AIRCRAFT_TRACE_PROVIDERS,
   normalizeAircraftTrace,
 } from '../server/aircraft-sources.mjs'
+import { buildProviderArtifact } from '../server/source-artifacts.mjs'
 import { payloadHash, setNoStoreHeaders } from '../server/database.mjs'
 import {
   normalizeDatexRoadEvents,
@@ -117,7 +118,7 @@ assert.equal(trace.length, 2, 'trace catch-up must retain exact in-radius fixes 
 assert.equal(trace[0].observedAt, '2026-08-15T08:00:30.000Z')
 assert.equal(trace[0].providerId, 'adsb-lol-current-trace')
 
-const rawArtifact = buildAircraftArtifact({
+const rawArtifact = buildProviderArtifact({
   sourceKey: 'aircraft-live',
   bucketAt: '2026-08-15T18:45:00.000Z',
   response: {
@@ -133,6 +134,25 @@ assert.equal(
   '{"now":1786819500,"ac":[]}',
   'archived aircraft artifacts must round-trip to the exact provider body',
 )
+
+const firmsCsv = [
+  'latitude,longitude,bright_ti4,scan,track,acq_date,acq_time,satellite,confidence,frp,daynight',
+  '50.55,6.06,345.2,0.4,0.5,2026-08-15,1205,N21,n,42.1,D',
+].join('\n')
+const firmsFixture = await loadFirms({
+  mapKey: 'never-store-this-key',
+  requestedAtMs: Date.parse('2026-08-15T12:10:00.000Z'),
+  includeRaw: true,
+  fetchImpl: async () => new Response(firmsCsv, {
+    status: 200,
+    headers: { 'Content-Type': 'text/csv' },
+  }),
+})
+assert.equal(firmsFixture.rawResponses.length, 4)
+assert.equal(firmsFixture.currentWindowDetectionCount, 4)
+assert.equal(firmsFixture.latestAcquiredAt, '2026-08-15T12:05:00.000Z')
+assert.ok(firmsFixture.rawResponses.every((item) => item.rawBody === firmsCsv))
+assert.ok(firmsFixture.rawResponses.every((item) => !item.provider.endpoint.includes('never-store-this-key')))
 
 const earlier = {
   generatedAt: '2026-08-15T13:00:00.000Z',

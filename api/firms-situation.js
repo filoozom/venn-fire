@@ -29,33 +29,51 @@ function haversineKm(latitude, longitude) {
   return 6371.0088 * 2 * Math.asin(Math.sqrt(value))
 }
 
-async function fetchCsv(url) {
-  const response = await fetch(url, {
-    headers: { Accept: 'text/csv' },
-    signal: AbortSignal.timeout(12_000),
-  })
-  const body = await response.text()
-  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+async function fetchCsv(request, fetchImpl = fetch) {
+  try {
+    const response = await fetchImpl(request.url, {
+      headers: { Accept: 'text/csv' },
+      signal: AbortSignal.timeout(12_000),
+    })
+    const rawBody = await response.text()
+    const base = {
+      request,
+      statusCode: response.status,
+      contentType: response.headers.get('content-type') || 'text/csv',
+      rawBody,
+    }
+    if (!response.ok) return { ...base, ok: false, error: `HTTP ${response.status}` }
 
-  // FIRMS can return an invalid-key or quota message with HTTP 200.
-  const header = body.split(/\r?\n/, 1)[0]?.toLowerCase() ?? ''
-  if (!header.includes('latitude') || !header.includes('longitude')) {
-    throw new Error('FIRMS did not return a CSV detection response')
+    // FIRMS can return an invalid-key or quota message with HTTP 200.
+    const header = rawBody.split(/\r?\n/, 1)[0]?.toLowerCase() ?? ''
+    if (!header.includes('latitude') || !header.includes('longitude')) {
+      return { ...base, ok: false, error: 'FIRMS did not return a CSV detection response' }
+    }
+    return { ...base, ok: true }
+  } catch (error) {
+    return {
+      request,
+      ok: false,
+      statusCode: null,
+      contentType: 'text/csv',
+      rawBody: null,
+      error: String(error?.message || error),
+    }
   }
-  return body
 }
 
-function publicSensorStatus(request, ok, detail = null) {
+function publicSensorStatus(request, ok, detail = null, metadata = {}) {
   return {
     sensorKey: request.sensor.key,
     sensorName: request.sensor.name,
     ok,
     sourceRequestUrl: request.citableUrl,
+    ...metadata,
     ...(detail ? { detail } : {}),
   }
 }
 
-export async function loadFirms({ mapKey, requestedAtMs }) {
+export async function loadFirms({ mapKey, requestedAtMs, includeRaw = false, fetchImpl = fetch }) {
   const startDate = isoDateDaysAgo(requestedAtMs, DAY_RANGE - 1)
   const requests = buildFirmsRequests({
     mapKey,
@@ -63,24 +81,23 @@ export async function loadFirms({ mapKey, requestedAtMs }) {
     startDate,
     dayRange: DAY_RANGE,
   })
-  const results = await Promise.allSettled(requests.map(async (request) => ({
-    request,
-    csv: await fetchCsv(request.url),
-  })))
+  const results = await Promise.all(requests.map((request) => fetchCsv(request, fetchImpl)))
 
   const retrievedAt = new Date(requestedAtMs).toISOString()
   const sensors = []
   const detections = []
   const sources = []
 
-  results.forEach((result, index) => {
-    const request = requests[index]
-    if (result.status === 'rejected') {
-      sources.push(publicSensorStatus(request, false, result.reason?.message || 'Request failed'))
+  results.forEach((result) => {
+    const { request } = result
+    if (!result.ok) {
+      sources.push(publicSensorStatus(request, false, result.error || 'Request failed', {
+        statusCode: result.statusCode,
+      }))
       return
     }
 
-    const parsed = parseFirmsCsv(result.value.csv, request.sensor)
+    const parsed = parseFirmsCsv(result.rawBody, request.sensor)
     const inRadius = parsed.detections.filter(
       (detection) => haversineKm(detection.latitude, detection.longitude) <= INCIDENT_RADIUS_KM,
     )
@@ -101,10 +118,17 @@ export async function loadFirms({ mapKey, requestedAtMs }) {
       footprint: detectionFootprint(detection),
       meetsMinimumConfidence: meetsConfidence(detection, MINIMUM_CONFIDENCE),
     })))
-    sources.push(publicSensorStatus(request, true))
+    sources.push(publicSensorStatus(request, true, null, {
+      statusCode: result.statusCode,
+      responseBytes: Buffer.byteLength(result.rawBody),
+    }))
   })
 
-  if (!sensors.length) throw new Error('Every FIRMS sensor request failed')
+  const latestAcquiredAt = detections.length
+    ? detections.reduce((latest, detection) => (
+        detection.acquiredAt > latest ? detection.acquiredAt : latest
+      ), detections[0].acquiredAt)
+    : null
 
   return {
     schemaVersion: 1,
@@ -125,9 +149,28 @@ export async function loadFirms({ mapKey, requestedAtMs }) {
     },
     radiusKm: INCIDENT_RADIUS_KM,
     minimumConfidence: MINIMUM_CONFIDENCE,
+    currentWindowDetectionCount: detections.length,
+    latestAcquiredAt,
     sensors,
     detections,
     sources,
+    ...(includeRaw
+      ? {
+          rawResponses: results.map((result) => ({
+            provider: {
+              id: `firms-${result.request.sensor.key}`,
+              name: result.request.sensor.name,
+              website: 'https://firms.modaps.eosdis.nasa.gov/',
+              endpoint: result.request.citableUrl,
+            },
+            ok: result.ok,
+            statusCode: result.statusCode,
+            contentType: result.contentType,
+            rawBody: result.rawBody,
+            error: result.error || null,
+          })),
+        }
+      : {}),
     interpretation: [
       'Every coordinate is an exact NASA FIRMS detection centroid; no position is interpolated.',
       `Only detections within ${INCIDENT_RADIUS_KM} km of Drossart are returned.`,
