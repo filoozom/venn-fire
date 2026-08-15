@@ -135,5 +135,17 @@ const media = normalizeVediaArticle({
 }, '2026-08-15T14:05:00Z')
 assert.equal(media.publisherKind, 'local-media')
 assert.equal(media.url, 'https://www.vedia.be/info/fixture/123')
+assert.equal(normalizeVediaArticle({
+  id: 'unrelated-drought',
+  attributes: {
+    title: 'Sécheresse: nos rivières au plus bas',
+    created: '2026-08-14T12:00:00Z',
+    path: { alias: '/info/drought/124' },
+    field_content_main_content: {
+      summary: 'Les faibles pluies ne changeront pas la situation régionale.',
+      value: '<p>Le risque d’incendie reste élevé dans le parc des Hautes Fagnes.</p>',
+    },
+  },
+}, '2026-08-15T14:05:00Z'), null, 'body-only keyword overlap must not admit an unrelated article')
 
 console.log('refresh pipeline verified: 14 leased sources, five-minute grid, public and controlled adapters, semantic history, no-store APIs')

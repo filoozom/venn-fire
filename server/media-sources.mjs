@@ -44,13 +44,12 @@ function canonicalUrl(attributes) {
 }
 
 function isIncidentArticle(article) {
-  const haystack = normalizeSearchText([
+  const headline = normalizeSearchText([
     article.title,
     article.summary,
-    article.bodyText,
   ].join(' '))
-  const incident = /incend|brasier|feu|fumee|brule/iu.test(haystack)
-  const location = /fagnes|drossart|baelen|jalhay|sourbrodt|butgenbach|mont rigi/iu.test(haystack)
+  const incident = /incend|brasier|feu|fumee|brule|centre de crise|plan d[’']urgence provincial/iu.test(headline)
+  const location = /fagnes|drossart|baelen|jalhay|sourbrodt|butgenbach|mont rigi/iu.test(headline)
   return incident && location
 }
 
@@ -143,7 +142,9 @@ export async function refreshVedia({ requestedAtMs, query }) {
   const incoming = pages.flatMap((page) => (
     (page.payload.data ?? []).map((resource) => normalizeVediaArticle(resource, retrievedAt)).filter(Boolean)
   ))
-  const articles = new Map((previous.articles ?? []).map((article) => [article.id, article]))
+  const articles = new Map((previous.articles ?? [])
+    .filter(isIncidentArticle)
+    .map((article) => [article.id, article]))
   for (const article of incoming) {
     const old = articles.get(article.id)
     articles.set(article.id, old
@@ -213,4 +214,3 @@ export async function refreshVedia({ requestedAtMs, query }) {
     },
   }
 }
-
