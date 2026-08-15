@@ -59,7 +59,7 @@ import {
   TIMELINE_START_MS,
 } from './data'
 import {
-  CORROBORATION_MIN_SENSORS,
+  FIRMS_EXTENTS,
   FIRMS_SENSORS,
   corroborateDetections,
   estimateFootprintArea,
@@ -73,7 +73,7 @@ const FIRMS_LAYER_KEYS = Object.fromEntries(FIRMS_SENSORS.map((sensor) => [senso
 // Independent-satellite agreement, kept separate from the published confidence
 // field. NASA's confidence value is never rewritten: a detection we cannot
 // corroborate is still exactly what NASA reported it to be.
-const FIRMS_CORROBORATED_KEY = 'firmsCorroboratedOnly'
+const FIRMS_EXTENT_KEY = 'firmsExtent'
 
 const FIRMS_CONFIDENCE_LEVELS = [
   { key: 'firmsConfidence:high', level: 'high', label: 'High confidence' },
@@ -91,10 +91,11 @@ const FIRMS_LAYER_DEFAULTS = {
   'firmsConfidence:high': true,
   'firmsConfidence:nominal': true,
   'firmsConfidence:low': false,
-  // On by default: the uncorroborated fringe is the part most likely to be read
-  // as fire where there was none.
-  [FIRMS_CORROBORATED_KEY]: true,
 }
+
+// Defaults to the tightest extent: the uncorroborated fringe is the part most
+// likely to be read as fire where there was none.
+const DEFAULT_FIRMS_EXTENT = 'fireCore'
 
 const DWD_WIND_LAYER_KEYS = Object.fromEntries(
   dwdWindStations.map((station) => [station.id, `dwdWind:${station.id}`]),
@@ -102,7 +103,12 @@ const DWD_WIND_LAYER_KEYS = Object.fromEntries(
 const DWD_WIND_LAYER_DEFAULTS = Object.fromEntries(
   dwdWindStations.map((station) => [DWD_WIND_LAYER_KEYS[station.id], true]),
 )
-const INITIAL_LAYER_STATE = { ...initialLayers, ...FIRMS_LAYER_DEFAULTS, ...DWD_WIND_LAYER_DEFAULTS }
+const INITIAL_LAYER_STATE = {
+  ...initialLayers,
+  ...FIRMS_LAYER_DEFAULTS,
+  ...DWD_WIND_LAYER_DEFAULTS,
+  [FIRMS_EXTENT_KEY]: DEFAULT_FIRMS_EXTENT,
+}
 const FIRMS_REFRESH_MS = 15 * 60 * 1000
 const EMPTY_FIRMS_DATA = {
   schemaVersion: 1,
@@ -836,11 +842,16 @@ function App() {
     [firmsDetections, frameIndex],
   )
 
+  const activeExtent = useMemo(
+    () => FIRMS_EXTENTS.find((extent) => extent.key === layers[FIRMS_EXTENT_KEY]) ?? FIRMS_EXTENTS[0],
+    [layers],
+  )
+
   const visibleFirmsDetections = useMemo(() => firmsDetectionsAtTime.filter((detection) => (
     layers[FIRMS_LAYER_KEYS[detection.sensorKey]]
       && activeConfidenceLevels.includes(detection.confidence.label)
-      && (!layers[FIRMS_CORROBORATED_KEY] || detection.isCorroborated)
-  )), [firmsDetectionsAtTime, layers, activeConfidenceLevels])
+      && activeExtent.test(detection)
+  )), [firmsDetectionsAtTime, layers, activeConfidenceLevels, activeExtent])
 
   // The estimate is recomputed here from the checked sensors and checked
   // confidence levels rather than read from a stored figure, so what is shown
@@ -961,23 +972,28 @@ function App() {
                   </label>
                 )
               })}
-              <label className="layer-checkbox">
-                <input
-                  type="checkbox"
-                  checked={Boolean(layers[FIRMS_CORROBORATED_KEY])}
-                  onChange={() => setLayers((value) => ({
-                    ...value, [FIRMS_CORROBORATED_KEY]: !value[FIRMS_CORROBORATED_KEY],
-                  }))}
-                />
-                <span>{`Corroborated only (≥${CORROBORATION_MIN_SENSORS} satellites)`}</span>
-                <em>{firmsDetections.filter((detection) => detection.isCorroborated).length}</em>
-              </label>
+            </div>
+
+            <div className="section-heading section-heading--sub"><span>FIRE EXTENT</span></div>
+            <div className="layer-checkboxes">
+              {FIRMS_EXTENTS.map((extent) => (
+                <label className="layer-checkbox" key={extent.key} title={extent.detail}>
+                  <input
+                    type="radio"
+                    name="firms-extent"
+                    checked={activeExtent.key === extent.key}
+                    onChange={() => setLayers((value) => ({ ...value, [FIRMS_EXTENT_KEY]: extent.key }))}
+                  />
+                  <span>{extent.label}</span>
+                  <em>{firmsDetections.filter(extent.test).length}</em>
+                </label>
+              ))}
             </div>
             <p className="layer-note">
               {firmsAreaRange
                 ? (firmsAreaRange.sensorCount > 1
-                  ? `Detection-footprint estimate ${Math.round(firmsAreaRange.min).toLocaleString('en-GB')}–${Math.round(firmsAreaRange.max).toLocaleString('en-GB')} ha across ${firmsAreaRange.sensorCount} sensors, at the selected confidence levels${layers[FIRMS_CORROBORATED_KEY] ? ', limited to cells two satellites both observed' : ''}. Not a burned area.`
-                  : `Detection-footprint estimate ${Math.round(firmsAreaRange.max).toLocaleString('en-GB')} ha at the selected confidence levels${layers[FIRMS_CORROBORATED_KEY] ? ', limited to cells two satellites both observed' : ''}. Not a burned area.`)
+                  ? `Detection-footprint estimate ${Math.round(firmsAreaRange.min).toLocaleString('en-GB')}–${Math.round(firmsAreaRange.max).toLocaleString('en-GB')} ha across ${firmsAreaRange.sensorCount} sensors, at the selected confidence levels${activeExtent.key === 'all' ? '' : `, ${activeExtent.detail.toLowerCase()}`}. Not a burned area.`
+                  : `Detection-footprint estimate ${Math.round(firmsAreaRange.max).toLocaleString('en-GB')} ha at the selected confidence levels${activeExtent.key === 'all' ? '' : `, ${activeExtent.detail.toLowerCase()}`}. Not a burned area.`)
                 : 'No FIRMS detections at the selected sensors, confidence levels and time.'}
             </p>
           </div>
@@ -988,7 +1004,7 @@ function App() {
               <SourceMark tone="nasa" /><span><strong>FIRMS</strong><small>{`${firmsData.detections.length} exact detections · ${visibleFirmsDetections.length} shown · ${firmsState.status === 'live' ? 'server refreshed' : 'audited snapshot'}`}</small></span><em className={`health-dot ${firmsState.status === 'live' ? '' : 'health-dot--amber'}`} />
             </button>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
-              <SourceMark tone="effis" /><span><strong>EFFIS daily geometry</strong><small>{currentEffisArea ? `${currentEffisArea.productDate}${effisCarriedForward ? ' carried forward' : ''} · not official fire size` : 'not yet available at selected time'}</small></span><em className="health-dot health-dot--amber" />
+              <SourceMark tone="effis" /><span><strong>EFFIS daily geometry</strong><small>{currentEffisArea ? `${currentEffisArea.productDate}${effisCarriedForward ? ' carried forward' : ''} · envelope containing fire activity, not burned area` : 'not yet available at selected time'}</small></span><em className="health-dot health-dot--amber" />
             </button>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
               <SourceMark tone="official" /><span><strong>Affected-area reports</strong><small>{frame.reportedAreaText} ha · {frame.areaLabel}</small></span><em className="health-dot health-dot--amber" />
@@ -1084,7 +1100,7 @@ function App() {
 
               <div className="snapshot-grid">
                 <article className="snapshot-card snapshot-card--fire"><span><Flame size={15} /> REPORTED AREA</span><strong>{reportedAreaText}<small>{frame.reportedHa == null ? '' : 'ha'}</small></strong><p>{frame.areaLabel}</p></article>
-                <article className="snapshot-card snapshot-card--effis"><span><Layers3 size={15} /> EFFIS DAILY GEOMETRY</span><strong>{currentEffisArea ? Math.round(currentEffisArea.areaHa).toLocaleString('en-GB') : '—'}<small>{currentEffisArea ? 'ha' : ''}</small></strong><p>{currentEffisArea ? `${currentEffisArea.productDate}${effisCarriedForward ? ' carried forward until replacement' : ''} · not official fire size` : 'no EFFIS product available at selected time'}</p></article>
+                <article className="snapshot-card snapshot-card--effis"><span><Layers3 size={15} /> EFFIS DAILY GEOMETRY</span><strong>{currentEffisArea ? Math.round(currentEffisArea.areaHa).toLocaleString('en-GB') : '—'}<small>{currentEffisArea ? 'ha' : ''}</small></strong><p>{currentEffisArea ? `${currentEffisArea.productDate}${effisCarriedForward ? ' carried forward until replacement' : ''} · envelope containing fire activity, not burned area` : 'no EFFIS product available at selected time'}</p></article>
                 <article className="snapshot-card"><span><Satellite size={15} /> HOTSPOTS</span><strong>{visibleFirmsDetections.length}<small>px</small></strong><p>{firmsAreaRange ? `${firmsAreaRange.sensorCount > 1 ? `${Math.round(firmsAreaRange.min).toLocaleString('en-GB')}–${Math.round(firmsAreaRange.max).toLocaleString('en-GB')}` : Math.round(firmsAreaRange.max).toLocaleString('en-GB')} ha footprint estimate · not fire size` : 'no detections at this time'}</p></article>
                 <article className="snapshot-card"><span><Helicopter size={15} /> AIR OPS</span><strong>{activeFlights.length}<small>recent</small></strong><p>{activeFlights.length ? 'fix within previous 5 min' : 'no recent observation'}</p></article>
                 <article className="snapshot-card snapshot-card--traffic"><span><Radio size={15} /> OTHER TRAFFIC</span><strong>{trafficLoadStatus === 'loaded' ? activeNearbyTraffic.length : '—'}<small>{trafficLoadStatus === 'loaded' ? 'recent' : ''}</small></strong><p>{trafficLoadStatus === 'loaded' ? `${observedNearbyTrafficCount}/${nearbyTrafficMeta.aircraftCount} identifiers seen by this time` : 'optional replay layer not loaded'}</p></article>

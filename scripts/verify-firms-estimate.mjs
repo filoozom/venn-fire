@@ -7,6 +7,7 @@
 import {
   FIRMS_SENSORS,
   buildFirmsRequests,
+  FIRMS_EXTENTS,
   corroborateDetections,
   detectionFootprint,
   estimateFootprintArea,
@@ -190,6 +191,36 @@ const withModis = corroborateDetections([
 check('modis does not corroborate viirs', withModis[0].isCorroborated, false)
 check('modis is excluded, not scored', withModis[1].corroboratingSensors, null)
 check('modis is never in the corroborated set', withModis[1].isCorroborated, false)
+
+// --- fire core (best estimate) --------------------------------------------
+
+const high = (latitude, longitude, sensorKey) => ({
+  ...at(latitude, longitude, sensorKey),
+  confidence: { label: 'high', rank: 3, raw: 'h' },
+})
+
+// Two satellites plus a high-confidence detection anchors the cell.
+const anchored = corroborateDetections([
+  high(50.5400, 6.0800, 'viirsNoaa20'),
+  at(50.5401, 6.0801, 'viirsSnpp'),
+])
+check('cell with 2 sats and a high-confidence hit is fire core', anchored.every((d) => d.isFireCore), true)
+check('nominal detection in an anchored cell is kept', anchored[1].isFireCore, true)
+
+// Corroborated but with no high-confidence detection anywhere in the cell.
+const unanchored = corroborateDetections([
+  at(50.5400, 6.0800, 'viirsNoaa20'),
+  at(50.5401, 6.0801, 'viirsSnpp'),
+])
+check('corroborated without high confidence is not fire core', unanchored.some((d) => d.isFireCore), false)
+check('...but it is still corroborated', unanchored.every((d) => d.isCorroborated), true)
+
+// High confidence from a single satellite is not enough on its own.
+const loneHigh = corroborateDetections([high(50.5400, 6.0000, 'viirsNoaa20')])
+check('high confidence from one satellite is not fire core', loneHigh[0].isFireCore, false)
+
+check('fire core is the tightest extent', FIRMS_EXTENTS[0].key, 'fireCore')
+check('every extent states its rule', FIRMS_EXTENTS.every((e) => e.detail?.length > 0), true)
 
 if (failures) {
   console.error(`\n${failures} check(s) failed`)

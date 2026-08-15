@@ -102,21 +102,67 @@ export function corroborateDetections(detections, options = {}) {
   const cellKey = (detection) => `${Math.floor(detection.latitude / cellDegrees)}:${Math.floor(detection.longitude / cellDegrees)}`
 
   const sensorsByCell = new Map()
+  const highConfidenceByCell = new Map()
   for (const detection of detections) {
     if (!isEligible(detection)) continue
     const key = cellKey(detection)
     if (!sensorsByCell.has(key)) sensorsByCell.set(key, new Set())
     sensorsByCell.get(key).add(detection.sensorKey)
+    if (detection.confidence.label === 'high') {
+      highConfidenceByCell.set(key, (highConfidenceByCell.get(key) ?? 0) + 1)
+    }
   }
 
   return detections.map((detection) => {
     if (!isEligible(detection)) {
-      return { ...detection, corroboratingSensors: null, isCorroborated: false }
+      return {
+        ...detection,
+        corroboratingSensors: null,
+        isCorroborated: false,
+        cellHighConfidenceCount: null,
+        isFireCore: false,
+      }
     }
-    const count = sensorsByCell.get(cellKey(detection))?.size ?? 0
-    return { ...detection, corroboratingSensors: count, isCorroborated: count >= minSensors }
+    const key = cellKey(detection)
+    const count = sensorsByCell.get(key)?.size ?? 0
+    const highConfidenceCount = highConfidenceByCell.get(key) ?? 0
+    const isCorroborated = count >= minSensors
+    return {
+      ...detection,
+      corroboratingSensors: count,
+      isCorroborated,
+      cellHighConfidenceCount: highConfidenceCount,
+      // The tightest extent: two spacecraft agree on the cell AND at least one
+      // of them reported high confidence there. A neighbouring nominal-confidence
+      // detection in the same cell is kept, because the cell is already anchored
+      // by a high-confidence observation.
+      isFireCore: isCorroborated && highConfidenceCount >= 1,
+    }
   })
 }
+
+// The three extents the interface can draw, tightest first. Each is a stateable
+// rule over published values, not a tuned threshold.
+export const FIRMS_EXTENTS = [
+  {
+    key: 'fireCore',
+    label: 'Best estimate',
+    detail: '2+ satellites agree and the cell has a high-confidence detection',
+    test: (detection) => detection.isFireCore,
+  },
+  {
+    key: 'corroborated',
+    label: 'Corroborated',
+    detail: '2+ satellites observed the cell',
+    test: (detection) => detection.isCorroborated,
+  },
+  {
+    key: 'all',
+    label: 'All detections',
+    detail: 'Every detection as published, including uncorroborated single passes',
+    test: () => true,
+  },
+]
 
 export const FOOTPRINT_ESTIMATE_CAVEATS = [
   'A detection marks a pixel that was radiating at the moment of the overpass. The published footprint is the whole sensor pixel, so a fire front far smaller than the pixel still marks the entire footprint. The estimate therefore overstates area for narrow or broken fire fronts.',

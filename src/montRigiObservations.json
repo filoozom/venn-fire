@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-15T11:36:48.678Z",
+  "generatedAt": "2026-08-15T11:46:49.373Z",
   "source": {
     "name": "Royal Meteorological Institute of Belgium (RMI) open data",
     "url": "https://opendata.meteo.be/",
     "endpoint": "https://opendata.meteo.be/service/ows",
     "featureType": "aws:aws_10min",
-    "requestUrl": "https://opendata.meteo.be/service/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=aws%3Aaws_10min&outputFormat=application%2Fjson&count=1000&sortBy=timestamp&CQL_FILTER=code%3D6494+AND+timestamp+DURING+2026-08-14T11%3A00%3A00Z%2F2026-08-15T11%3A36%3A48.677Z"
+    "requestUrl": "https://opendata.meteo.be/service/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=aws%3Aaws_10min&outputFormat=application%2Fjson&count=1000&sortBy=timestamp&CQL_FILTER=code%3D6494+AND+timestamp+DURING+2026-08-14T11%3A00%3A00Z%2F2026-08-15T11%3A46%3A49.372Z"
   },
   "station": {
     "code": 6494,
@@ -2579,6 +2579,23 @@
       "precip_quantity_validated": false,
       "wind_speed_10m_kmh": 9.6368868,
       "wind_gusts_speed_kmh": 20.7306828
+    },
+    {
+      "observedAt": "2026-08-15T11:40:00Z",
+      "wind_speed_10m": 2.78569,
+      "wind_speed_10m_validated": false,
+      "wind_direction": 313.282777,
+      "wind_direction_validated": false,
+      "wind_gusts_speed": 5.041313,
+      "wind_gusts_speed_validated": false,
+      "humidity_rel_shelter_avg": 46.850922,
+      "humidity_rel_shelter_avg_validated": false,
+      "temp_dry_shelter_avg": 25.147252,
+      "temp_dry_shelter_avg_validated": false,
+      "precip_quantity": 0,
+      "precip_quantity_validated": false,
+      "wind_speed_10m_kmh": 10.028484,
+      "wind_gusts_speed_kmh": 18.1487268
     }
   ]
 }

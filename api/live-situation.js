@@ -1,10 +1,25 @@
-const INCIDENT = { latitude: 50.54762, longitude: 6.05757 }
-const INCIDENT_AIRCRAFT = new Map([
+export const INCIDENT = { latitude: 50.54762, longitude: 6.05757 }
+export const INCIDENT_AIRCRAFT = new Map([
   ['44c1e5', { callSign: 'G10', registration: 'OO-POE' }],
   ['44c1e8', { callSign: 'G12', registration: 'OO-POH' }],
   ['44c1ea', { callSign: 'G17', registration: 'OO-POJ' }],
 ])
-const INCIDENT_RADIUS_KM = 10
+export const INCIDENT_RADIUS_KM = 10
+
+export const LIVE_AIRCRAFT_PROVIDERS = [
+  {
+    id: 'adsb-fi',
+    name: 'adsb.fi',
+    website: 'https://adsb.fi/',
+    endpoint: `https://opendata.adsb.fi/api/v2/lat/${INCIDENT.latitude}/lon/${INCIDENT.longitude}/dist/25`,
+  },
+  {
+    id: 'adsb-lol',
+    name: 'ADSB.lol',
+    website: 'https://www.adsb.lol/',
+    endpoint: `https://api.adsb.lol/v2/point/${INCIDENT.latitude}/${INCIDENT.longitude}/25`,
+  },
+]
 
 function haversineKm(latitude, longitude) {
   const radians = Math.PI / 180
@@ -29,7 +44,16 @@ function finiteNumber(value) {
   return Number.isFinite(number) ? number : null
 }
 
-function normalizeAircraft(payload, provider, requestedAtMs) {
+export function normalizeAircraft(payload, provider, requestedAtMs) {
+  // Both providers publish the epoch represented by `seen_pos`. Using it keeps
+  // an observation's timestamp stable when two consecutive imports receive the
+  // same fix; falling back to our request time preserves compatibility with
+  // provider responses that omit `now`.
+  const payloadTimestampMs = finiteNumber(payload?.now)
+  const referenceTimestampMs = payloadTimestampMs == null
+    ? requestedAtMs
+    : (payloadTimestampMs > 10_000_000_000 ? payloadTimestampMs : payloadTimestampMs * 1_000)
+
   return (payload?.ac || payload?.aircraft || []).flatMap((aircraft) => {
     const icao24 = String(aircraft.hex || aircraft.icao24 || '').trim().toLowerCase()
     const identity = INCIDENT_AIRCRAFT.get(icao24)
@@ -51,7 +75,7 @@ function normalizeAircraft(payload, provider, requestedAtMs) {
       icao24,
       callSign: String(aircraft.flight || aircraft.callsign || identity.callSign).trim() || identity.callSign,
       registration: String(aircraft.r || aircraft.registration || identity.registration).trim() || identity.registration,
-      observedAt: new Date(requestedAtMs - seenPositionSeconds * 1_000).toISOString(),
+      observedAt: new Date(referenceTimestampMs - seenPositionSeconds * 1_000).toISOString(),
       latitude,
       longitude,
       altitudeFt: altitudeValue,
@@ -67,22 +91,11 @@ function normalizeAircraft(payload, provider, requestedAtMs) {
   })
 }
 
-async function loadAircraft(requestedAtMs) {
-  const providers = [
-    {
-      id: 'adsb-fi',
-      name: 'adsb.fi',
-      website: 'https://adsb.fi/',
-      endpoint: `https://opendata.adsb.fi/api/v2/lat/${INCIDENT.latitude}/lon/${INCIDENT.longitude}/dist/25`,
-    },
-    {
-      id: 'adsb-lol',
-      name: 'ADSB.lol',
-      website: 'https://www.adsb.lol/',
-      endpoint: `https://api.adsb.lol/v2/point/${INCIDENT.latitude}/${INCIDENT.longitude}/25`,
-    },
-  ]
-
+export async function loadAircraft(
+  requestedAtMs,
+  providers = LIVE_AIRCRAFT_PROVIDERS,
+  { includeRaw = false } = {},
+) {
   const results = await Promise.allSettled(providers.map(async (provider) => ({
     provider,
     payload: await fetchJson(provider.endpoint),
@@ -134,7 +147,20 @@ async function loadAircraft(requestedAtMs) {
     })
   })
 
-  return { observations, conflicts, sources: sourceStatus }
+  return {
+    observations,
+    conflicts,
+    sources: sourceStatus,
+    ...(includeRaw
+      ? {
+          rawResponses: results.flatMap((result) => (
+            result.status === 'fulfilled'
+              ? [{ provider: result.value.provider, payload: result.value.payload }]
+              : []
+          )),
+        }
+      : {}),
+  }
 }
 
 function haversineBetween(leftLatitude, leftLongitude, rightLatitude, rightLongitude) {
