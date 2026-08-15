@@ -108,55 +108,49 @@ if (chartBounds.y < 0 || chartBounds.y + chartBounds.height > 44.01) {
   throw new Error(`Reported-area chart escapes its 44 px viewBox: ${JSON.stringify(chartBounds)}`)
 }
 
-// A report refresh must advance the report timeline even when weather is down.
-// Otherwise a transient Open-Meteo failure can leave an exact source update
-// hidden until the next successful weather request.
+// A database report update must advance the timeline independently of any
+// provider request. The browser consumes only the normalized Postgres view.
 const livePage = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
 const liveErrors = []
 livePage.on('pageerror', (error) => liveErrors.push(error.message))
-await livePage.route('**/api/live-situation', async (route) => route.fulfill({
-  status: 200,
-  contentType: 'application/json',
-  body: JSON.stringify({
-    schemaVersion: 2,
-    generatedAt: '2026-08-15T13:10:00.000Z',
-    refreshAfterSeconds: 300,
-    weather: { ok: false, rows: [], current: null },
-    aircraft: { ok: false, observations: [], conflicts: [], sources: [] },
-    reports: {
-      ok: true,
-      complete: true,
-      areaReports: [{
-        timestampMs: Date.parse('2026-08-15T15:05:00+02:00'),
-        observedAt: '2026-08-15T13:05:00.000Z',
-        reportedHa: 1600,
-        areaPrefix: '>',
-        areaLabel: 'fixture report at 15:05 CEST',
-        source: 'BRF',
-        sourceUrl: 'https://brf.be/regional/2100196/',
-      }],
-      sources: [],
-    },
-  }),
-}))
+await livePage.route('**/api/data', async (route) => {
+  const upstream = await route.fetch()
+  const payload = await upstream.json()
+  payload.generatedAt = '2026-08-15T13:10:00.000Z'
+  payload.datasets.reports.payload = {
+    ...payload.datasets.reports.payload,
+    ok: true,
+    complete: true,
+    areaReports: [...payload.datasets.reports.payload.areaReports, {
+      timestampMs: Date.parse('2026-08-15T15:05:00+02:00'),
+      observedAt: '2026-08-15T13:05:00.000Z',
+      reportedHa: 1600,
+      areaPrefix: '>',
+      areaLabel: 'fixture report at 15:05 CEST',
+      source: 'BRF',
+      sourceUrl: 'https://brf.be/regional/2100196/',
+    }],
+  }
+  await route.fulfill({ response: upstream, json: payload })
+})
 await livePage.goto(testUrl, { waitUntil: 'domcontentloaded' })
 await livePage.waitForFunction(() => (
   document.querySelector('.snapshot-card--fire strong')?.textContent.replace(/\s+/gu, '') === '>1,600ha'
 ))
-const reportWithoutWeather = {
+const databaseReportUpdate = {
   area: await livePage.locator('.snapshot-card--fire strong').innerText(),
   latestFrame: await livePage.locator('.updated-state strong').innerText(),
   syncLabel: await livePage.locator('.updated-state small').innerText(),
   logEntries: await livePage.getByText('>1,600 ha reported affected', { exact: true }).count(),
 }
-if (!reportWithoutWeather.latestFrame.includes('15:10')) {
-  throw new Error(`Live report did not advance the timeline: ${JSON.stringify(reportWithoutWeather)}`)
+if (!databaseReportUpdate.latestFrame.includes('15:10')) {
+  throw new Error(`Database report did not advance the timeline: ${JSON.stringify(databaseReportUpdate)}`)
 }
-if (reportWithoutWeather.logEntries !== 1) {
-  throw new Error(`Live report reached the card but not exactly one log entry: ${JSON.stringify(reportWithoutWeather)}`)
+if (databaseReportUpdate.logEntries !== 1) {
+  throw new Error(`Database report reached the card but not exactly one log entry: ${JSON.stringify(databaseReportUpdate)}`)
 }
 if (liveErrors.length) throw new Error(`Live-report browser errors: ${liveErrors.join(' | ')}`)
 if (errors.length) throw new Error(`Browser errors: ${errors.join(' | ')}`)
 
-console.log(JSON.stringify({ states, bundledLatestAreaLogEntries, effisOn14August, effisOn15August, unrelatedTrafficControls, officialSourceLinks, chartBounds, reportWithoutWeather }, null, 2))
+console.log(JSON.stringify({ states, bundledLatestAreaLogEntries, effisOn14August, effisOn15August, unrelatedTrafficControls, officialSourceLinks, chartBounds, databaseReportUpdate }, null, 2))
 await browser.close()

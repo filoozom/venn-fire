@@ -165,8 +165,12 @@ function numericAreaFromGermanDescription(description) {
 export function parseBrfAreaReport(html) {
   const description = brfDescription(html)
   const timestampMs = brfUpdatedTimestamp(html)
-  if (!description || !/Hohen Venn|Vennbrand|Gro[ßs]brand/iu.test(description) || !Number.isFinite(timestampMs)) return []
-  const area = numericAreaFromGermanDescription(description)
+  const article = String(html).match(/<article\b[^>]*>[\s\S]*?<\/article>/iu)?.[0] ?? html
+  const articleText = htmlToSourceText(article)
+  const incidentText = `${description || ''}\n${articleText}`
+  if (!/Hohen Venn|Vennbrand|Gro[ßs]brand/iu.test(incidentText) || !Number.isFinite(timestampMs)) return []
+  const area = numericAreaFromGermanDescription(description || '')
+    || numericAreaFromGermanDescription(articleText)
   if (!area) return []
   const time = clockLabel(timestampMs)
   return [{

@@ -3095,3 +3095,35 @@ button.connection-card--upload {
   max-height: 340px;
   overflow-y: auto;
 }
+/* The application intentionally has no bundled data fallback. */
+.database-startup {
+  min-height: 100vh;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 0.8rem;
+  padding: 2rem;
+  color: #f4f0e9;
+  background: #141918;
+  text-align: center;
+}
+
+.database-startup h1,
+.database-startup p {
+  margin: 0;
+}
+
+.database-startup p {
+  max-width: 34rem;
+  color: #aeb9b4;
+}
+
+.database-startup button {
+  margin-top: 0.5rem;
+  padding: 0.65rem 1rem;
+  border: 1px solid #51615b;
+  border-radius: 0.5rem;
+  color: inherit;
+  background: #25302c;
+  cursor: pointer;
+}

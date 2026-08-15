@@ -7,6 +7,7 @@ import {
   parseFirmsCsv,
   summarizeSensorDetections,
 } from '../src/firmsDetections.js'
+import { loadDataset, setNoStoreHeaders } from '../server/database.mjs'
 
 const DROSSART = { latitude: 50.54762, longitude: 6.05757 }
 const INCIDENT_RADIUS_KM = 15
@@ -54,7 +55,7 @@ function publicSensorStatus(request, ok, detail = null) {
   }
 }
 
-async function loadFirms({ mapKey, requestedAtMs }) {
+export async function loadFirms({ mapKey, requestedAtMs }) {
   const startDate = isoDateDaysAgo(requestedAtMs, DAY_RANGE - 1)
   const requests = buildFirmsRequests({
     mapKey,
@@ -139,52 +140,33 @@ async function loadFirms({ mapKey, requestedAtMs }) {
 }
 
 export default async function handler(request, response) {
+  setNoStoreHeaders(response)
   response.setHeader('Access-Control-Allow-Origin', '*')
   response.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
-  response.setHeader(
-    'Cache-Control',
-    `public, s-maxage=${CACHE_SECONDS}, stale-while-revalidate=${CACHE_SECONDS * 4}`,
-  )
   if (request.method === 'OPTIONS') return response.status(204).end()
   if (request.method !== 'GET') return response.status(405).json({ error: 'Method not allowed' })
 
-  const requestedAtMs = Date.now()
-  const mapKey = process.env.FIRMS_MAP_KEY?.trim()
-  if (!mapKey) {
-    return response.status(200).json({
-      ok: false,
-      configured: false,
-      generatedAt: new Date(requestedAtMs).toISOString(),
-      refreshAfterSeconds: CACHE_SECONDS,
-      sensors: [],
-      detections: [],
-      sources: FIRMS_SENSORS.map((sensor) => ({
-        sensorKey: sensor.key,
-        sensorName: sensor.name,
-        ok: false,
-      })),
-      error: 'Server-side NASA FIRMS refresh is not configured; use the bundled audited snapshot.',
-    })
-  }
-
   try {
-    const payload = await loadFirms({ mapKey, requestedAtMs })
+    const dataset = await loadDataset('firms')
+    if (!dataset) throw new Error('FIRMS dataset has not been seeded')
     return response.status(200).json({
       ok: true,
-      configured: true,
+      configured: Boolean(process.env.FIRMS_MAP_KEY?.trim()),
       refreshAfterSeconds: CACHE_SECONDS,
-      ...payload,
+      ...dataset.payload,
+      databaseRefreshedAt: dataset.refreshedAt,
     })
-  } catch {
-    return response.status(200).json({
+  } catch (error) {
+    console.error('FIRMS database read failed:', error?.message || error)
+    return response.status(503).json({
       ok: false,
-      configured: true,
-      generatedAt: new Date(requestedAtMs).toISOString(),
+      configured: Boolean(process.env.FIRMS_MAP_KEY?.trim()),
+      generatedAt: new Date().toISOString(),
       refreshAfterSeconds: CACHE_SECONDS,
       sensors: [],
       detections: [],
       sources: [],
-      error: 'NASA FIRMS refresh failed; use the bundled audited snapshot.',
+      error: 'FIRMS database read failed',
     })
   }
 }

@@ -1,8 +1,7 @@
 import { neon } from '@neondatabase/serverless'
 
 export const FLIGHT_HISTORY_START = '2026-08-14T11:00:00.000Z'
-export const FLIGHT_HISTORY_RETENTION_DAYS = 30
-export const FLIGHT_HISTORY_LIMIT = 5_000
+export const FLIGHT_HISTORY_LIMIT = 50_000
 
 const schemaPromises = new WeakMap()
 const databaseQueries = new Map()
@@ -202,7 +201,6 @@ export async function persistFlightPoll({
 }, {
   databaseUrl = flightDatabaseUrl(),
   query = databaseUrl ? databaseQuery(databaseUrl) : null,
-  retentionDays = FLIGHT_HISTORY_RETENTION_DAYS,
   since = FLIGHT_HISTORY_START,
   limit = FLIGHT_HISTORY_LIMIT,
 } = {}) {
@@ -283,16 +281,6 @@ export async function persistFlightPoll({
     `, [JSON.stringify(records)])
     persistedObservations = persisted.length
   }
-
-  await query(`
-    WITH removed_observations AS (
-      DELETE FROM flight_observations
-      WHERE observed_at < now() - ($1::integer * interval '1 day')
-      RETURNING observation_key
-    )
-    DELETE FROM flight_import_runs
-    WHERE bucket_at < now() - ($1::integer * interval '1 day')
-  `, [retentionDays])
 
   const history = await loadFlightHistory({ databaseUrl, query, since, limit })
   return {

@@ -1,0 +1,31 @@
+name: Refresh production data
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-data-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Run leased Vercel refresh
+        env:
+          REFRESH_URL: https://venn-fire.vercel.app/api/refresh
+        run: |
+          response_file="$(mktemp)"
+          trap 'rm -f "$response_file"' EXIT
+          http_code="$(curl --retry 2 --retry-all-errors --max-time 90 --silent --show-error \
+            --output "$response_file" --write-out '%{http_code}' "$REFRESH_URL")"
+          cat "$response_file"
+          test "$http_code" -ge 200
+          test "$http_code" -lt 300
+          jq --exit-status '.ok == true' "$response_file" >/dev/null

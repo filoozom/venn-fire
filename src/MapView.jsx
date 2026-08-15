@@ -4,9 +4,6 @@ import 'leaflet/dist/leaflet.css'
 import {
   AIRCRAFT_PATH_MAX_GAP_MS,
   AIRCRAFT_PATH_MAX_SPEED_KT,
-  incidentCenter,
-  mapLabels,
-  protectedArea,
 } from './data'
 
 // Detections are shaded by NASA's published confidence rather than by satellite:
@@ -141,6 +138,8 @@ export default function MapView({
   importedTracks = [],
   firmsDetections = [],
   fireOutlineRings = [],
+  mapLabels = [],
+  protectedArea = [],
 }) {
   const nodeRef = useRef(null)
   const mapRef = useRef(null)
@@ -208,7 +207,7 @@ export default function MapView({
       L.marker(label.position, { icon, interactive: false }).addTo(group)
     })
 
-  }, [])
+  }, [mapLabels])
 
   useEffect(() => {
     const group = overlayRef.current
@@ -217,7 +216,7 @@ export default function MapView({
 
     // The Drossart marker was removed: it plotted the place name used in the
     // incident reports, not a fire measurement, and read as an ignition point.
-    // incidentCenter remains the measurement datum for every distance here.
+    // The database incident center remains the measurement datum for distances.
 
     if (layers.protected && protectedArea.length >= 3) {
       L.polygon(protectedArea, {
@@ -395,7 +394,7 @@ export default function MapView({
         }), { direction: 'top', offset: [0, -18] })
         .addTo(group)
     })
-  }, [frameIndex, frame, flights, effisArea, effisCarriedForward, layers, importedTracks, firmsDetections])
+  }, [frameIndex, frame, flights, effisArea, effisCarriedForward, layers, importedTracks, firmsDetections, fireOutlineRings, protectedArea])
 
   return (
     <div className="map-surface" aria-label="Interactive fire situation map">

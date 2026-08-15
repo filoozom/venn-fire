@@ -48,6 +48,16 @@ assert(brfReports.length === 1, `Expected one BRF report, got ${brfReports.lengt
 assert(brfReports[0].reportedHa === 1500 && brfReports[0].areaPrefix === '>', 'BRF did not select the current lead estimate')
 assert(brfReports[0].timestampMs === Date.parse('2026-08-15T14:30:00+02:00'), 'BRF estimate was not linked to the edit time')
 
+const truncatedDescriptionBrf = parseBrfAreaReport(`
+  <meta name="description" content="Wegen des Großbrandes im Hohen Venn könnte der föderale Notfallplan aktiviert werden." />
+  <time title="Bearbeitet am" class="edit">15.08.2026 - 15:24</time>
+  <article><p>Schätzungen gehen davon aus, dass mittlerweile mehr als 1.500 Hektar Fläche in Flammen stehen.</p></article>
+`)
+assert(
+  truncatedDescriptionBrf.length === 1 && truncatedDescriptionBrf[0].reportedHa === 1500,
+  'BRF must fall back to the qualified article estimate when its meta description is truncated',
+)
+
 const ambiguousBrf = parseBrfAreaReport(`
   <meta name="description" content="Großbrand im Hohen Venn: 2.000 Hektar werden im Artikel erwähnt." />
   <time class="edit">15.08.2026 - 15:00</time>

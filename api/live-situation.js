@@ -1,4 +1,4 @@
-import { loadAreaReports } from './live-reports.js'
+import { databaseOverview, loadDatasets, setNoStoreHeaders } from '../server/database.mjs'
 
 export const INCIDENT = { latitude: 50.54762, longitude: 6.05757 }
 export const INCIDENT_AIRCRAFT = new Map([
@@ -184,7 +184,7 @@ function haversineBetween(leftLatitude, leftLongitude, rightLatitude, rightLongi
   return 6371.0088 * 2 * Math.asin(Math.sqrt(value))
 }
 
-async function loadWeather() {
+export async function loadWeather() {
   const parameters = new URLSearchParams({
     latitude: String(INCIDENT.latitude),
     longitude: String(INCIDENT.longitude),
@@ -219,103 +219,55 @@ async function loadWeather() {
   return { rows, current }
 }
 
-async function storeAndLoadAircraftHistory(aircraftResult, generatedAt) {
-  // Dynamic so the standalone Docker importer can continue reusing this file's
-  // provider normalization without loading the database driver.
-  const history = await import('../server/flight-history.mjs')
-  if (!history.flightDatabaseUrl()) {
-    return {
-      observations: aircraftResult.status === 'fulfilled' ? aircraftResult.value.observations : [],
-      persistence: {
-        configured: false,
-        ok: false,
-        historyObservationCount: 0,
-        persistedThisPoll: 0,
-      },
-    }
-  }
-
-  try {
-    const stored = aircraftResult.status === 'fulfilled'
-      ? await history.persistFlightPoll({
-          generatedAt,
-          observations: aircraftResult.value.observations,
-          sources: aircraftResult.value.sources,
-          conflicts: aircraftResult.value.conflicts,
-        })
-      : await history.loadFlightHistory()
-    const live = aircraftResult.status === 'fulfilled' ? aircraftResult.value.observations : []
-    const observations = history.mergeFlightHistory(stored.observations, live)
-    return {
-      observations,
-      persistence: {
-        configured: true,
-        ok: true,
-        historyObservationCount: stored.observations.length,
-        persistedThisPoll: stored.persistedObservations ?? 0,
-        retentionDays: history.FLIGHT_HISTORY_RETENTION_DAYS,
-      },
-    }
-  } catch (error) {
-    console.error('Flight-history persistence failed:', error.message ?? error)
-    return {
-      observations: aircraftResult.status === 'fulfilled' ? aircraftResult.value.observations : [],
-      persistence: {
-        configured: true,
-        ok: false,
-        historyObservationCount: 0,
-        persistedThisPoll: 0,
-      },
-    }
-  }
-}
-
 export default async function handler(request, response) {
+  setNoStoreHeaders(response)
   response.setHeader('Access-Control-Allow-Origin', '*')
   response.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
-  // Revalidate synchronously at the requested cadence. Serving stale while a
-  // background refresh runs would make a five-minute browser poll display the
-  // previous poll until ten minutes later.
-  response.setHeader('Cache-Control', `public, s-maxage=${LIVE_REFRESH_SECONDS}`)
   if (request.method === 'OPTIONS') return response.status(204).end()
   if (request.method !== 'GET') return response.status(405).json({ error: 'Method not allowed' })
 
-  const requestedAtMs = Date.now()
-  const [weatherResult, aircraftResult, reportsResult] = await Promise.allSettled([
-    loadWeather(),
-    loadAircraft(requestedAtMs),
-    loadAreaReports(),
-  ])
-  const generatedAt = new Date(requestedAtMs).toISOString()
-  const aircraftHistory = await storeAndLoadAircraftHistory(aircraftResult, generatedAt)
-  const liveAircraft = aircraftResult.status === 'fulfilled' ? aircraftResult.value : null
-
-  return response.status(200).json({
-    schemaVersion: 2,
-    generatedAt,
-    refreshAfterSeconds: LIVE_REFRESH_SECONDS,
-    weather: weatherResult.status === 'fulfilled'
-      ? { ok: true, ...weatherResult.value }
-      : { ok: false, rows: [], current: null },
-    aircraft: {
-      ok: Boolean(liveAircraft),
-      observations: aircraftHistory.observations,
-      conflicts: liveAircraft?.conflicts ?? [],
-      sources: liveAircraft?.sources ?? [],
-      persistence: aircraftHistory.persistence,
-    },
-    reports: reportsResult.status === 'fulfilled'
-      ? reportsResult.value
-      : { ok: false, complete: false, areaReports: [], sources: [] },
-    interpretation: [
-      'Reported hectares are exact timestamped statements parsed only from the whitelisted Governor of Liège and BRF incident pages; they remain separate from satellite-derived estimates.',
-      'Governor figures are official situation estimates. BRF figures are local reporting and retain that distinct label.',
-      'Between timestamped reports, the viewer carries the last report forward and does not interpolate fire growth.',
-      'Aircraft coordinates are exact current receiver observations from one selected provider; provider positions are never averaged.',
-      'Only known incident aircraft within 10 km of Drossart are returned, excluding the known Aachen/Walheim MLAT artifact.',
-      'When Postgres is configured, exact observations are deduplicated into 30-day shared history before this response is cached.',
-      'Absence from this response is not proof that an aircraft did not fly.',
-      'Open-Meteo values are model output, not readings from an incident weather station.',
-    ],
-  })
+  try {
+    const [datasets, database] = await Promise.all([loadDatasets(), databaseOverview()])
+    const weather = datasets['weather-open-meteo']?.payload
+    const aircraft = datasets.aircraft?.payload
+    const reports = datasets.reports?.payload
+    return response.status(200).json({
+      schemaVersion: 3,
+      generatedAt: new Date().toISOString(),
+      refreshAfterSeconds: LIVE_REFRESH_SECONDS,
+      weather: weather
+        ? { ok: true, rows: weather.rows || [], current: weather.current || null }
+        : { ok: false, rows: [], current: null },
+      aircraft: {
+        ok: Boolean(aircraft),
+        observations: aircraft?.observations || [],
+        latestObservations: aircraft?.latestObservations || [],
+        conflicts: aircraft?.conflicts || [],
+        sources: aircraft?.sources || [],
+        persistence: {
+          configured: true,
+          ok: Boolean(aircraft),
+          historyObservationCount: aircraft?.observations?.length || 0,
+          retentionPolicy: aircraft?.retentionPolicy || 'incident lifetime',
+        },
+      },
+      reports: reports || { ok: false, complete: false, areaReports: [], sources: [] },
+      database,
+      interpretation: [
+        'This endpoint reads Postgres only; provider polling is performed by the leased five-minute refresh function.',
+        'Responses are not stored in the browser or Vercel CDN cache.',
+      ],
+    })
+  } catch (error) {
+    console.error('Live database read failed:', error?.message || error)
+    return response.status(503).json({
+      schemaVersion: 3,
+      generatedAt: new Date().toISOString(),
+      refreshAfterSeconds: LIVE_REFRESH_SECONDS,
+      weather: { ok: false, rows: [], current: null },
+      aircraft: { ok: false, observations: [], conflicts: [], sources: [], persistence: { configured: true, ok: false } },
+      reports: { ok: false, complete: false, areaReports: [], sources: [] },
+      error: 'Database read failed',
+    })
+  }
 }

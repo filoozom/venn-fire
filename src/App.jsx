@@ -42,22 +42,10 @@ import {
 } from 'lucide-react'
 import MapView from './MapView'
 import {
-  areaReports,
-  buildEvents,
-  buildFireFrames,
-  bundledWeatherRows,
-  dwdWindStations,
-  events,
   effisAreaForTimestamp,
   effisProductIsCarriedForward,
-  fireFrames,
   FIVE_MINUTES_MS,
-  flights,
-  incidentAircraftMeta,
-  initialLayers,
-  mergeAreaReports,
-  sourceLinks,
-  TIMELINE_START_MS,
+  runtimeDataFromResponse,
 } from './data'
 import {
   footprintOutlineRings,
@@ -99,71 +87,20 @@ const FIRMS_LAYER_DEFAULTS = {
 // than a mosaic of pixel rectangles.
 const BEST_ESTIMATE_RULE = '2+ satellites agree and the cell has a high-confidence detection'
 
-const DWD_WIND_LAYER_KEYS = Object.fromEntries(
-  dwdWindStations.map((station) => [station.id, `dwdWind:${station.id}`]),
-)
-const DWD_WIND_LAYER_DEFAULTS = Object.fromEntries(
-  dwdWindStations.map((station) => [DWD_WIND_LAYER_KEYS[station.id], true]),
-)
-const INITIAL_LAYER_STATE = {
-  ...initialLayers,
-  ...FIRMS_LAYER_DEFAULTS,
-  ...DWD_WIND_LAYER_DEFAULTS,
-  [FIRE_OUTLINE_KEY]: true,
-}
-const FIRMS_REFRESH_MS = 15 * 60 * 1000
-const LIVE_SITUATION_REFRESH_MS = 5 * 60 * 1000
-const EMPTY_FIRMS_DATA = {
-  schemaVersion: 1,
-  generatedAt: null,
-  locationReference: {
-    name: 'Drossart locality',
-    latitude: 50.54762,
-    longitude: 6.05757,
-  },
-  sensors: [],
-  detections: [],
+function dwdWindLayerKey(stationId) {
+  return `dwdWind:${stationId}`
 }
 
-function firmsDetectionKey(detection) {
-  return [
-    detection.sensorKey,
-    detection.acquiredAt,
-    Number(detection.latitude).toFixed(6),
-    Number(detection.longitude).toFixed(6),
-  ].join('|')
-}
-
-// Live responses cover a rolling window. Merge them into the audited snapshot
-// rather than replacing history, and prefer live fields only for exact duplicate
-// observations.
-function mergeFirmsData(bundled, live) {
-  const detections = new Map(
-    bundled.detections.map((detection) => [firmsDetectionKey(detection), detection]),
-  )
-  live.detections.forEach((detection) => detections.set(firmsDetectionKey(detection), detection))
-
-  const sensorSummaries = new Map(
-    bundled.sensors.map((summary) => [summary.sensorKey, summary]),
-  )
-  live.sensors.forEach((summary) => sensorSummaries.set(summary.sensorKey, summary))
-
+function initialLayerState(runtime) {
   return {
-    ...bundled,
-    ...live,
-    locationReference: live.locationReference || bundled.locationReference,
-    sensors: FIRMS_SENSORS.flatMap((sensor) => {
-      const summary = sensorSummaries.get(sensor.key)
-      return summary ? [summary] : []
-    }),
-    detections: [...detections.values()].sort((left, right) => (
-      Date.parse(left.acquiredAt) - Date.parse(right.acquiredAt)
-      || left.sensorKey.localeCompare(right.sensorKey)
-    )),
+    ...runtime.initialLayers,
+    ...FIRMS_LAYER_DEFAULTS,
+    ...Object.fromEntries(runtime.dwdWindStations.map((station) => [dwdWindLayerKey(station.id), true])),
+    [FIRE_OUTLINE_KEY]: true,
   }
 }
 
-function layerOptionsFor(effisArea, isCarriedForward, firmsSummaries = [], frame = null) {
+function layerOptionsFor(effisArea, isCarriedForward, firmsSummaries = [], frame = null, dwdWindStations = []) {
   return [
   { key: 'perimeter', label: 'EFFIS daily geometry', detail: effisArea ? `${effisArea.productDate}${isCarriedForward ? ' carried forward' : ''} · ${Math.round(effisArea.areaHa).toLocaleString('en-GB')} ha polygon` : 'No product available at selected time', icon: Layers3, color: '#e96838' },
   ...FIRMS_SENSORS.map((sensor) => {
@@ -174,7 +111,7 @@ function layerOptionsFor(effisArea, isCarriedForward, firmsSummaries = [], frame
       label: sensor.name,
       detail: summary
         ? `${summary.detectionCount} detections · ${pixel ? `${Math.round(pixel)} ha mean pixel` : `${sensor.nominalResolutionM} m nominal`}${AREA_CAPABLE_SENSORS.has(sensor.key) ? '' : ' · no area derived'}`
-        : 'No detections in the bundled snapshot',
+        : 'No detections in the database',
       icon: Satellite,
       color: sensor.color,
     }
@@ -185,7 +122,7 @@ function layerOptionsFor(effisArea, isCarriedForward, firmsSummaries = [], frame
   ...dwdWindStations.map((station) => {
     const reading = frame?.dwdWinds?.find((item) => item.id === station.id)
     return {
-      key: DWD_WIND_LAYER_KEYS[station.id],
+      key: dwdWindLayerKey(station.id),
       label: `${station.name} wind`,
       detail: reading ? `DWD 10 min · ${station.distanceKm.toFixed(1)} km away · ${reading.ageMinutes} min old · preliminary` : 'No DWD reading within 90 min of selected time',
       icon: Wind,
@@ -401,7 +338,7 @@ function SourceMark({ tone }) {
   return <span className="source-monogram source-monogram--adsb"><Airplay size={17} /></span>
 }
 
-function DataModal({ open, onClose, onImportTracks, importedCount, firmsState, firmsDetectionCount }) {
+function DataModal({ open, onClose, onImportTracks, importedCount, firmsState, firmsDetectionCount, sourceLinks }) {
   const [tab, setTab] = useState('connections')
   const [status, setStatus] = useState('idle')
   const [message, setMessage] = useState('')
@@ -487,9 +424,9 @@ function DataModal({ open, onClose, onImportTracks, importedCount, firmsState, f
               <div className="connection-card connection-card--primary">
                 <div className="connection-icon"><Satellite size={20} /></div>
                 <div className="connection-copy">
-                  <div className="connection-title"><strong>NASA FIRMS</strong><span className="status-pill status-pill--connected"><Check size={11} /> {firmsState.status === 'live' ? 'SERVER REFRESH' : 'AUDITED SNAPSHOT'}</span></div>
-                  <p>{firmsDetectionCount} exact thermal-anomaly detections from Suomi-NPP, NOAA-20, NOAA-21 and MODIS are bundled. {firmsState.status === 'live' ? 'A server-side refresh has been merged into that historical record.' : 'The audited snapshot remains available without a viewer key.'}</p>
-                  <span className="connection-meta">15 km incident filter · acquisition times preserved · no browser-stored API key</span>
+                  <div className="connection-title"><strong>NASA FIRMS</strong><span className="status-pill status-pill--connected"><Check size={11} /> DATABASE REFRESH</span></div>
+                  <p>{firmsDetectionCount} exact thermal-anomaly detections from Suomi-NPP, NOAA-20, NOAA-21 and MODIS are retained in Postgres. The Vercel refresh function merges each new overpass into that history.</p>
+                  <span className="connection-meta">Checked every 5 min · provider lease 15 min · no browser-stored API key</span>
                 </div>
               </div>
 
@@ -550,7 +487,7 @@ function DataModal({ open, onClose, onImportTracks, importedCount, firmsState, f
                   <ExternalLink size={15} />
                 </a>
               ))}
-              <div className="source-footnote"><CircleHelp size={15} /><p>Historical source responses remain timestamped and auditable. FIRMS uses a bundled reviewed snapshot and an optional server-side refresh; no key is sent to or stored by the viewer.</p></div>
+              <div className="source-footnote"><CircleHelp size={15} /><p>Current datasets, historical versions and migrated source artifacts are retained in Postgres. The browser reads the database only; provider credentials never reach the viewer.</p></div>
             </div>
           )}
         </div>
@@ -559,12 +496,12 @@ function DataModal({ open, onClose, onImportTracks, importedCount, firmsState, f
   )
 }
 
-function App() {
-  const [frames, setFrames] = useState(fireFrames)
-  const [displayEvents, setDisplayEvents] = useState(events)
-  const framesLengthRef = useRef(fireFrames.length)
-  const [frameIndex, setFrameIndex] = useState(fireFrames.length - 1)
-  const [layers, setLayers] = useState(INITIAL_LAYER_STATE)
+function FireViewer({ runtime, databaseError }) {
+  const frames = runtime.frames
+  const displayEvents = runtime.events
+  const framesLengthRef = useRef(frames.length)
+  const [frameIndex, setFrameIndex] = useState(frames.length - 1)
+  const [layers, setLayers] = useState(() => initialLayerState(runtime))
   const [baseMode, setBaseMode] = useState('terrain')
   const [playing, setPlaying] = useState(false)
   const [playbackRate, setPlaybackRate] = useState(1)
@@ -573,31 +510,36 @@ function App() {
   const [mapActions, setMapActions] = useState(null)
   const [mobileLayersOpen, setMobileLayersOpen] = useState(false)
   const [importedTracks, setImportedTracks] = useState([])
-  const [firmsData, setFirmsData] = useState(EMPTY_FIRMS_DATA)
-  const [firmsState, setFirmsState] = useState({ status: 'checking', generatedAt: null })
-  const [liveAircraftObservations, setLiveAircraftObservations] = useState([])
-  const liveAreaReportsRef = useRef([])
-  const [syncState, setSyncState] = useState({
-    status: 'loading',
-    generatedAt: null,
-    weatherOk: false,
-    aircraftOk: false,
-    reportsOk: false,
-    reportsComplete: false,
-  })
+  const firmsData = runtime.firms
+  const firmsState = {
+    status: databaseError ? 'stale' : 'live',
+    configured: true,
+    generatedAt: firmsData.generatedAt,
+  }
+  const liveAircraftObservations = runtime.aircraft.observations ?? []
+  const sourceRuns = runtime.database?.sources ?? []
+  const hasFailedSource = sourceRuns.some((source) => source.status === 'failed')
+  const syncState = {
+    status: databaseError ? 'stale' : hasFailedSource ? 'partial' : 'live',
+    generatedAt: runtime.generatedAt,
+    weatherOk: true,
+    aircraftOk: sourceRuns.find((source) => source.sourceKey === 'aircraft')?.status === 'ok',
+    reportsOk: Boolean(runtime.reports.ok),
+    reportsComplete: Boolean(runtime.reports.complete),
+  }
   const frame = frames[Math.min(frameIndex, frames.length - 1)]
-  const currentEffisArea = effisAreaForTimestamp(frame.timestampMs)
+  const currentEffisArea = effisAreaForTimestamp(runtime.effisProducts, frame.timestampMs)
   // "Carried forward" means the product predates the day being viewed, not that
   // it happens to be the 14 August one. On 14 August that product is current.
   const effisCarriedForward = effisProductIsCarriedForward(currentEffisArea, frame.timestampMs)
     && frame.timestampMs >= Date.parse('2026-08-15T00:00:00+02:00')
   const layerOptions = useMemo(
-    () => layerOptionsFor(currentEffisArea, effisCarriedForward, firmsData.sensors, frame),
-    [currentEffisArea, effisCarriedForward, firmsData.sensors, frame],
+    () => layerOptionsFor(currentEffisArea, effisCarriedForward, firmsData.sensors, frame, runtime.dwdWindStations),
+    [currentEffisArea, effisCarriedForward, firmsData.sensors, frame, runtime.dwdWindStations],
   )
   const reportedAreaText = frame.reportedAreaText
 
-  const displayFlights = useMemo(() => flights.map((flight) => {
+  const displayFlights = useMemo(() => runtime.flights.map((flight) => {
     const live = liveAircraftObservations
       .filter((observation) => observation.icao24 === flight.icao24)
       .map((observation) => ({
@@ -619,131 +561,18 @@ function App() {
           || observation.position[1] !== previous.position[1]
       })
     return { ...flight, observations }
-  }), [liveAircraftObservations])
+  }), [liveAircraftObservations, runtime.flights])
 
   useEffect(() => {
-    let cancelled = false
-
-    async function refreshLiveSituation() {
-      try {
-        const response = await fetch('/api/live-situation', { headers: { Accept: 'application/json' } })
-        if (!response.ok) throw new Error(`Live endpoint returned ${response.status}`)
-        const snapshot = await response.json()
-        if (cancelled) return
-
-        const weatherOk = Boolean(snapshot.weather?.ok)
-        const aircraftOk = Boolean(snapshot.aircraft?.ok)
-        const reportsOk = Boolean(snapshot.reports?.ok)
-        const reportsComplete = Boolean(snapshot.reports?.complete)
-
-        if (reportsOk && Array.isArray(snapshot.reports.areaReports)) {
-          liveAreaReportsRef.current = mergeAreaReports(
-            liveAreaReportsRef.current,
-            snapshot.reports.areaReports,
-          )
-          setDisplayEvents(buildEvents(mergeAreaReports(areaReports, liveAreaReportsRef.current)))
-        }
-
-        if (weatherOk || reportsOk) {
-          const endMs = Date.parse(snapshot.generatedAt)
-          const nextFrames = buildFireFrames({
-            endMs,
-            weatherRows: weatherOk && snapshot.weather.rows?.length
-              ? [...bundledWeatherRows, ...snapshot.weather.rows]
-              : bundledWeatherRows,
-            reportRows: mergeAreaReports(areaReports, liveAreaReportsRef.current),
-          })
-          const previousLength = framesLengthRef.current
-          setFrameIndex((currentIndex) => (
-            currentIndex >= previousLength - 2
-              ? nextFrames.length - 1
-              : Math.min(currentIndex, nextFrames.length - 1)
-          ))
-          framesLengthRef.current = nextFrames.length
-          setFrames(nextFrames)
-        }
-
-        // Stored history remains useful when both live providers are temporarily
-        // unavailable, even though aircraftOk correctly reports the live outage.
-        if (snapshot.aircraft?.observations?.length) {
-          setLiveAircraftObservations((current) => {
-            const merged = [...current, ...snapshot.aircraft.observations]
-            const seen = new Set()
-            return merged.filter((observation) => {
-              const key = `${observation.icao24}|${observation.observedAt}|${observation.latitude}|${observation.longitude}`
-              if (seen.has(key)) return false
-              seen.add(key)
-              return true
-            }).slice(-500)
-          })
-        }
-
-        setSyncState({
-          status: weatherOk && aircraftOk && reportsComplete
-            ? 'live'
-            : weatherOk || aircraftOk || reportsOk ? 'partial' : 'bundled',
-          generatedAt: snapshot.generatedAt,
-          weatherOk,
-          aircraftOk,
-          reportsOk,
-          reportsComplete,
-        })
-      } catch {
-        if (!cancelled) setSyncState((current) => ({ ...current, status: 'bundled' }))
-      }
-    }
-
-    refreshLiveSituation()
-    const timer = window.setInterval(refreshLiveSituation, LIVE_SITUATION_REFRESH_MS)
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-    }
-  }, [])
-
-  useEffect(() => {
-    let cancelled = false
-    let bundledSnapshot = null
-
-    async function refreshFirms() {
-      try {
-        if (!bundledSnapshot) {
-          const module = await import('./firmsDetectionsSnapshot.json')
-          bundledSnapshot = module.default
-          if (!cancelled) {
-            setFirmsData(bundledSnapshot)
-            setFirmsState({ status: 'bundled', configured: false, generatedAt: bundledSnapshot.generatedAt })
-          }
-        }
-        const response = await fetch('/api/firms-situation', { headers: { Accept: 'application/json' } })
-        if (!response.ok) throw new Error(`FIRMS endpoint returned ${response.status}`)
-        const payload = await response.json()
-        if (cancelled) return
-        if (!payload.ok || !Array.isArray(payload.detections) || !Array.isArray(payload.sensors)) {
-          setFirmsState({
-            status: 'bundled',
-            configured: Boolean(payload.configured),
-            generatedAt: bundledSnapshot.generatedAt,
-          })
-          return
-        }
-        setFirmsData(mergeFirmsData(bundledSnapshot, payload))
-        setFirmsState({ status: 'live', configured: true, generatedAt: payload.generatedAt })
-      } catch {
-        if (!cancelled && bundledSnapshot) {
-          setFirmsData(bundledSnapshot)
-          setFirmsState({ status: 'bundled', configured: false, generatedAt: bundledSnapshot.generatedAt })
-        }
-      }
-    }
-
-    refreshFirms()
-    const timer = window.setInterval(refreshFirms, FIRMS_REFRESH_MS)
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-    }
-  }, [])
+    const previousLength = framesLengthRef.current
+    setFrameIndex((currentIndex) => (
+      currentIndex >= previousLength - 2
+        ? frames.length - 1
+        : Math.min(currentIndex, frames.length - 1)
+    ))
+    framesLengthRef.current = frames.length
+    setLayers((current) => ({ ...initialLayerState(runtime), ...current }))
+  }, [frames.length, runtime])
 
   useEffect(() => {
     if (!playing) return undefined
@@ -817,7 +646,7 @@ function App() {
     [displayFlights, frame],
   )
 
-  // Bundled and live FIRMS detections, placed on the five-minute timeline by their exact
+  // Database-retained FIRMS detections, placed on the five-minute timeline by their exact
   // acquisition time. A detection appears from its overpass onward; it is never
   // back-dated and never interpolated between overpasses.
   const firmsDetections = useMemo(() => corroborateDetections(firmsData.detections).map((detection) => {
@@ -827,9 +656,9 @@ function App() {
       sensorName: sensor?.name ?? detection.sensorKey,
       sensorColor: sensor?.color ?? '#efaa3c',
       position: [detection.latitude, detection.longitude],
-      frame: Math.max(0, Math.ceil((Date.parse(detection.acquiredAt) - TIMELINE_START_MS) / FIVE_MINUTES_MS)),
+      frame: Math.max(0, Math.ceil((Date.parse(detection.acquiredAt) - runtime.timelineStartMs) / FIVE_MINUTES_MS)),
     }
-  }), [firmsData.detections])
+  }), [firmsData.detections, runtime.timelineStartMs])
 
   const activeConfidenceLevels = useMemo(
     () => FIRMS_CONFIDENCE_LEVELS.filter((entry) => layers[entry.key]).map((entry) => entry.level),
@@ -936,7 +765,7 @@ function App() {
         </div>
 
         <div className="header-actions">
-          <div className="updated-state"><span className={`live-pulse ${syncState.status === 'live' ? '' : 'is-bundled'}`} /><div><small>{syncState.status === 'live' ? 'LIVE SOURCES REFRESHED' : syncState.status === 'partial' ? 'PARTIAL LIVE REFRESH' : syncState.status === 'loading' ? 'CHECKING LIVE SOURCES' : 'BUNDLED SNAPSHOT'}</small><strong>{frames.at(-1).dayLabel} · {frames.at(-1).shortTime} CEST</strong></div></div>
+          <div className="updated-state"><span className={`live-pulse ${syncState.status === 'live' ? '' : 'is-bundled'}`} /><div><small>{syncState.status === 'live' ? 'DATABASE SOURCES REFRESHED' : syncState.status === 'partial' ? 'PARTIAL SOURCE REFRESH' : 'DATABASE VIEW STALE'}</small><strong>{frames.at(-1).dayLabel} · {frames.at(-1).shortTime} CEST</strong></div></div>
           <button className="data-button" type="button" onClick={() => setDataOpen(true)}><Database size={15} /><span>Data & sources</span></button>
         </div>
       </header>
@@ -983,7 +812,7 @@ function App() {
           </div>
 
           <div className="sidebar-section layers-section">
-            <div className="section-heading"><span>MAP LAYERS</span><button type="button" onClick={() => setLayers(INITIAL_LAYER_STATE)} aria-label="Reset map layers"><RotateCcw size={13} /></button></div>
+            <div className="section-heading"><span>MAP LAYERS</span><button type="button" onClick={() => setLayers(initialLayerState(runtime))} aria-label="Reset map layers"><RotateCcw size={13} /></button></div>
             <div className="layer-list">
               {layerOptions.map((item) => (
                 <LayerToggle
@@ -1022,7 +851,7 @@ function App() {
           <div className="sidebar-section source-summary">
             <div className="section-heading"><span>SOURCE HEALTH</span><button type="button" onClick={() => setDataOpen(true)}>Manage</button></div>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
-              <SourceMark tone="nasa" /><span><strong>FIRMS</strong><small>{`${firmsData.detections.length} exact detections · ${visibleFirmsDetections.length} shown · ${firmsState.status === 'live' ? 'server refreshed' : 'audited snapshot'}`}</small></span><em className={`health-dot ${firmsState.status === 'live' ? '' : 'health-dot--amber'}`} />
+              <SourceMark tone="nasa" /><span><strong>FIRMS</strong><small>{`${firmsData.detections.length} exact detections · ${visibleFirmsDetections.length} shown · ${firmsState.status === 'live' ? 'database refreshed' : 'database view stale'}`}</small></span><em className={`health-dot ${firmsState.status === 'live' ? '' : 'health-dot--amber'}`} />
             </button>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
               <SourceMark tone="effis" /><span><strong>EFFIS daily geometry</strong><small>{currentEffisArea ? `${currentEffisArea.productDate}${effisCarriedForward ? ' carried forward' : ''} · envelope containing fire activity, not burned area` : 'not yet available at selected time'}</small></span><em className="health-dot health-dot--amber" />
@@ -1056,6 +885,8 @@ function App() {
             importedTracks={importedTracks}
             firmsDetections={visibleFirmsDetections}
             fireOutlineRings={layers[FIRE_OUTLINE_KEY] ? fireOutlineRings : []}
+            mapLabels={runtime.mapLabels}
+            protectedArea={runtime.protectedArea}
           />
 
           <div className="map-topbar">
@@ -1210,7 +1041,7 @@ function App() {
               </div>
 
               <div className="coverage-note"><Radio size={15} /><p><strong>Dots are observations; dashed lines are not flight paths.</strong><span>Airplanes.live supplied 30-second MLAT replay samples for G10 and G17 on 15 August. Straight connectors appear only across gaps ≤2 minutes and plausible speed. G12 remains photo-only near this incident.</span></p></div>
-              <div className="coverage-note"><Info size={15} /><p><strong>Wide-area checks separate this incident from nearby activity.</strong><span>{incidentAircraftMeta.negativeFindings[0]} {incidentAircraftMeta.negativeFindings[1]} The known Aachen/Walheim MLAT artifact is excluded.</span></p></div>
+              <div className="coverage-note"><Info size={15} /><p><strong>Wide-area checks separate this incident from nearby activity.</strong><span>{runtime.incidentAircraftMeta.negativeFindings?.[0]} {runtime.incidentAircraftMeta.negativeFindings?.[1]} The known Aachen/Walheim MLAT artifact is excluded.</span></p></div>
             </div>
           ) : null}
         </aside>
@@ -1223,9 +1054,63 @@ function App() {
         importedCount={importedTracks.length}
         firmsState={firmsState}
         firmsDetectionCount={firmsData.detections.length}
+        sourceLinks={runtime.sourceLinks}
       />
     </div>
   )
+}
+
+function App() {
+  const [runtime, setRuntime] = useState(null)
+  const [databaseError, setDatabaseError] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    let pending = false
+
+    async function refreshDatabaseView() {
+      if (pending) return
+      pending = true
+      try {
+        const response = await fetch('/api/data', {
+          cache: 'no-store',
+          headers: { Accept: 'application/json' },
+        })
+        if (!response.ok) throw new Error(`Database endpoint returned ${response.status}`)
+        const nextRuntime = runtimeDataFromResponse(await response.json())
+        if (!cancelled) {
+          setRuntime(nextRuntime)
+          setDatabaseError(null)
+        }
+      } catch (error) {
+        if (!cancelled) setDatabaseError(error)
+      } finally {
+        pending = false
+      }
+    }
+
+    refreshDatabaseView()
+    const timer = window.setInterval(refreshDatabaseView, FIVE_MINUTES_MS)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [])
+
+  if (!runtime) {
+    return (
+      <main className="database-startup" aria-live="polite">
+        <span className="brand-mark"><Flame size={19} fill="currentColor" /></span>
+        <h1>{databaseError ? 'Data temporarily unavailable' : 'Loading incident database'}</h1>
+        <p>{databaseError
+          ? 'The viewer has no bundled fallback. Reload when the database connection is restored.'
+          : 'Fetching the current five-minute timeline from Postgres…'}</p>
+        {databaseError ? <button type="button" onClick={() => window.location.reload()}>Retry</button> : null}
+      </main>
+    )
+  }
+
+  return <FireViewer runtime={runtime} databaseError={databaseError} />
 }
 
 export default App
