@@ -3,11 +3,11 @@
   "functions": {
     "api/refresh.js": {
       "maxDuration": 60,
-      "regions": ["bru1"]
+      "regions": ["fra1"]
     },
     "api/refresh-queue.js": {
       "maxDuration": 60,
-      "regions": ["bru1"],
+      "regions": ["fra1"],
       "experimentalTriggers": [
         {
           "type": "queue/v2beta",
