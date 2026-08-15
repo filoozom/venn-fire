@@ -6,7 +6,7 @@ on:
       - main
   schedule:
     # GitHub documents heavier queueing at the start of each hour.
-    - cron: '2-59/5 * * * *'
+    - cron: '2/5 * * * *'
   workflow_dispatch:
 
 permissions:
