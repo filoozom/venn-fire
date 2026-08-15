@@ -364,7 +364,7 @@ function DataModal({
   const [message, setMessage] = useState('')
   const inputRef = useRef(null)
   const latestQuicklook = (sentinel2.scenes ?? []).filter((scene) => scene.quicklook?.stored).at(-1)
-  const sourceRunByKey = new Map(sourceRuns.map((run) => [run.sourceKey, run]))
+  const sourceRunByKey = new globalThis.Map(sourceRuns.map((run) => [run.sourceKey, run]))
 
   useEffect(() => {
     if (!open) return undefined
@@ -385,7 +385,7 @@ function DataModal({
         const lonIndex = headers.findIndex((value) => ['lon', 'lng', 'longitude'].includes(value))
         const callIndex = headers.findIndex((value) => ['callsign', 'call_sign', 'flight', 'registration'].includes(value))
         if (latIndex < 0 || lonIndex < 0) throw new Error('CSV needs latitude and longitude columns')
-        const groups = new Map()
+        const groups = new globalThis.Map()
         lines.forEach((line) => {
           const cells = line.split(',').map((item) => item.trim())
           const callSign = callIndex >= 0 ? cells[callIndex] || 'IMPORTED' : 'IMPORTED'
