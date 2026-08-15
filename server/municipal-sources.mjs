@@ -67,9 +67,8 @@ export const MUNICIPAL_PROVIDERS = [
     id: 'butgenbach',
     municipality: 'Bütgenbach',
     name: 'Municipality of Bütgenbach',
-    format: 'wordpress',
-    endpoint: 'https://www.butgenbach.be/?rest_route=/wp/v2/search&per_page=100&subtype=post',
-    detailEndpoint: 'https://www.butgenbach.be/?p=',
+    format: 'wordpress-sitemap',
+    endpoint: 'https://butgenbach.be/wp-sitemap-posts-post-1.xml',
     publicUrl: 'https://butgenbach.be/blog/',
     trustedHost: 'butgenbach.be',
   },
@@ -158,6 +157,28 @@ export function parseMunicipalRdfFeed(xml) {
       sourceType: xmlTag(block, 'dc:type') || 'News Item',
     }
   }).filter((item) => item.id && item.title && item.url)
+}
+
+export function parseButgenbachSitemap(xml) {
+  return [...String(xml ?? '').matchAll(/<url\b[^>]*>([\s\S]*?)<\/url>/giu)]
+    .map((match) => {
+      const url = xmlTag(match[1], 'loc')
+      if (!url) return null
+      let title = url
+      try {
+        const slug = new URL(url).pathname.split('/').filter(Boolean).at(-1) || url
+        title = decodeURIComponent(slug).replace(/[-_]+/g, ' ')
+      } catch {
+        // Keep the URL as a searchable fallback title.
+      }
+      return {
+        id: url,
+        url,
+        title,
+        updatedAt: validTimestamp(xmlTag(match[1], 'lastmod')),
+      }
+    })
+    .filter(Boolean)
 }
 
 function validTimestamp(value) {
@@ -351,16 +372,21 @@ export function normalizeWaimesNotice(item, provider, retrievedAt) {
 
 export function normalizeButgenbachNotice(searchItem, html, provider, retrievedAt) {
   const bodyText = extractButgenbachBody(html)
+  const title = (
+    htmlMetaContent(html, 'og:title')
+    || htmlToText(/<h1\b[^>]*>([\s\S]*?)<\/h1>/iu.exec(html)?.[1] ?? '')
+    || htmlToText(searchItem?.title || '')
+  ).replace(/\s+[-–—]\s+Gemeinde Bütgenbach\s*$/iu, '')
   const notice = {
     id: `${provider.id}:${searchItem?.id}`,
     municipality: provider.municipality,
-    title: htmlToText(searchItem?.title || ''),
-    summary: summarize(bodyText, searchItem?.title),
+    title,
+    summary: summarize(bodyText, title),
     bodyText,
     url: searchItem?.url,
-    publishedAt: jsonLdDate(html, 'datePublished'),
+    publishedAt: jsonLdDate(html, 'datePublished') || searchItem?.publishedAt || searchItem?.updatedAt,
     effectiveAt: germanNoticeDate(bodyText),
-    updatedAt: jsonLdDate(html, 'dateModified') || jsonLdDate(html, 'datePublished'),
+    updatedAt: jsonLdDate(html, 'dateModified') || searchItem?.updatedAt || jsonLdDate(html, 'datePublished'),
     firstRetrievedAt: retrievedAt,
     lastRetrievedAt: retrievedAt,
     publisher: provider.name,
@@ -567,19 +593,20 @@ async function refreshHlz(provider, retrievedAt, query) {
 
 function butgenbachCandidate(item) {
   const text = normalizeSearchText(`${item?.title || ''} ${item?.url || ''}`)
-  return /fagnes|hohen venn|kuechelscheid|kuchelscheid|leykaul|wichtige information/iu.test(text)
+  const updatedAtMs = Date.parse(item?.updatedAt)
+  return (!Number.isFinite(updatedAtMs) || updatedAtMs >= INCIDENT_START_MS)
+    && /incend|feu|brand|feuer|rauch|evaku|fagnes|hohen venn|kuechelscheid|kuchelscheid|leykaul|wichtige information/iu.test(text)
 }
 
 async function refreshButgenbach(provider, retrievedAt, query, previousProvider = null) {
-  const response = await fetchBody(provider.endpoint, { accept: 'application/json' })
+  const response = await fetchBody(provider.endpoint, { accept: 'application/xml, text/xml' })
   await archiveBody({ providerId: provider.id, url: provider.endpoint, ...response, retrievedAt }, query)
-  const items = JSON.parse(response.body)
-  if (!Array.isArray(items)) throw new Error('Bütgenbach search returned an invalid payload')
+  const items = parseButgenbachSitemap(response.body)
+  if (!items.length) throw new Error('Bütgenbach sitemap returned no post URLs')
   const candidatesById = new Map()
   for (const item of items.filter(butgenbachCandidate)) candidatesById.set(item.id, item)
   const latestItems = [...items]
-    .filter((candidate) => Number.isFinite(Number(candidate?.id)))
-    .sort((left, right) => Number(right.id) - Number(left.id))
+    .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
     .slice(0, 8)
   const previouslySeen = new Set(previousProvider?.latestItemIds || [])
   for (const item of latestItems) {
@@ -587,8 +614,8 @@ async function refreshButgenbach(provider, retrievedAt, query, previousProvider 
   }
   const candidates = [...candidatesById.values()].slice(0, 15)
   const details = await Promise.allSettled(candidates.map(async (item) => {
-    if (!Number.isFinite(Number(item?.id))) throw new Error('Bütgenbach returned an invalid post id')
-    const url = `${provider.detailEndpoint}${Number(item.id)}`
+    const url = trustedArticleUrl(item?.url, provider)
+    if (!url) throw new Error('Bütgenbach sitemap returned an untrusted article URL')
     const article = await fetchBody(url, { accept: 'text/html' })
     await archiveBody({ providerId: provider.id, url, ...article, retrievedAt }, query)
     return normalizeButgenbachNotice(item, article.body, provider, retrievedAt)

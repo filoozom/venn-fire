@@ -18,6 +18,7 @@ import {
   normalizeRdfNotice,
   normalizeWaimesNotice,
   normalizeWordpressApiNotice,
+  parseButgenbachSitemap,
   parseMunicipalRdfFeed,
   parseHlzNewsList,
 } from '../server/municipal-sources.mjs'
@@ -290,6 +291,16 @@ const policeNotice = normalizeWordpressApiNotice({
 assert.equal(policeNotice.publisherKind, 'official-police')
 
 const butgenbachProvider = MUNICIPAL_PROVIDERS.find((item) => item.id === 'butgenbach')
+const [butgenbachSitemapItem] = parseButgenbachSitemap(`
+  <urlset>
+    <url>
+      <loc>https://butgenbach.be/wichtige-informationen-kuechelscheid-leykaul/</loc>
+      <lastmod>2026-08-15T14:50:50+00:00</lastmod>
+    </url>
+  </urlset>
+`)
+assert.equal(butgenbachSitemapItem.id, butgenbachSitemapItem.url)
+assert.equal(butgenbachSitemapItem.updatedAt, '2026-08-15T14:50:50.000Z')
 const butgenbachNotice = normalizeButgenbachNotice({
   id: 33585,
   title: 'WICHTIGE INFORMATIONEN AN DIE EINWOHNER SOWIE BESUCHER VON KÜCHELSCHEID UND LEYKAUL',
