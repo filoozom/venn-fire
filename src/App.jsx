@@ -43,24 +43,42 @@ import {
 import MapView from './MapView'
 import {
   events,
+  effisBurnedArea,
   fireFrames,
   flights,
-  hotspots,
   initialLayers,
   sourceLinks,
 } from './data'
 
 const layerOptions = [
-  { key: 'perimeter', label: 'Fire progression', detail: 'Reported / reconstructed', icon: Flame, color: '#ed6a3e' },
-  { key: 'hotspots', label: 'NASA hotspots', detail: 'VIIRS thermal anomalies', icon: Satellite, color: '#efaa3c' },
-  { key: 'aircraft', label: 'Aerial operations', detail: 'Imported and reconstructed', icon: Helicopter, color: '#3a7fcc' },
-  { key: 'wind', label: 'Wind field', detail: '10 m hourly model', icon: Wind, color: '#4f9e90' },
-  { key: 'protected', label: 'Protected area', detail: 'High Fens reserve', icon: Layers3, color: '#6b9871' },
+  { key: 'perimeter', label: 'EFFIS fire footprint', detail: '14 Aug daily VIIRS product · ~501 ha', icon: Layers3, color: '#e96838' },
+  { key: 'hotspots', label: 'NASA hotspots', detail: 'Only after a FIRMS response', icon: Satellite, color: '#efaa3c' },
+  { key: 'aircraft', label: 'Aircraft observations', detail: 'MLAT fixes + photo evidence', icon: Helicopter, color: '#3a7fcc' },
+  { key: 'wind', label: 'Wind at Drossart', detail: '10 m hourly model value', icon: Wind, color: '#4f9e90' },
 ]
+
+const OBSERVATION_RECENCY_MS = 5 * 60 * 1000
 
 function windCardinal(deg) {
   const names = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
   return names[Math.round(deg / 22.5) % 16]
+}
+
+function observationState(flight, frame) {
+  if (!flight.observations?.length) {
+    const visibleEvidence = (flight.evidenceObservations || [])
+      .filter((evidence) => evidence.timestampMs <= frame.timestampMs)
+    if (flight.evidenceObservations?.length && !visibleEvidence.length) return { key: 'future', label: 'NOT YET' }
+    if (visibleEvidence.at(-1)?.state === 'landed') return { key: 'landed', label: 'LANDED PHOTO', latest: visibleEvidence.at(-1) }
+    return { key: 'static', label: 'STATIC' }
+  }
+  const visible = flight.observations.filter((observation) => observation.timestampMs <= frame.timestampMs)
+  if (!visible.length) return { key: 'future', label: 'NOT YET' }
+  const latest = visible.at(-1)
+  if (frame.timestampMs - latest.timestampMs <= OBSERVATION_RECENCY_MS) {
+    return { key: 'recent', label: 'OBSERVED', latest }
+  }
+  return { key: 'past', label: 'LAST SEEN', latest }
 }
 
 function iconForEvent(type) {
@@ -100,12 +118,13 @@ function MiniAreaChart({ currentIndex }) {
   const max = 110
   const points = fireFrames.map((frame, index) => {
     const x = (index / (fireFrames.length - 1)) * width
+    if (!Number.isFinite(frame.reportedHa)) return null
     const y = height - (frame.reportedHa / max) * (height - 5)
-    return [x, y]
-  })
-  const visible = points.slice(0, currentIndex + 1)
+    return [x, y, index]
+  }).filter(Boolean)
+  const visible = points.filter((point) => point[2] <= currentIndex)
   const path = visible.map(([x, y], index) => `${index === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ')
-  const area = visible.length ? `${path} L${visible.at(-1)[0]},${height} L${visible[0][0]},${height} Z` : ''
+  const area = visible.length >= 2 ? `${path} L${visible.at(-1)[0]},${height} L${visible[0][0]},${height} Z` : ''
   const cursorX = (currentIndex / (fireFrames.length - 1)) * width
 
   return (
@@ -138,9 +157,9 @@ function Timeline({ frameIndex, setFrameIndex, playing, setPlaying, playbackRate
           <strong>15 Aug, 02:00 CEST</strong>
         </div>
         <div className="timeline-legend">
-          <span><i className="legend-line legend-line--fire" />Reported area</span>
+          <span><i className="legend-line legend-line--fire" />Reported estimate</span>
           <span><i className="legend-dot legend-dot--event" />Incident update</span>
-          <span><i className="legend-dot legend-dot--flight" />Air operation</span>
+          <span><i className="legend-dot legend-dot--flight" />Aircraft evidence</span>
         </div>
       </div>
 
@@ -152,7 +171,7 @@ function Timeline({ frameIndex, setFrameIndex, playing, setPlaying, playbackRate
           className="step-button"
           onClick={() => setFrameIndex(Math.max(0, frameIndex - 1))}
           type="button"
-          aria-label="Previous hour"
+          aria-label="Previous five minutes"
         >
           <ChevronLeft size={17} />
         </button>
@@ -191,7 +210,7 @@ function Timeline({ frameIndex, setFrameIndex, playing, setPlaying, playbackRate
           </div>
           <div className="timeline-now" style={{ left: `${progress}%` }}>
             <strong>{frame.shortTime}</strong>
-            <small>{frameIndex < 11 ? '14 AUG' : '15 AUG'}</small>
+            <small>{frame.dayLabel}</small>
           </div>
         </div>
 
@@ -199,7 +218,7 @@ function Timeline({ frameIndex, setFrameIndex, playing, setPlaying, playbackRate
           className="step-button"
           onClick={() => setFrameIndex(Math.min(fireFrames.length - 1, frameIndex + 1))}
           type="button"
-          aria-label="Next hour"
+          aria-label="Next five minutes"
         >
           <ChevronRight size={17} />
         </button>
@@ -214,8 +233,8 @@ function Timeline({ frameIndex, setFrameIndex, playing, setPlaying, playbackRate
       </div>
 
       <div className="timeline-foot">
-        <span><Radio size={12} /> {visibleEvents.length} verified or referenced updates visible</span>
-        <span className="reconstruction-note"><Info size={12} /> Perimeters and aircraft paths are a transparent incident reconstruction until official geometry / track imports are connected.</span>
+        <span><Radio size={12} /> Five-minute timeline · {visibleEvents.length} sourced updates visible</span>
+        <span className="reconstruction-note"><Info size={12} /> Dashed aircraft links join only plausible adjacent fixes; gaps stay open. Icons appear only within five minutes of a fix.</span>
         <a className="apyos-credit" href="https://apyos.com" target="_blank" rel="noreferrer">
           Developed by <strong>Apyos</strong><ExternalLink size={11} />
         </a>
@@ -226,6 +245,7 @@ function Timeline({ frameIndex, setFrameIndex, playing, setPlaying, playbackRate
 
 function SourceMark({ tone }) {
   if (tone === 'nasa') return <span className="source-monogram source-monogram--nasa">NASA</span>
+  if (tone === 'effis') return <span className="source-monogram source-monogram--effis">EU</span>
   if (tone === 'weather') return <span className="source-monogram source-monogram--weather"><CloudSun size={17} /></span>
   if (tone === 'rmi') return <span className="source-monogram source-monogram--rmi">RMI</span>
   return <span className="source-monogram source-monogram--adsb"><Airplay size={17} /></span>
@@ -255,7 +275,7 @@ function DataModal({ open, onClose, onImportTracks, importedCount, onFirmsData, 
     localStorage.setItem('venn-firms-key', mapKey.trim())
     setStatus('loading')
     setMessage('Checking the FIRMS area service…')
-    const endpoint = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${mapKey.trim()}/VIIRS_SNPP_NRT/5.95,50.54,6.28,50.67/2/2026-08-14`
+    const endpoint = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${mapKey.trim()}/VIIRS_SNPP_NRT/5.90,50.50,6.16,50.66/2/2026-08-14`
     try {
       const response = await fetch(endpoint)
       if (!response.ok) throw new Error(`FIRMS returned ${response.status}`)
@@ -404,7 +424,7 @@ function DataModal({ open, onClose, onImportTracks, importedCount, onFirmsData, 
                   <span className="connection-icon"><FileUp size={20} /></span>
                   <span className="connection-copy">
                     <span className="connection-title"><strong>Import aircraft tracks</strong><span className="status-pill">{importedCount || 0} loaded</span></span>
-                    <p>GeoJSON LineString or CSV with latitude, longitude and an optional callsign.</p>
+                    <p>GeoJSON LineString or CSV with latitude, longitude and an optional callsign. Untimed files are displayed as static geometry.</p>
                     <span className="upload-cta">Choose a file <ArrowDownToLine size={14} /></span>
                   </span>
                 </button>
@@ -414,7 +434,7 @@ function DataModal({ open, onClose, onImportTracks, importedCount, onFirmsData, 
                   <span className="connection-icon connection-icon--weather"><Wind size={20} /></span>
                   <span className="connection-copy">
                     <span className="connection-title"><strong>Local weather</strong><span className="status-pill status-pill--connected"><Check size={11} /> Seeded</span></span>
-                    <p>Hourly 10 m wind, gust, temperature and humidity for 50.593° N, 6.194° E.</p>
+                    <p>Hourly 10 m wind, gust, temperature and humidity for the Drossart model grid point at 50.548° N, 6.061° E.</p>
                     <span className="connection-meta">Open-Meteo · Europe/Brussels</span>
                   </span>
                 </div>
@@ -433,13 +453,13 @@ function DataModal({ open, onClose, onImportTracks, importedCount, onFirmsData, 
             <div className="method-layout">
               <div className="method-callout">
                 <Info size={19} />
-                <p><strong>Three layers, three different meanings.</strong> Thermal detections show sensor pixels, incident reports state an approximate affected area, and a perimeter is geometry reconstructed from those observations. They should never be presented as interchangeable.</p>
+                <p><strong>Different products answer different questions.</strong> The viewer keeps reported area, satellite-derived geometry, thermal detections, aircraft fixes and model weather separate.</p>
               </div>
               <div className="method-steps">
-                <article><span>01</span><div><strong>Thermal anomaly</strong><p>VIIRS marks an approximately 375 m observation footprint. A marker does not mean its whole footprint burned.</p></div></article>
-                <article><span>02</span><div><strong>Reported area</strong><p>The ~100 ha figure is treated as a cited incident milestone, with time and provenance attached.</p></div></article>
-                <article><span>03</span><div><strong>Progression geometry</strong><p>The displayed shape is a reconstruction for timeline design until an official Copernicus, DNF or incident-command perimeter is imported.</p></div></article>
-                <article><span>04</span><div><strong>Aircraft history</strong><p>Complete tracks depend on receiver coverage and provider rights. Imported tracks retain a verification label.</p></div></article>
+                <article><span>01</span><div><strong>Thermal anomaly</strong><p>No marker is bundled. If FIRMS returns VIIRS data, each point remains a sensor observation rather than a burned-area polygon.</p></div></article>
+                <article><span>02</span><div><strong>Reported area</strong><p>The ~100 ha figure appears only from the cited reporting time and is never converted into a drawn shape.</p></div></article>
+                <article><span>03</span><div><strong>Satellite footprint</strong><p>The ~501 ha map shape is the real 14 August EFFIS VIIRS-derived polygon. It is a static daily algorithmic footprint, not a surveyed perimeter or five-minute progression.</p></div></article>
+                <article><span>04</span><div><strong>Aircraft observations</strong><p>G10 is shown as individual MLAT fixes. Gaps stay empty, and a marker never claims the helicopter remained airborne.</p></div></article>
               </div>
               <div className="safety-note"><ShieldAlert size={17} /><span>This viewer is informational and must not be used for evacuation or preservation-of-life decisions. Follow BE-Alert and emergency services.</span></div>
             </div>
@@ -477,6 +497,7 @@ function App() {
   const [importedTracks, setImportedTracks] = useState([])
   const [connectedHotspots, setConnectedHotspots] = useState([])
   const frame = fireFrames[frameIndex]
+  const reportedAreaText = frame.reportedHa == null ? '—' : `~${frame.reportedHa}`
 
   useEffect(() => {
     if (!playing) return undefined
@@ -513,12 +534,11 @@ function App() {
   )
 
   const activeFlights = useMemo(
-    () => flights.filter((flight) => frameIndex >= flight.startFrame && frameIndex < flight.endFrame),
-    [frameIndex],
+    () => flights.filter((flight) => observationState(flight, frame).key === 'recent'),
+    [frame],
   )
 
-  const hotspotDataset = connectedHotspots.length ? connectedHotspots : hotspots
-  const visibleHotspots = hotspotDataset.filter((spot) => spot.frame <= frameIndex).length
+  const visibleHotspots = connectedHotspots.filter((spot) => spot.frame <= frameIndex).length
 
   function importTracks(tracks) {
     const colors = ['#168aad', '#c15f9a', '#7c9f35', '#d47f28']
@@ -527,14 +547,12 @@ function App() {
       callSign: track.callSign,
       label: 'Imported aircraft track',
       type: 'helicopter',
-      status: 'User import · verify source',
+      status: 'Static user import · no timestamp or airborne status inferred',
       color: colors[index % colors.length],
-      startFrame: 0,
-      endFrame: fireFrames.length - 1,
-      start: 'Imported',
-      end: 'Imported',
-      drops: 0,
-      distance: '—',
+      start: null,
+      end: null,
+      drops: null,
+      distance: null,
       points: track.points,
     }))
     setImportedTracks((current) => [...current, ...normalized])
@@ -551,7 +569,7 @@ function App() {
 
         <div className="incident-heading">
           <div className="incident-location"><MapPin size={14} /><span>HIGH FENS</span><i>/</i><b>EUPEN · BAELEN</b></div>
-          <span className="reference-badge"><Sparkles size={11} /> REFERENCE VIEW</span>
+          <span className="reference-badge"><Sparkles size={11} /> OBSERVATION VIEW</span>
         </div>
 
         <div className="header-actions">
@@ -564,14 +582,14 @@ function App() {
         <aside className={`left-sidebar ${mobileLayersOpen ? 'is-mobile-open' : ''}`}>
           <div className="incident-card">
             <div className="incident-card-head">
-              <span className="active-tag"><i /> ACTIVE INCIDENT</span>
+              <span className="active-tag"><i /> INCIDENT RECORD</span>
               <button type="button" aria-label="Incident information"><Info size={15} /></button>
             </div>
             <h1>High Fens<br />wildfire</h1>
-            <p>Pilgerweg · Allgemeines Venn</p>
+            <p>Drossart · Fagne des Deux-Séries</p>
             <div className="incident-metrics">
-              <div><strong>~{frame.reportedHa}</strong><span>hectares</span><small>{frame.areaLabel}</small></div>
-              <div><strong>{frame.confidence}</strong><span>area status</span><small>not a live perimeter</small></div>
+              <div><strong>{reportedAreaText}</strong><span>reported hectares</span><small>{frame.areaLabel}</small></div>
+              <div><strong>~{Math.round(effisBurnedArea.areaHa)}</strong><span>EFFIS footprint ha</span><small>static 14 Aug product</small></div>
             </div>
           </div>
 
@@ -592,13 +610,16 @@ function App() {
           <div className="sidebar-section source-summary">
             <div className="section-heading"><span>SOURCE HEALTH</span><button type="button" onClick={() => setDataOpen(true)}>Manage</button></div>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
-              <SourceMark tone="nasa" /><span><strong>FIRMS</strong><small>{connectedHotspots.length ? `${connectedHotspots.length} detections plotted` : 'Reference points'}</small></span><em className={`health-dot ${connectedHotspots.length ? '' : 'health-dot--amber'}`} />
+              <SourceMark tone="nasa" /><span><strong>FIRMS</strong><small>{connectedHotspots.length ? `${connectedHotspots.length} detections plotted` : 'No data loaded'}</small></span><em className={`health-dot ${connectedHotspots.length ? '' : 'health-dot--amber'}`} />
             </button>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
-              <SourceMark tone="weather" /><span><strong>Wind model</strong><small>Hourly values loaded</small></span><em className="health-dot" />
+              <SourceMark tone="effis" /><span><strong>EFFIS footprint</strong><small>14 Aug VIIRS daily polygon</small></span><em className="health-dot" />
             </button>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
-              <SourceMark tone="adsb" /><span><strong>Aircraft</strong><small>{importedTracks.length ? `${importedTracks.length} imported` : 'Reconstruction only'}</small></span><em className={`health-dot ${importedTracks.length ? '' : 'health-dot--amber'}`} /></button>
+              <SourceMark tone="weather" /><span><strong>Wind model</strong><small>Drossart hourly values</small></span><em className="health-dot" />
+            </button>
+            <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
+              <SourceMark tone="adsb" /><span><strong>Aircraft</strong><small>{flights.length} sourced set{importedTracks.length ? ` · ${importedTracks.length} static import` : ''}</small></span><em className="health-dot" /></button>
           </div>
 
           <div className="emergency-note">
@@ -624,12 +645,12 @@ function App() {
               <button className={baseMode === 'satellite' ? 'is-active' : ''} onClick={() => setBaseMode('satellite')} type="button"><Satellite size={14} /> Satellite</button>
               <button className={baseMode === 'topo' ? 'is-active' : ''} onClick={() => setBaseMode('topo')} type="button"><Mountain size={14} /> Topo</button>
             </div>
-            <div className="map-date-chip"><CalendarDays size={14} /><span>{frameIndex < 11 ? 'Fri 14 Aug' : 'Sat 15 Aug'}</span><strong>{frame.shortTime}</strong></div>
+            <div className="map-date-chip"><CalendarDays size={14} /><span>{frame.dayLabel === '14 AUG' ? 'Fri 14 Aug' : 'Sat 15 Aug'}</span><strong>{frame.shortTime}</strong></div>
           </div>
 
           <div className="map-warning">
             <ShieldAlert size={15} />
-            <p><strong>High Fens access restrictions</strong><span>Follow local authority instructions; do not approach the incident area.</span></p>
+            <p><strong>Official instructions take precedence</strong><span>This historical viewer does not determine current access or safety.</span></p>
             <a href="https://www.be-alert.be/en" target="_blank" rel="noreferrer">BE-Alert <ExternalLink size={12} /></a>
           </div>
 
@@ -641,7 +662,7 @@ function App() {
             <button type="button" onClick={() => mapActions?.fire()} aria-label="Center on fire"><LocateFixed size={17} /></button>
           </div>
 
-          <div className="map-scale-card"><span><i /> 5 km</span><small>50.593° N · 6.194° E</small></div>
+          <div className="map-scale-card"><span><i /> 5 km</span><small>50.548° N · 6.058° E</small></div>
 
           <Timeline
             frameIndex={frameIndex}
@@ -664,13 +685,14 @@ function App() {
               <div className="snapshot-head">
                 <span className="kicker">AT SELECTED TIME</span>
                 <strong>{frame.shortTime}<small>CEST</small></strong>
-                <p>{frameIndex < 11 ? 'Friday, 14 August 2026' : 'Saturday, 15 August 2026'}</p>
+                <p>{frame.dateLabel}</p>
               </div>
 
               <div className="snapshot-grid">
-                <article className="snapshot-card snapshot-card--fire"><span><Flame size={15} /> REPORTED AREA</span><strong>~{frame.reportedHa}<small>ha</small></strong><p>{frame.areaLabel}</p></article>
-                <article className="snapshot-card"><span><Satellite size={15} /> HOTSPOTS</span><strong>{visibleHotspots}<small>pts</small></strong><p>{connectedHotspots.length ? 'NASA FIRMS connected' : 'reference view'}</p></article>
-                <article className="snapshot-card"><span><Helicopter size={15} /> AIRCRAFT</span><strong>{activeFlights.length}<small>active</small></strong><p>{activeFlights.length ? 'in reconstruction' : 'none at this time'}</p></article>
+                <article className="snapshot-card snapshot-card--fire"><span><Flame size={15} /> REPORTED AREA</span><strong>{reportedAreaText}<small>{frame.reportedHa == null ? '' : 'ha'}</small></strong><p>{frame.areaLabel}</p></article>
+                <article className="snapshot-card snapshot-card--effis"><span><Layers3 size={15} /> EFFIS FOOTPRINT</span><strong>~{Math.round(effisBurnedArea.areaHa)}<small>ha</small></strong><p>static 14 Aug VIIRS geometry</p></article>
+                <article className="snapshot-card"><span><Satellite size={15} /> HOTSPOTS</span><strong>{visibleHotspots}<small>pts</small></strong><p>{connectedHotspots.length ? 'NASA FIRMS connected' : 'no FIRMS data loaded'}</p></article>
+                <article className="snapshot-card"><span><Helicopter size={15} /> AIRCRAFT</span><strong>{activeFlights.length}<small>recent</small></strong><p>{activeFlights.length ? 'fix within previous 5 min' : 'no recent observation'}</p></article>
                 <article className="snapshot-card snapshot-card--wind"><span><Wind size={15} /> WIND FROM</span><strong>{windCardinal(frame.windDirection)}<small>{frame.windDirection}°</small></strong><p>{frame.windSpeed.toFixed(1)} km/h · gust {frame.gust.toFixed(0)}</p></article>
               </div>
 
@@ -682,7 +704,7 @@ function App() {
                       <path d="M12 20V4M6.5 9.5 12 4l5.5 5.5" />
                     </svg>
                   </span>
-                  <div><strong>{windCardinal(frame.windDirection)}</strong><span>from {frame.windDirection}°</span></div>
+                  <div><strong>{windCardinal(frame.windDirection)}</strong><span>from {frame.windDirection}° · arrow toward {(frame.windDirection + 180) % 360}°</span></div>
                   <p><strong>{frame.windSpeed.toFixed(1)}</strong><span>km/h</span><small>gusts {frame.gust.toFixed(1)}</small></p>
                 </div>
                 <div className="condition-row">
@@ -712,29 +734,33 @@ function App() {
               <div className="air-ops-summary">
                 <span className="kicker">TRACK COVERAGE</span>
                 <h2>Aerial operations</h2>
-                <p>Replay reconstructed response flights or import licensed ADS-B history for a verified incident record.</p>
+                <p>Two police helicopters are confirmed: G10 by photo and MLAT, G12 by a timestamped landed photo. Only G10 has an incident-area receiver path.</p>
                 <button type="button" onClick={() => setDataOpen(true)}><FileUp size={14} /> Import tracks</button>
               </div>
 
               <div className="flight-list">
                 {[...flights, ...importedTracks].map((flight) => {
-                  const isActive = frameIndex >= flight.startFrame && frameIndex < flight.endFrame
-                  const hasStarted = frameIndex >= flight.startFrame
+                  const state = observationState(flight, frame)
+                  const isActive = state.key === 'recent'
+                  const hasStarted = !['future'].includes(state.key)
+                  const observationCount = flight.observations?.length ?? null
+                  const coverageCount = flight.coverageWindows?.length ?? null
+                  const photoCount = flight.evidenceObservations?.filter((evidence) => evidence.kind === 'photo').length ?? 0
                   return (
                     <article key={flight.id} className={`flight-card ${isActive ? 'is-active' : ''} ${hasStarted ? '' : 'is-future'}`}>
                       <div className="flight-head">
                         <span className="flight-icon" style={{ '--flight-color': flight.color }}>{flight.type === 'plane' ? <Plane size={17} /> : <Helicopter size={17} />}</span>
                         <div><strong>{flight.callSign}</strong><small>{flight.label}</small></div>
-                        <span className={`flight-state ${isActive ? 'is-live' : ''}`}>{isActive ? 'IN AIR' : hasStarted ? 'ENDED' : 'LATER'}</span>
+                        <span className={`flight-state ${isActive ? 'is-live' : ''}`}>{state.label}</span>
                       </div>
-                      <div className="flight-stats"><span><small>WINDOW</small><strong>{flight.start}–{flight.end}</strong></span><span><small>DROPS</small><strong>{flight.drops || '—'}</strong></span><span><small>DISTANCE</small><strong>{flight.distance}</strong></span></div>
-                      <div className="flight-provenance"><Info size={12} /> {flight.status}</div>
+                      <div className="flight-stats"><span><small>FIXES</small><strong>{observationCount ?? '—'}</strong></span><span><small>CLUSTERS</small><strong>{coverageCount ?? '—'}</strong></span><span><small>PHOTOS</small><strong>{photoCount || '—'}</strong></span></div>
+                      <div className="flight-provenance"><Info size={12} /> {flight.status}{flight.pathMethod ? ` · ${flight.pathMethod}` : ''}</div>
                     </article>
                   )
                 })}
               </div>
 
-              <div className="coverage-note"><Radio size={15} /><p><strong>Coverage is not completeness.</strong><span>Emergency, military and low-level aircraft can be absent from ADS-B archives or have irregular reception.</span></p></div>
+              <div className="coverage-note"><Radio size={15} /><p><strong>G12 is confirmed, but untracked here.</strong><span>A timestamped BRF photo visibly shows it landed. Its absence from receiver archives does not mean it did not fly.</span></p></div>
             </div>
           )}
         </aside>

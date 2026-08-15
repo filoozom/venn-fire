@@ -530,6 +530,12 @@ button {
   background: #15427e;
 }
 
+.source-monogram--effis {
+  color: #fff;
+  background: #1d4f91;
+  box-shadow: inset 0 0 0 2px #ffcf33;
+}
+
 .source-monogram--weather {
   color: #287d91;
   background: #e4f5f6;
@@ -960,7 +966,7 @@ button {
 .fire-area-marker > div {
   display: flex;
   flex-direction: column;
-  min-width: 94px;
+  min-width: 154px;
   padding: 7px 9px;
   color: #fff;
   background: rgba(65, 34, 24, 0.88);
@@ -972,7 +978,7 @@ button {
 
 .fire-area-marker span {
   color: #f6b493;
-  font-size: 8.5px;
+  font-size: 9px;
   font-weight: 900;
   letter-spacing: 0.12em;
 }
@@ -985,7 +991,7 @@ button {
 .fire-area-marker small {
   margin-top: 2px;
   color: rgba(255, 255, 255, 0.66);
-  font-size: 9px;
+  font-size: 9.5px;
 }
 
 .aircraft-map-marker {
@@ -1010,6 +1016,37 @@ button {
   height: 18px;
   transform: rotate(var(--aircraft-rotation));
   transform-origin: center;
+}
+
+.photo-evidence-marker {
+  background: transparent;
+  border: 0;
+}
+
+.photo-evidence-marker > span {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 94px;
+  min-height: 38px;
+  color: #fff;
+  background: color-mix(in srgb, var(--flight-color) 88%, #1d2430);
+  border: 2px solid rgba(255, 255, 255, 0.94);
+  border-radius: 7px;
+  box-shadow: 0 4px 12px rgba(30, 48, 42, 0.3);
+}
+
+.photo-evidence-marker b {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.photo-evidence-marker small {
+  margin-top: 3px;
+  font-size: 8px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
 }
 
 .water-drop-marker {
@@ -1680,6 +1717,20 @@ button {
 
 .snapshot-card--fire > strong {
   color: #b84c2b;
+}
+
+.snapshot-card--effis {
+  background: #fff8ed;
+  border-color: #efdcb7;
+}
+
+.snapshot-card--effis > span,
+.snapshot-card--effis > span svg {
+  color: #9b6c24;
+}
+
+.snapshot-card--effis > strong {
+  color: #8f5a18;
 }
 
 .snapshot-card--wind {

@@ -7,7 +7,12 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "import:flightaware": "node scripts/import-flightaware.mjs",
+    "import:public-adsb": "node scripts/import-public-adsb-traces.mjs",
+    "import:effis": "node scripts/import-effis-burned-area.mjs",
+    "scan:aircraft": "node scripts/extract-adsb-replay.mjs",
+    "enrich:aircraft": "node scripts/enrich-aircraft-candidates.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
