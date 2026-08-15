@@ -1,0 +1,23 @@
+{
+  "name": "venn-fire-watch",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.15.9",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "vite": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "leaflet": "^1.9.4",
+    "lucide-react": "latest"
+  },
+  "devDependencies": {
+    "@playwright/test": "latest"
+  }
+}

@@ -1,0 +1,752 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Activity,
+  Airplay,
+  ArrowDownToLine,
+  BadgeAlert,
+  CalendarDays,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  CircleHelp,
+  CloudSun,
+  Database,
+  Droplets,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  FileUp,
+  Flame,
+  Gauge,
+  Helicopter,
+  Info,
+  Layers3,
+  LocateFixed,
+  Map,
+  MapPin,
+  Maximize2,
+  Minus,
+  Mountain,
+  Pause,
+  Plane,
+  Play,
+  Plus,
+  Radio,
+  RotateCcw,
+  Satellite,
+  ShieldAlert,
+  Sparkles,
+  ThermometerSun,
+  Wind,
+  X,
+} from 'lucide-react'
+import MapView from './MapView'
+import {
+  events,
+  fireFrames,
+  flights,
+  hotspots,
+  initialLayers,
+  sourceLinks,
+} from './data'
+
+const layerOptions = [
+  { key: 'perimeter', label: 'Fire progression', detail: 'Reported / reconstructed', icon: Flame, color: '#ed6a3e' },
+  { key: 'hotspots', label: 'NASA hotspots', detail: 'VIIRS thermal anomalies', icon: Satellite, color: '#efaa3c' },
+  { key: 'aircraft', label: 'Aerial operations', detail: 'Imported and reconstructed', icon: Helicopter, color: '#3a7fcc' },
+  { key: 'wind', label: 'Wind field', detail: '10 m hourly model', icon: Wind, color: '#4f9e90' },
+  { key: 'protected', label: 'Protected area', detail: 'High Fens reserve', icon: Layers3, color: '#6b9871' },
+]
+
+function windCardinal(deg) {
+  const names = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
+  return names[Math.round(deg / 22.5) % 16]
+}
+
+function iconForEvent(type) {
+  if (type === 'satellite') return Satellite
+  if (type === 'aircraft') return Helicopter
+  if (type === 'wind') return Wind
+  if (type === 'area') return Gauge
+  if (type === 'closure') return ShieldAlert
+  if (type === 'monitor') return Eye
+  return Flame
+}
+
+function LayerToggle({ item, checked, onChange }) {
+  const Icon = item.icon
+  return (
+    <button
+      className={`layer-row ${checked ? 'is-active' : ''}`}
+      onClick={onChange}
+      type="button"
+      aria-pressed={checked}
+    >
+      <span className="layer-symbol" style={{ '--layer-color': item.color }}>
+        <Icon size={16} strokeWidth={1.9} />
+      </span>
+      <span className="layer-copy">
+        <strong>{item.label}</strong>
+        <small>{item.detail}</small>
+      </span>
+      <span className="toggle-track" aria-hidden="true"><i /></span>
+    </button>
+  )
+}
+
+function MiniAreaChart({ currentIndex }) {
+  const width = 660
+  const height = 44
+  const max = 110
+  const points = fireFrames.map((frame, index) => {
+    const x = (index / (fireFrames.length - 1)) * width
+    const y = height - (frame.reportedHa / max) * (height - 5)
+    return [x, y]
+  })
+  const visible = points.slice(0, currentIndex + 1)
+  const path = visible.map(([x, y], index) => `${index === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ')
+  const area = visible.length ? `${path} L${visible.at(-1)[0]},${height} L${visible[0][0]},${height} Z` : ''
+  const cursorX = (currentIndex / (fireFrames.length - 1)) * width
+
+  return (
+    <svg className="mini-area-chart" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
+      <defs>
+        <linearGradient id="fireAreaFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#ef7548" stopOpacity="0.36" />
+          <stop offset="1" stopColor="#ef7548" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={area} fill="url(#fireAreaFill)" />
+      <path d={path} fill="none" stroke="#ed754a" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+      <line x1={cursorX} x2={cursorX} y1="0" y2={height} stroke="#263a33" strokeOpacity="0.28" strokeDasharray="2 3" />
+    </svg>
+  )
+}
+
+function Timeline({ frameIndex, setFrameIndex, playing, setPlaying, playbackRate, setPlaybackRate }) {
+  const frame = fireFrames[frameIndex]
+  const progress = (frameIndex / (fireFrames.length - 1)) * 100
+  const visibleEvents = events.filter((event) => event.frame <= frameIndex)
+
+  return (
+    <section className="timeline-panel" aria-label="Incident timeline controls">
+      <div className="timeline-head">
+        <div className="timeline-title">
+          <span>Incident timeline</span>
+          <strong>14 Aug, 13:00</strong>
+          <i />
+          <strong>15 Aug, 02:00 CEST</strong>
+        </div>
+        <div className="timeline-legend">
+          <span><i className="legend-line legend-line--fire" />Reported area</span>
+          <span><i className="legend-dot legend-dot--event" />Incident update</span>
+          <span><i className="legend-dot legend-dot--flight" />Air operation</span>
+        </div>
+      </div>
+
+      <div className="timeline-body">
+        <button className="play-button" onClick={() => setPlaying((value) => !value)} type="button" aria-label={playing ? 'Pause timeline' : 'Play timeline'}>
+          {playing ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
+        </button>
+        <button
+          className="step-button"
+          onClick={() => setFrameIndex(Math.max(0, frameIndex - 1))}
+          type="button"
+          aria-label="Previous hour"
+        >
+          <ChevronLeft size={17} />
+        </button>
+
+        <div className="timeline-track-wrap">
+          <MiniAreaChart currentIndex={frameIndex} />
+          <div className="event-markers" aria-hidden="true">
+            {events.map((event, index) => (
+              <i
+                key={`${event.time}-${index}`}
+                className={`${event.type === 'aircraft' ? 'is-flight' : ''} ${event.frame <= frameIndex ? 'is-past' : ''}`}
+                style={{ left: `${(event.frame / (fireFrames.length - 1)) * 100}%` }}
+              />
+            ))}
+          </div>
+          <input
+            className="timeline-range"
+            type="range"
+            min="0"
+            max={fireFrames.length - 1}
+            step="1"
+            value={frameIndex}
+            onChange={(event) => {
+              setPlaying(false)
+              setFrameIndex(Number(event.target.value))
+            }}
+            style={{ '--timeline-progress': `${progress}%` }}
+            aria-label="Incident time"
+          />
+          <div className="timeline-ticks" aria-hidden="true">
+            <span>13:00</span>
+            <span>16:00</span>
+            <span>19:00</span>
+            <span>22:00</span>
+            <span>01:00</span>
+          </div>
+          <div className="timeline-now" style={{ left: `${progress}%` }}>
+            <strong>{frame.shortTime}</strong>
+            <small>{frameIndex < 11 ? '14 AUG' : '15 AUG'}</small>
+          </div>
+        </div>
+
+        <button
+          className="step-button"
+          onClick={() => setFrameIndex(Math.min(fireFrames.length - 1, frameIndex + 1))}
+          type="button"
+          aria-label="Next hour"
+        >
+          <ChevronRight size={17} />
+        </button>
+        <button
+          className="speed-button"
+          onClick={() => setPlaybackRate((value) => value === 1 ? 2 : value === 2 ? 4 : 1)}
+          type="button"
+          aria-label="Change playback speed"
+        >
+          {playbackRate}×
+        </button>
+      </div>
+
+      <div className="timeline-foot">
+        <span><Radio size={12} /> {visibleEvents.length} verified or referenced updates visible</span>
+        <span className="reconstruction-note"><Info size={12} /> Perimeters and aircraft paths are a transparent incident reconstruction until official geometry / track imports are connected.</span>
+      </div>
+    </section>
+  )
+}
+
+function SourceMark({ tone }) {
+  if (tone === 'nasa') return <span className="source-monogram source-monogram--nasa">NASA</span>
+  if (tone === 'weather') return <span className="source-monogram source-monogram--weather"><CloudSun size={17} /></span>
+  if (tone === 'rmi') return <span className="source-monogram source-monogram--rmi">RMI</span>
+  return <span className="source-monogram source-monogram--adsb"><Airplay size={17} /></span>
+}
+
+function DataModal({ open, onClose, onImportTracks, importedCount, onFirmsData, connectedCount }) {
+  const [tab, setTab] = useState('connections')
+  const [mapKey, setMapKey] = useState(() => localStorage.getItem('venn-firms-key') || '')
+  const [keyVisible, setKeyVisible] = useState(false)
+  const [status, setStatus] = useState('idle')
+  const [message, setMessage] = useState('')
+  const inputRef = useRef(null)
+
+  useEffect(() => {
+    if (!open) return undefined
+    const closeOnEscape = (event) => event.key === 'Escape' && onClose()
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [open, onClose])
+
+  async function testFirms() {
+    if (!mapKey.trim()) {
+      setStatus('error')
+      setMessage('Add your free FIRMS MAP_KEY first.')
+      return
+    }
+    localStorage.setItem('venn-firms-key', mapKey.trim())
+    setStatus('loading')
+    setMessage('Checking the FIRMS area service…')
+    const endpoint = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${mapKey.trim()}/VIIRS_SNPP_NRT/5.95,50.54,6.28,50.67/2/2026-08-14`
+    try {
+      const response = await fetch(endpoint)
+      if (!response.ok) throw new Error(`FIRMS returned ${response.status}`)
+      const csv = await response.text()
+      const rows = csv.trim().split(/\r?\n/)
+      const headers = (rows.shift() || '').split(',').map((value) => value.trim().toLowerCase())
+      const indexOf = (...names) => headers.findIndex((value) => names.includes(value))
+      const latitudeIndex = indexOf('latitude')
+      const longitudeIndex = indexOf('longitude')
+      const dateIndex = indexOf('acq_date')
+      const timeIndex = indexOf('acq_time')
+      const confidenceIndex = indexOf('confidence')
+      const frpIndex = indexOf('frp')
+      const instrumentIndex = indexOf('instrument')
+      const satelliteIndex = indexOf('satellite')
+      if (latitudeIndex < 0 || longitudeIndex < 0) throw new Error('FIRMS response did not contain coordinates')
+
+      const detections = rows.map((row) => {
+        const cells = row.split(',').map((value) => value.trim())
+        const latitude = Number(cells[latitudeIndex])
+        const longitude = Number(cells[longitudeIndex])
+        const rawTime = (cells[timeIndex] || '0000').padStart(4, '0')
+        const acquired = `${cells[dateIndex] || '2026-08-14'}T${rawTime.slice(0, 2)}:${rawTime.slice(2, 4)}:00Z`
+        const acquiredAt = new Date(acquired).getTime()
+        let closestFrame = 0
+        let closestDistance = Number.POSITIVE_INFINITY
+        fireFrames.forEach((item, index) => {
+          const distance = Math.abs(new Date(item.time).getTime() - acquiredAt)
+          if (distance < closestDistance) {
+            closestDistance = distance
+            closestFrame = index
+          }
+        })
+        return {
+          position: [latitude, longitude],
+          frame: closestFrame,
+          confidence: (cells[confidenceIndex] || 'nominal').toLowerCase(),
+          sensor: `${cells[satelliteIndex] || 'VIIRS'} ${cells[instrumentIndex] || ''}`.trim(),
+          frp: Number(cells[frpIndex]) || null,
+          acquired: acquired.replace('T', ' ').replace(':00Z', ' UTC'),
+          connected: true,
+        }
+      }).filter((spot) => Number.isFinite(spot.position[0]) && Number.isFinite(spot.position[1]))
+
+      onFirmsData(detections)
+      setStatus('success')
+      setMessage(`${detections.length} VIIRS records returned and plotted for the map extent.`)
+    } catch (error) {
+      setStatus('error')
+      setMessage(`${error.message}. The key was saved; a server proxy may be needed if the browser blocks CORS.`)
+    }
+  }
+
+  async function importFile(file) {
+    if (!file) return
+    try {
+      const text = await file.text()
+      let tracks = []
+      if (file.name.toLowerCase().endsWith('.csv')) {
+        const lines = text.trim().split(/\r?\n/)
+        const headers = lines.shift().split(',').map((item) => item.trim().toLowerCase())
+        const latIndex = headers.findIndex((value) => ['lat', 'latitude'].includes(value))
+        const lonIndex = headers.findIndex((value) => ['lon', 'lng', 'longitude'].includes(value))
+        const callIndex = headers.findIndex((value) => ['callsign', 'call_sign', 'flight', 'registration'].includes(value))
+        if (latIndex < 0 || lonIndex < 0) throw new Error('CSV needs latitude and longitude columns')
+        const groups = new Map()
+        lines.forEach((line) => {
+          const cells = line.split(',').map((item) => item.trim())
+          const callSign = callIndex >= 0 ? cells[callIndex] || 'IMPORTED' : 'IMPORTED'
+          const point = [Number(cells[latIndex]), Number(cells[lonIndex])]
+          if (!Number.isFinite(point[0]) || !Number.isFinite(point[1])) return
+          if (!groups.has(callSign)) groups.set(callSign, [])
+          groups.get(callSign).push(point)
+        })
+        tracks = [...groups.entries()].map(([callSign, points], index) => ({ callSign, points, index }))
+      } else {
+        const json = JSON.parse(text)
+        const features = json.type === 'FeatureCollection' ? json.features : [json]
+        tracks = features
+          .filter((feature) => (feature.geometry || feature).type === 'LineString')
+          .map((feature, index) => {
+            const geometry = feature.geometry || feature
+            return {
+              callSign: feature.properties?.callsign || feature.properties?.flight || `IMPORT ${index + 1}`,
+              points: geometry.coordinates.map(([lon, lat]) => [lat, lon]),
+              index,
+            }
+          })
+      }
+      if (!tracks.length) throw new Error('No usable LineString or coordinate rows found')
+      onImportTracks(tracks)
+      setStatus('success')
+      setMessage(`${tracks.length} aircraft track${tracks.length === 1 ? '' : 's'} imported into the map.`)
+    } catch (error) {
+      setStatus('error')
+      setMessage(error.message)
+    } finally {
+      if (inputRef.current) inputRef.current.value = ''
+    }
+  }
+
+  if (!open) return null
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section className="data-modal" role="dialog" aria-modal="true" aria-labelledby="data-modal-title">
+        <header className="modal-header">
+          <div>
+            <span className="kicker">DATA WORKSPACE</span>
+            <h2 id="data-modal-title">Sources & connections</h2>
+          </div>
+          <button className="icon-button" onClick={onClose} type="button" aria-label="Close data workspace"><X size={19} /></button>
+        </header>
+
+        <nav className="modal-tabs" aria-label="Data workspace sections">
+          <button className={tab === 'connections' ? 'is-active' : ''} onClick={() => setTab('connections')} type="button">Connections</button>
+          <button className={tab === 'method' ? 'is-active' : ''} onClick={() => setTab('method')} type="button">Method & limits</button>
+          <button className={tab === 'sources' ? 'is-active' : ''} onClick={() => setTab('sources')} type="button">Source directory</button>
+        </nav>
+
+        <div className="modal-content">
+          {tab === 'connections' && (
+            <>
+              <div className="connection-card connection-card--primary">
+                <div className="connection-icon"><Satellite size={20} /></div>
+                <div className="connection-copy">
+                  <div className="connection-title"><strong>NASA FIRMS</strong><span className={`status-pill ${connectedCount ? 'status-pill--connected' : 'status-pill--key'}`}>{connectedCount ? <><Check size={11} /> {connectedCount} plotted</> : 'MAP_KEY required'}</span></div>
+                  <p>Query VIIRS S-NPP detections inside the Eupen–High Fens map extent. The key is stored only in this browser.</p>
+                  <div className="key-input">
+                    <input
+                      type={keyVisible ? 'text' : 'password'}
+                      value={mapKey}
+                      onChange={(event) => setMapKey(event.target.value)}
+                      placeholder="Paste your free FIRMS MAP_KEY"
+                      autoComplete="off"
+                    />
+                    <button type="button" onClick={() => setKeyVisible((value) => !value)} aria-label={keyVisible ? 'Hide map key' : 'Show map key'}>{keyVisible ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+                    <button className="connect-button" onClick={testFirms} type="button" disabled={status === 'loading'}>{status === 'loading' ? 'Checking…' : 'Save & test'}</button>
+                  </div>
+                  <a className="inline-link" href="https://firms.modaps.eosdis.nasa.gov/api/map_key/" target="_blank" rel="noreferrer">Request a free key <ExternalLink size={12} /></a>
+                </div>
+              </div>
+
+              <div className="connection-grid">
+                <button className="connection-card connection-card--upload" onClick={() => inputRef.current?.click()} type="button">
+                  <span className="connection-icon"><FileUp size={20} /></span>
+                  <span className="connection-copy">
+                    <span className="connection-title"><strong>Import aircraft tracks</strong><span className="status-pill">{importedCount || 0} loaded</span></span>
+                    <p>GeoJSON LineString or CSV with latitude, longitude and an optional callsign.</p>
+                    <span className="upload-cta">Choose a file <ArrowDownToLine size={14} /></span>
+                  </span>
+                </button>
+                <input ref={inputRef} hidden type="file" accept=".json,.geojson,.csv,application/json,text/csv" onChange={(event) => importFile(event.target.files?.[0])} />
+
+                <div className="connection-card">
+                  <span className="connection-icon connection-icon--weather"><Wind size={20} /></span>
+                  <span className="connection-copy">
+                    <span className="connection-title"><strong>Local weather</strong><span className="status-pill status-pill--connected"><Check size={11} /> Seeded</span></span>
+                    <p>Hourly 10 m wind, gust, temperature and humidity for 50.593° N, 6.194° E.</p>
+                    <span className="connection-meta">Open-Meteo · Europe/Brussels</span>
+                  </span>
+                </div>
+              </div>
+
+              {message && (
+                <div className={`connection-message is-${status}`}>
+                  {status === 'success' ? <Check size={15} /> : status === 'error' ? <BadgeAlert size={15} /> : <Activity size={15} />}
+                  <span>{message}</span>
+                </div>
+              )}
+            </>
+          )}
+
+          {tab === 'method' && (
+            <div className="method-layout">
+              <div className="method-callout">
+                <Info size={19} />
+                <p><strong>Three layers, three different meanings.</strong> Thermal detections show sensor pixels, incident reports state an approximate affected area, and a perimeter is geometry reconstructed from those observations. They should never be presented as interchangeable.</p>
+              </div>
+              <div className="method-steps">
+                <article><span>01</span><div><strong>Thermal anomaly</strong><p>VIIRS marks an approximately 375 m observation footprint. A marker does not mean its whole footprint burned.</p></div></article>
+                <article><span>02</span><div><strong>Reported area</strong><p>The ~100 ha figure is treated as a cited incident milestone, with time and provenance attached.</p></div></article>
+                <article><span>03</span><div><strong>Progression geometry</strong><p>The displayed shape is a reconstruction for timeline design until an official Copernicus, DNF or incident-command perimeter is imported.</p></div></article>
+                <article><span>04</span><div><strong>Aircraft history</strong><p>Complete tracks depend on receiver coverage and provider rights. Imported tracks retain a verification label.</p></div></article>
+              </div>
+              <div className="safety-note"><ShieldAlert size={17} /><span>This viewer is informational and must not be used for evacuation or preservation-of-life decisions. Follow BE-Alert and emergency services.</span></div>
+            </div>
+          )}
+
+          {tab === 'sources' && (
+            <div className="source-directory">
+              {sourceLinks.map((source) => (
+                <a key={source.name} href={source.url} target="_blank" rel="noreferrer" className="directory-row">
+                  <SourceMark tone={source.tone} />
+                  <span><strong>{source.name}</strong><small>{source.detail}</small></span>
+                  <em>{source.cadence}</em>
+                  <ExternalLink size={15} />
+                </a>
+              ))}
+              <div className="source-footnote"><CircleHelp size={15} /><p>A production deployment should proxy credentialed APIs server-side, archive raw responses with timestamps and expose provenance on every observation.</p></div>
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function App() {
+  const [frameIndex, setFrameIndex] = useState(fireFrames.length - 1)
+  const [layers, setLayers] = useState(initialLayers)
+  const [baseMode, setBaseMode] = useState('terrain')
+  const [playing, setPlaying] = useState(false)
+  const [playbackRate, setPlaybackRate] = useState(1)
+  const [inspectorTab, setInspectorTab] = useState('situation')
+  const [dataOpen, setDataOpen] = useState(false)
+  const [mapActions, setMapActions] = useState(null)
+  const [mobileLayersOpen, setMobileLayersOpen] = useState(false)
+  const [importedTracks, setImportedTracks] = useState([])
+  const [connectedHotspots, setConnectedHotspots] = useState([])
+  const frame = fireFrames[frameIndex]
+
+  useEffect(() => {
+    if (!playing) return undefined
+    const delay = 1100 / playbackRate
+    const timer = window.setInterval(() => {
+      setFrameIndex((current) => {
+        if (current >= fireFrames.length - 1) {
+          setPlaying(false)
+          return current
+        }
+        return current + 1
+      })
+    }, delay)
+    return () => window.clearInterval(timer)
+  }, [playing, playbackRate])
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (dataOpen || ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return
+      if (event.key === 'ArrowLeft') setFrameIndex((value) => Math.max(0, value - 1))
+      if (event.key === 'ArrowRight') setFrameIndex((value) => Math.min(fireFrames.length - 1, value + 1))
+      if (event.key === ' ') {
+        event.preventDefault()
+        setPlaying((value) => !value)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [dataOpen])
+
+  const currentEvents = useMemo(
+    () => events.filter((event) => event.frame <= frameIndex).slice(-5).reverse(),
+    [frameIndex],
+  )
+
+  const activeFlights = useMemo(
+    () => flights.filter((flight) => frameIndex >= flight.startFrame && frameIndex < flight.endFrame),
+    [frameIndex],
+  )
+
+  const hotspotDataset = connectedHotspots.length ? connectedHotspots : hotspots
+  const visibleHotspots = hotspotDataset.filter((spot) => spot.frame <= frameIndex).length
+
+  function importTracks(tracks) {
+    const colors = ['#168aad', '#c15f9a', '#7c9f35', '#d47f28']
+    const normalized = tracks.map((track, index) => ({
+      id: `import-${Date.now()}-${index}`,
+      callSign: track.callSign,
+      label: 'Imported aircraft track',
+      type: 'helicopter',
+      status: 'User import · verify source',
+      color: colors[index % colors.length],
+      startFrame: 0,
+      endFrame: fireFrames.length - 1,
+      start: 'Imported',
+      end: 'Imported',
+      drops: 0,
+      distance: '—',
+      points: track.points,
+    }))
+    setImportedTracks((current) => [...current, ...normalized])
+    setLayers((current) => ({ ...current, aircraft: true }))
+  }
+
+  return (
+    <div className="app-shell">
+      <header className="app-header">
+        <div className="brand-block">
+          <span className="brand-mark"><Flame size={19} fill="currentColor" /></span>
+          <div><strong>VENN</strong><small>FIRE WATCH</small></div>
+        </div>
+
+        <div className="incident-heading">
+          <div className="incident-location"><MapPin size={14} /><span>HIGH FENS</span><i>/</i><b>EUPEN · BAELEN</b></div>
+          <span className="reference-badge"><Sparkles size={11} /> REFERENCE VIEW</span>
+        </div>
+
+        <div className="header-actions">
+          <div className="updated-state"><span className="live-pulse" /><div><small>DATA SNAPSHOT</small><strong>15 Aug · 02:00 CEST</strong></div></div>
+          <button className="data-button" type="button" onClick={() => setDataOpen(true)}><Database size={15} /><span>Data & sources</span></button>
+        </div>
+      </header>
+
+      <div className="workspace">
+        <aside className={`left-sidebar ${mobileLayersOpen ? 'is-mobile-open' : ''}`}>
+          <div className="incident-card">
+            <div className="incident-card-head">
+              <span className="active-tag"><i /> ACTIVE INCIDENT</span>
+              <button type="button" aria-label="Incident information"><Info size={15} /></button>
+            </div>
+            <h1>High Fens<br />wildfire</h1>
+            <p>Pilgerweg · Allgemeines Venn</p>
+            <div className="incident-metrics">
+              <div><strong>~{frame.reportedHa}</strong><span>hectares</span><small>{frame.areaLabel}</small></div>
+              <div><strong>{frame.confidence}</strong><span>area status</span><small>not a live perimeter</small></div>
+            </div>
+          </div>
+
+          <div className="sidebar-section layers-section">
+            <div className="section-heading"><span>MAP LAYERS</span><button type="button" onClick={() => setLayers(initialLayers)} aria-label="Reset map layers"><RotateCcw size={13} /></button></div>
+            <div className="layer-list">
+              {layerOptions.map((item) => (
+                <LayerToggle
+                  key={item.key}
+                  item={item}
+                  checked={layers[item.key]}
+                  onChange={() => setLayers((value) => ({ ...value, [item.key]: !value[item.key] }))}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className="sidebar-section source-summary">
+            <div className="section-heading"><span>SOURCE HEALTH</span><button type="button" onClick={() => setDataOpen(true)}>Manage</button></div>
+            <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
+              <SourceMark tone="nasa" /><span><strong>FIRMS</strong><small>{connectedHotspots.length ? `${connectedHotspots.length} detections plotted` : 'Reference points'}</small></span><em className={`health-dot ${connectedHotspots.length ? '' : 'health-dot--amber'}`} />
+            </button>
+            <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
+              <SourceMark tone="weather" /><span><strong>Wind model</strong><small>Hourly values loaded</small></span><em className="health-dot" />
+            </button>
+            <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
+              <SourceMark tone="adsb" /><span><strong>Aircraft</strong><small>{importedTracks.length ? `${importedTracks.length} imported` : 'Reconstruction only'}</small></span><em className={`health-dot ${importedTracks.length ? '' : 'health-dot--amber'}`} /></button>
+          </div>
+
+          <div className="emergency-note">
+            <ShieldAlert size={17} />
+            <p><strong>Not an emergency service</strong><span>For official instructions follow BE-Alert and call 112 only for an emergency.</span></p>
+          </div>
+        </aside>
+
+        <main className="map-region">
+          <MapView
+            frameIndex={frameIndex}
+            layers={layers}
+            baseMode={baseMode}
+            onMapReady={setMapActions}
+            importedTracks={importedTracks}
+            connectedHotspots={connectedHotspots}
+          />
+
+          <div className="map-topbar">
+            <button className="mobile-layer-button" type="button" onClick={() => setMobileLayersOpen((value) => !value)}><Layers3 size={16} /> Layers</button>
+            <div className="basemap-switcher" role="group" aria-label="Base map">
+              <button className={baseMode === 'terrain' ? 'is-active' : ''} onClick={() => setBaseMode('terrain')} type="button"><Map size={14} /> Map</button>
+              <button className={baseMode === 'satellite' ? 'is-active' : ''} onClick={() => setBaseMode('satellite')} type="button"><Satellite size={14} /> Satellite</button>
+              <button className={baseMode === 'topo' ? 'is-active' : ''} onClick={() => setBaseMode('topo')} type="button"><Mountain size={14} /> Topo</button>
+            </div>
+            <div className="map-date-chip"><CalendarDays size={14} /><span>{frameIndex < 11 ? 'Fri 14 Aug' : 'Sat 15 Aug'}</span><strong>{frame.shortTime}</strong></div>
+          </div>
+
+          <div className="map-warning">
+            <ShieldAlert size={15} />
+            <p><strong>High Fens access restrictions</strong><span>Follow local authority instructions; do not approach the incident area.</span></p>
+            <a href="https://www.be-alert.be/en" target="_blank" rel="noreferrer">BE-Alert <ExternalLink size={12} /></a>
+          </div>
+
+          <div className="map-controls" aria-label="Map controls">
+            <button type="button" onClick={() => mapActions?.zoomIn()} aria-label="Zoom in"><Plus size={18} /></button>
+            <button type="button" onClick={() => mapActions?.zoomOut()} aria-label="Zoom out"><Minus size={18} /></button>
+            <i />
+            <button type="button" onClick={() => mapActions?.home()} aria-label="Show full incident area"><Maximize2 size={17} /></button>
+            <button type="button" onClick={() => mapActions?.fire()} aria-label="Center on fire"><LocateFixed size={17} /></button>
+          </div>
+
+          <div className="map-scale-card"><span><i /> 5 km</span><small>50.593° N · 6.194° E</small></div>
+
+          <Timeline
+            frameIndex={frameIndex}
+            setFrameIndex={setFrameIndex}
+            playing={playing}
+            setPlaying={setPlaying}
+            playbackRate={playbackRate}
+            setPlaybackRate={setPlaybackRate}
+          />
+        </main>
+
+        <aside className="right-inspector">
+          <div className="inspector-tabs">
+            <button className={inspectorTab === 'situation' ? 'is-active' : ''} onClick={() => setInspectorTab('situation')} type="button">Situation</button>
+            <button className={inspectorTab === 'air' ? 'is-active' : ''} onClick={() => setInspectorTab('air')} type="button">Air ops <span>{flights.length + importedTracks.length}</span></button>
+          </div>
+
+          {inspectorTab === 'situation' ? (
+            <div className="inspector-scroll">
+              <div className="snapshot-head">
+                <span className="kicker">AT SELECTED TIME</span>
+                <strong>{frame.shortTime}<small>CEST</small></strong>
+                <p>{frameIndex < 11 ? 'Friday, 14 August 2026' : 'Saturday, 15 August 2026'}</p>
+              </div>
+
+              <div className="snapshot-grid">
+                <article className="snapshot-card snapshot-card--fire"><span><Flame size={15} /> REPORTED AREA</span><strong>~{frame.reportedHa}<small>ha</small></strong><p>{frame.areaLabel}</p></article>
+                <article className="snapshot-card"><span><Satellite size={15} /> HOTSPOTS</span><strong>{visibleHotspots}<small>pts</small></strong><p>{connectedHotspots.length ? 'NASA FIRMS connected' : 'reference view'}</p></article>
+                <article className="snapshot-card"><span><Helicopter size={15} /> AIRCRAFT</span><strong>{activeFlights.length}<small>active</small></strong><p>{activeFlights.length ? 'in reconstruction' : 'none at this time'}</p></article>
+                <article className="snapshot-card snapshot-card--wind"><span><Wind size={15} /> WIND FROM</span><strong>{windCardinal(frame.windDirection)}<small>{frame.windDirection}°</small></strong><p>{frame.windSpeed.toFixed(1)} km/h · gust {frame.gust.toFixed(0)}</p></article>
+              </div>
+
+              <div className="conditions-card">
+                <div className="section-heading"><span>FIRE WEATHER</span><small>10 m · hourly model</small></div>
+                <div className="wind-hero">
+                  <span className="big-wind-arrow" title={`Wind travelling toward ${(frame.windDirection + 180) % 360}°`}>
+                    <svg viewBox="0 0 24 24" style={{ '--wind-rotation': `${(frame.windDirection + 180) % 360}deg` }} aria-hidden="true">
+                      <path d="M12 20V4M6.5 9.5 12 4l5.5 5.5" />
+                    </svg>
+                  </span>
+                  <div><strong>{windCardinal(frame.windDirection)}</strong><span>from {frame.windDirection}°</span></div>
+                  <p><strong>{frame.windSpeed.toFixed(1)}</strong><span>km/h</span><small>gusts {frame.gust.toFixed(1)}</small></p>
+                </div>
+                <div className="condition-row">
+                  <span><ThermometerSun size={15} /> Temperature<strong>{frame.temperature.toFixed(1)}°C</strong></span>
+                  <span><Droplets size={15} /> Humidity<strong>{frame.humidity}%</strong></span>
+                </div>
+              </div>
+
+              <section className="event-log">
+                <div className="section-heading"><span>INCIDENT LOG</span><small>{events.filter((event) => event.frame <= frameIndex).length} visible</small></div>
+                <div className="event-list">
+                  {currentEvents.map((event, index) => {
+                    const Icon = iconForEvent(event.type)
+                    return (
+                      <button key={`${event.time}-${event.title}`} className={`event-row ${index === 0 ? 'is-latest' : ''}`} type="button" onClick={() => setFrameIndex(event.frame)}>
+                        <span className={`event-icon event-icon--${event.type}`}><Icon size={14} /></span>
+                        <span><strong>{event.title}</strong><small>{event.detail}</small></span>
+                        <time>{event.time}</time>
+                      </button>
+                    )
+                  })}
+                </div>
+              </section>
+            </div>
+          ) : (
+            <div className="inspector-scroll air-ops-panel">
+              <div className="air-ops-summary">
+                <span className="kicker">TRACK COVERAGE</span>
+                <h2>Aerial operations</h2>
+                <p>Replay reconstructed response flights or import licensed ADS-B history for a verified incident record.</p>
+                <button type="button" onClick={() => setDataOpen(true)}><FileUp size={14} /> Import tracks</button>
+              </div>
+
+              <div className="flight-list">
+                {[...flights, ...importedTracks].map((flight) => {
+                  const isActive = frameIndex >= flight.startFrame && frameIndex < flight.endFrame
+                  const hasStarted = frameIndex >= flight.startFrame
+                  return (
+                    <article key={flight.id} className={`flight-card ${isActive ? 'is-active' : ''} ${hasStarted ? '' : 'is-future'}`}>
+                      <div className="flight-head">
+                        <span className="flight-icon" style={{ '--flight-color': flight.color }}>{flight.type === 'plane' ? <Plane size={17} /> : <Helicopter size={17} />}</span>
+                        <div><strong>{flight.callSign}</strong><small>{flight.label}</small></div>
+                        <span className={`flight-state ${isActive ? 'is-live' : ''}`}>{isActive ? 'IN AIR' : hasStarted ? 'ENDED' : 'LATER'}</span>
+                      </div>
+                      <div className="flight-stats"><span><small>WINDOW</small><strong>{flight.start}–{flight.end}</strong></span><span><small>DROPS</small><strong>{flight.drops || '—'}</strong></span><span><small>DISTANCE</small><strong>{flight.distance}</strong></span></div>
+                      <div className="flight-provenance"><Info size={12} /> {flight.status}</div>
+                    </article>
+                  )
+                })}
+              </div>
+
+              <div className="coverage-note"><Radio size={15} /><p><strong>Coverage is not completeness.</strong><span>Emergency, military and low-level aircraft can be absent from ADS-B archives or have irregular reception.</span></p></div>
+            </div>
+          )}
+        </aside>
+      </div>
+
+      <DataModal
+        open={dataOpen}
+        onClose={() => setDataOpen(false)}
+        onImportTracks={importTracks}
+        importedCount={importedTracks.length}
+        onFirmsData={setConnectedHotspots}
+        connectedCount={connectedHotspots.length}
+      />
+    </div>
+  )
+}
+
+export default App
