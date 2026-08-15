@@ -7,6 +7,7 @@
 import {
   FIRMS_SENSORS,
   buildFirmsRequests,
+  corroborateDetections,
   detectionFootprint,
   estimateFootprintArea,
   parseFirmsCsv,
@@ -146,6 +147,49 @@ check('estimate carries its request url', summary.sourceRequestUrl, requests[0].
 check('caveats travel with the figure', summary.caveats.length > 0, true)
 check('single pixel size published for scale', summary.singlePixelHa, SINGLE_PIXEL_HA, 0.001)
 check('window start reported', summary.firstAcquiredAt, '2026-08-14T13:12:00.000Z')
+
+// --- corroboration ------------------------------------------------------------
+
+const at = (latitude, longitude, sensorKey) => ({
+  latitude, longitude, sensorKey, scanKm: 0.375, trackKm: 0.375,
+  acquiredAt: '2026-08-15T00:35:00.000Z',
+  confidence: { label: 'nominal', rank: 2, raw: 'n' },
+  frpMw: 2.5, brightnessK: null, dayNight: 'N', satellite: 'test', footprintSource: 'published',
+})
+
+// Two different satellites over the same spot corroborate each other.
+const together = corroborateDetections([
+  at(50.5400, 6.0800, 'viirsNoaa20'),
+  at(50.5401, 6.0801, 'viirsSnpp'),
+])
+check('same cell, two satellites is corroborated', together.every((d) => d.isCorroborated), true)
+check('corroborating satellite count is reported', together[0].corroboratingSensors, 2)
+
+// The west-side case: many detections, all from one satellite.
+const onePass = corroborateDetections([
+  at(50.5400, 6.0000, 'viirsNoaa20'),
+  at(50.5401, 6.0001, 'viirsNoaa20'),
+  at(50.5402, 6.0002, 'viirsNoaa20'),
+])
+check('one satellite alone is not corroborated', onePass.some((d) => d.isCorroborated), false)
+check('repeat passes of one satellite do not self-corroborate', onePass[0].corroboratingSensors, 1)
+
+// Distant detections from two satellites are not the same location.
+const apart = corroborateDetections([
+  at(50.5400, 6.0800, 'viirsNoaa20'),
+  at(50.5400, 6.2000, 'viirsSnpp'),
+])
+check('different cells do not corroborate', apart.some((d) => d.isCorroborated), false)
+
+// MODIS is too coarse to place a 375 m detection, so it neither corroborates nor
+// is corroborated.
+const withModis = corroborateDetections([
+  at(50.5400, 6.0800, 'viirsNoaa20'),
+  at(50.5401, 6.0801, 'modis'),
+])
+check('modis does not corroborate viirs', withModis[0].isCorroborated, false)
+check('modis is excluded, not scored', withModis[1].corroboratingSensors, null)
+check('modis is never in the corroborated set', withModis[1].isCorroborated, false)
 
 if (failures) {
   console.error(`\n${failures} check(s) failed`)

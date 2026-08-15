@@ -567,9 +567,12 @@ export const events = [
 // source for protected-area boundaries.
 export const protectedArea = []
 
-export const mapLabels = [
-  { name: 'Drossart · reported fire locality', position: CENTER, kind: 'poi' },
-]
+// The Drossart locality marker was removed. It plotted the place name used in
+// the incident reports, not any fire measurement, and read as an ignition point.
+// CENTER remains the measurement datum for every distance in this project: the
+// ADS-B selection radii, the FIRMS bounding box and the station offsets all
+// still reference it. Only the map marker is gone.
+export const mapLabels = []
 
 export const sourceLinks = [
   {

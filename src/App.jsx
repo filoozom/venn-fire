@@ -58,13 +58,23 @@ import {
   sourceLinks,
   TIMELINE_START_MS,
 } from './data'
-import { FIRMS_SENSORS, estimateFootprintArea } from './firmsDetections'
+import {
+  CORROBORATION_MIN_SENSORS,
+  FIRMS_SENSORS,
+  corroborateDetections,
+  estimateFootprintArea,
+} from './firmsDetections'
 
 // Each sensor is its own layer and each confidence level its own filter, so the
 // viewer chooses the configuration rather than inheriting a threshold we picked.
 // The hectare figure recomputes from whatever is checked; it is never a stored
 // constant.
 const FIRMS_LAYER_KEYS = Object.fromEntries(FIRMS_SENSORS.map((sensor) => [sensor.key, `firms:${sensor.key}`]))
+// Independent-satellite agreement, kept separate from the published confidence
+// field. NASA's confidence value is never rewritten: a detection we cannot
+// corroborate is still exactly what NASA reported it to be.
+const FIRMS_CORROBORATED_KEY = 'firmsCorroboratedOnly'
+
 const FIRMS_CONFIDENCE_LEVELS = [
   { key: 'firmsConfidence:high', level: 'high', label: 'High confidence' },
   { key: 'firmsConfidence:nominal', level: 'nominal', label: 'Nominal confidence' },
@@ -81,6 +91,9 @@ const FIRMS_LAYER_DEFAULTS = {
   'firmsConfidence:high': true,
   'firmsConfidence:nominal': true,
   'firmsConfidence:low': false,
+  // On by default: the uncorroborated fringe is the part most likely to be read
+  // as fire where there was none.
+  [FIRMS_CORROBORATED_KEY]: true,
 }
 
 const DWD_WIND_LAYER_KEYS = Object.fromEntries(
@@ -802,7 +815,7 @@ function App() {
   // Bundled and live FIRMS detections, placed on the five-minute timeline by their exact
   // acquisition time. A detection appears from its overpass onward; it is never
   // back-dated and never interpolated between overpasses.
-  const firmsDetections = useMemo(() => firmsData.detections.map((detection) => {
+  const firmsDetections = useMemo(() => corroborateDetections(firmsData.detections).map((detection) => {
     const sensor = FIRMS_SENSORS.find((entry) => entry.key === detection.sensorKey)
     return {
       ...detection,
@@ -826,6 +839,7 @@ function App() {
   const visibleFirmsDetections = useMemo(() => firmsDetectionsAtTime.filter((detection) => (
     layers[FIRMS_LAYER_KEYS[detection.sensorKey]]
       && activeConfidenceLevels.includes(detection.confidence.label)
+      && (!layers[FIRMS_CORROBORATED_KEY] || detection.isCorroborated)
   )), [firmsDetectionsAtTime, layers, activeConfidenceLevels])
 
   // The estimate is recomputed here from the checked sensors and checked
@@ -947,12 +961,23 @@ function App() {
                   </label>
                 )
               })}
+              <label className="layer-checkbox">
+                <input
+                  type="checkbox"
+                  checked={Boolean(layers[FIRMS_CORROBORATED_KEY])}
+                  onChange={() => setLayers((value) => ({
+                    ...value, [FIRMS_CORROBORATED_KEY]: !value[FIRMS_CORROBORATED_KEY],
+                  }))}
+                />
+                <span>{`Corroborated only (≥${CORROBORATION_MIN_SENSORS} satellites)`}</span>
+                <em>{firmsDetections.filter((detection) => detection.isCorroborated).length}</em>
+              </label>
             </div>
             <p className="layer-note">
               {firmsAreaRange
                 ? (firmsAreaRange.sensorCount > 1
-                  ? `Detection-footprint estimate ${Math.round(firmsAreaRange.min).toLocaleString('en-GB')}–${Math.round(firmsAreaRange.max).toLocaleString('en-GB')} ha across ${firmsAreaRange.sensorCount} sensors, at the selected confidence levels. Not a burned area.`
-                  : `Detection-footprint estimate ${Math.round(firmsAreaRange.max).toLocaleString('en-GB')} ha at the selected confidence levels. Not a burned area.`)
+                  ? `Detection-footprint estimate ${Math.round(firmsAreaRange.min).toLocaleString('en-GB')}–${Math.round(firmsAreaRange.max).toLocaleString('en-GB')} ha across ${firmsAreaRange.sensorCount} sensors, at the selected confidence levels${layers[FIRMS_CORROBORATED_KEY] ? ', limited to cells two satellites both observed' : ''}. Not a burned area.`
+                  : `Detection-footprint estimate ${Math.round(firmsAreaRange.max).toLocaleString('en-GB')} ha at the selected confidence levels${layers[FIRMS_CORROBORATED_KEY] ? ', limited to cells two satellites both observed' : ''}. Not a burned area.`)
                 : 'No FIRMS detections at the selected sensors, confidence levels and time.'}
             </p>
           </div>

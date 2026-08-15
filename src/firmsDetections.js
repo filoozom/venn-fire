@@ -73,12 +73,58 @@ export const FIRMS_SENSORS = [
   },
 ]
 
+// Corroboration: whether independent spacecraft saw the same patch of ground.
+//
+// A single overpass can trigger on something that is not an active fire front.
+// The 15 August 00:35 NOAA-20 pass produced 27 detections west of the burn at a
+// mean 2.5 MW, against 37.9 MW in the corroborated core, and not one of them was
+// high confidence or seen by any other satellite. Requiring agreement between
+// two spacecraft removes that fringe without touching any published value.
+export const CORROBORATION_CELL_DEGREES = 0.005 // about 500 m at this latitude
+export const CORROBORATION_MIN_SENSORS = 2
+
+const INSTRUMENT_BY_SENSOR_KEY = new Map(FIRMS_SENSORS.map((sensor) => [sensor.key, sensor.instrument]))
+
+/**
+ * Tag each detection with how many distinct satellites observed its cell.
+ *
+ * Only VIIRS corroborates by default. A 1 km MODIS pixel covers far more ground
+ * than a 375 m VIIRS pixel, so treating the two as agreeing on a location would
+ * overstate what MODIS can actually resolve. MODIS detections are therefore
+ * marked with a null count and are never part of the corroborated set.
+ */
+export function corroborateDetections(detections, options = {}) {
+  const cellDegrees = options.cellDegrees ?? CORROBORATION_CELL_DEGREES
+  const minSensors = options.minSensors ?? CORROBORATION_MIN_SENSORS
+  const eligibleInstruments = new Set(options.eligibleInstruments ?? ['VIIRS'])
+
+  const isEligible = (detection) => eligibleInstruments.has(INSTRUMENT_BY_SENSOR_KEY.get(detection.sensorKey))
+  const cellKey = (detection) => `${Math.floor(detection.latitude / cellDegrees)}:${Math.floor(detection.longitude / cellDegrees)}`
+
+  const sensorsByCell = new Map()
+  for (const detection of detections) {
+    if (!isEligible(detection)) continue
+    const key = cellKey(detection)
+    if (!sensorsByCell.has(key)) sensorsByCell.set(key, new Set())
+    sensorsByCell.get(key).add(detection.sensorKey)
+  }
+
+  return detections.map((detection) => {
+    if (!isEligible(detection)) {
+      return { ...detection, corroboratingSensors: null, isCorroborated: false }
+    }
+    const count = sensorsByCell.get(cellKey(detection))?.size ?? 0
+    return { ...detection, corroboratingSensors: count, isCorroborated: count >= minSensors }
+  })
+}
+
 export const FOOTPRINT_ESTIMATE_CAVEATS = [
   'A detection marks a pixel that was radiating at the moment of the overpass. The published footprint is the whole sensor pixel, so a fire front far smaller than the pixel still marks the entire footprint. The estimate therefore overstates area for narrow or broken fire fronts.',
   'Only ground that was actively flaming during an overpass can be detected. Ground that ignited and burned out between overpasses is never counted, and smoke or cloud removes further detections. The estimate therefore understates area for a fast-moving fire between passes.',
   'Because those two errors act in opposite directions and do not cancel predictably, this figure is neither an upper nor a lower bound on burned area.',
   'The footprint rectangle is axis-aligned in latitude and longitude from the published scan and track pixel dimensions. It approximates the true sensor parallelogram and ignores the scan-angle rotation.',
   'Each sensor is estimated independently. Figures from different sensors must not be added together; the same ground observed twice is two observations, not twice the area.',
+  'Corroboration records that two spacecraft observed the same cell. It raises confidence that something was burning there; it does not measure how much of the cell burned, and an uncorroborated detection is not thereby proven false.',
 ]
 
 // WGS84 local scale, so the grid union is computed in metres rather than in
