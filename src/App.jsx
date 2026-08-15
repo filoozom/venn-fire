@@ -746,7 +746,12 @@ function App() {
     // Every event up to the selected time, newest first. Capping this at five hid
     // earlier entries entirely, including the evacuation orders, and with them
     // their source links. The list scrolls instead.
-    () => events.filter((event) => event.frame <= frameIndex).reverse(),
+    // Sorted, not reversed: the source array is not in chronological order, so
+    // reversing it produced a list that only looked ordered.
+    () => events
+      .filter((event) => event.frame <= frameIndex)
+      .slice()
+      .sort((left, right) => right.frame - left.frame),
     [frameIndex],
   )
 

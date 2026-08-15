@@ -14,7 +14,7 @@ const RMI_STATION_MAX_AGE_MS = 20 * 60 * 1000
 export const AIRCRAFT_PATH_MAX_GAP_MS = 2 * 60 * 1000
 export const AIRCRAFT_PATH_MAX_SPEED_KT = 160
 export const TIMELINE_START_MS = Date.parse('2026-08-14T13:00:00+02:00')
-export const BUNDLED_TIMELINE_END_MS = Date.parse('2026-08-15T11:45:00+02:00')
+export const BUNDLED_TIMELINE_END_MS = Date.parse('2026-08-15T15:00:00+02:00')
 
 export { effisAreaForTimestamp, effisBurnedArea, effisBurnedAreas, effisProductIsCarriedForward }
 
@@ -126,6 +126,14 @@ export const areaReports = [
     reportedHa: 900,
     areaPrefix: '>',
     areaLabel: 'local reporting updated at 11:28 CEST',
+    source: 'BRF',
+    sourceUrl: 'https://brf.be/regional/2100196/',
+  },
+  {
+    timestampMs: Date.parse('2026-08-15T14:30:00+02:00'),
+    reportedHa: 1500,
+    areaPrefix: '>',
+    areaLabel: 'BRF update at 14:30 CEST',
     source: 'BRF',
     sourceUrl: 'https://brf.be/regional/2100196/',
   },
@@ -416,6 +424,15 @@ export const events = [
     type: 'evacuation',
     sourceUrl: 'https://www.lavenir.net/regions/verviers/waimes/2026/08/14/le-mont-rigi-et-la-baraque-michel-evacues-a-cause-de-lincendie-dans-les-hautes-fagnes-la-nuit-va-etre-decisive-LOCGEEQ7EFFTXHCGJVWN354UVM/',
     sourceName: 'L’Avenir, published 14 Aug 22:30',
+  },
+  {
+    frame: frameAt('2026-08-15T13:45:00+02:00'),
+    time: '13:45',
+    title: 'Sourbrodt put on evacuation standby',
+    detail: 'The commune of Waimes asks Sourbrodt residents to prepare for a possible evacuation and to pack a bag of essentials. No evacuation is ordered; residents are told to stay in their homes. The village is under heavy smoke.',
+    type: 'evacuation',
+    sourceUrl: 'https://www.aachener-zeitung.de/region-nrw/belgien/liveblog-brandflaeche-im-hohen-venn-waechst-auf-1600-hektar/160063855.html',
+    sourceName: 'Aachener Zeitung liveblog, 15 Aug 13:45',
   },
   {
     frame: frameAt('2026-08-14T19:24:00+02:00'),
