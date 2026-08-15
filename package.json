@@ -33,12 +33,13 @@
     "refresh:daemon": "node scripts/refresh-daemon.mjs"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
     "@vitejs/plugin-react": "latest",
-    "vite": "latest",
+    "leaflet": "^1.9.4",
+    "lucide-react": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "leaflet": "^1.9.4",
-    "lucide-react": "latest"
+    "vite": "latest"
   },
   "devDependencies": {
     "@playwright/test": "latest"

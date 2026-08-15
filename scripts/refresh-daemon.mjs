@@ -31,6 +31,17 @@ export const SOURCES = [
     command: ['scripts/import-live-flights.mjs'],
   },
   {
+    key: 'alerts',
+    label: 'BE-Alert public alerts',
+    // Alerts expire within an hour or two and leave the feed when they do, so a
+    // slow poll loses them permanently. The importer accumulates what it sees.
+    intervalMs: 5 * MINUTE,
+    retryIntervalMs: 5 * MINUTE,
+    reason: 'Alerts expire within the hour and leave the feed',
+    command: ['scripts/import-public-alerts.mjs'],
+    snapshotArgs: ['--write-snapshot'],
+  },
+  {
     key: 'rmi',
     label: 'RMI Mont Rigi observations',
     // The station itself reports every ten minutes; polling faster cannot

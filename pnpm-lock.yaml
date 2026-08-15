@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@neondatabase/serverless':
+        specifier: ^1.1.0
+        version: 1.1.0
       '@vitejs/plugin-react':
         specifier: latest
         version: 6.0.5(vite@8.2.1)
@@ -32,6 +35,10 @@ importers:
         version: 1.62.1
 
 packages:
+
+  '@neondatabase/serverless@1.1.0':
+    resolution: {integrity: sha512-r3ZZhRjEcfEdKIZnoB1RusNgvHuaBRqfCzV4Gi+5A9yUX0S4HTws/ASWqt13wL4y4I+0rqsWGdA2w7EQXHi3+Q==}
+    engines: {node: '>=19.0.0'}
 
   '@oxc-project/types@0.144.0':
     resolution: {integrity: sha512-nuhZIOLuI6TFQ32I/WnUx+SCPY7SdSKwgnFHydAuoS1+Z4BRcaP+RRJmGzl9lw+0OFF7UmaESf7KQRXaNLHypg==}
@@ -337,6 +344,8 @@ packages:
         optional: true
 
 snapshots:
+
+  '@neondatabase/serverless@1.1.0': {}
 
   '@oxc-project/types@0.144.0': {}
 

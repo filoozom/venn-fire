@@ -215,15 +215,9 @@ export default function MapView({
     if (!group) return
     group.clearLayers()
 
-    L.circleMarker(incidentCenter, {
-      radius: 7,
-      color: '#fff3d6',
-      weight: 2,
-      fillColor: '#ef4f2f',
-      fillOpacity: 0.9,
-    })
-      .bindTooltip('<strong>Drossart</strong><br><small>Reported fire locality · not an ignition-point survey</small>', { direction: 'top' })
-      .addTo(group)
+    // The Drossart marker was removed: it plotted the place name used in the
+    // incident reports, not a fire measurement, and read as an ignition point.
+    // incidentCenter remains the measurement datum for every distance here.
 
     if (layers.protected && protectedArea.length >= 3) {
       L.polygon(protectedArea, {
