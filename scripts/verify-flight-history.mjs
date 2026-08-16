@@ -57,6 +57,9 @@ function fakeDatabase() {
     }
     if (text.includes('INSERT INTO flight_observations')) {
       const records = JSON.parse(parameters[0])
+      if (new Set(records.map((record) => record.observation_key)).size !== records.length) {
+        throw new Error('ON CONFLICT DO UPDATE command cannot affect row a second time')
+      }
       records.forEach((record) => {
         state.observations.set(record.observation_key, {
           ...state.observations.get(record.observation_key),
@@ -111,6 +114,12 @@ const firstPoll = await persistFlightPoll({
 assert.equal(firstPoll.configured, true)
 assert.equal(firstPoll.ok, true)
 assert.equal(firstPoll.observations.length, 1)
+
+const duplicateBatch = await persistFlightObservations({ observations: [first, duplicate] }, options)
+assert.equal(duplicateBatch.persistedObservations, 1, 'one bulk insert must contain each conflict key only once')
+assert.equal(database.state.observations.size, 1)
+assert.equal(database.state.observations.get(flightObservationKey(first)).provider_id, 'adsb-lol')
+assert.deepEqual(database.state.observations.get(flightObservationKey(first)).corroborated_by, ['adsb-fi'])
 
 const secondPoll = await persistFlightPoll({
   generatedAt: '2026-08-15T12:04:30.000Z',

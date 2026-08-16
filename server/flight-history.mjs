@@ -200,7 +200,11 @@ export async function loadFlightHistory({
 }
 
 async function upsertFlightObservations(observations, query) {
-  const records = observations.filter(validObservation).map(observationRecord)
+  // Current and completed trace providers often return the same exact receiver
+  // fix. PostgreSQL cannot update one conflict target twice in a single INSERT,
+  // so merge duplicate observation keys before building the recordset. This
+  // also preserves provider corroboration instead of arbitrarily dropping one.
+  const records = mergeFlightHistory([], observations).map(observationRecord)
   if (!records.length) return 0
 
   const persisted = await query(`
