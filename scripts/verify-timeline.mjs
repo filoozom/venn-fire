@@ -141,27 +141,29 @@ const edgeNoteAfterRepeat = await page.locator('.layer-note').first().innerText(
 if (edgeBeforeRepeat.includes('Aircraft-supported edge')) {
   throw new Error(`Aircraft edge appeared before repeat support: ${edgeBeforeRepeat}`)
 }
-if (!edgeAfterRepeat.includes('Aircraft-supported edge') || !edgeNoteAfterRepeat.includes('2 GRZLY81 cells')) {
+if (!edgeAfterRepeat.includes('Aircraft-supported edge') || !edgeNoteAfterRepeat.includes('Dashed amber: GRZLY81 context only')) {
   throw new Error(`Aircraft edge did not enter on the expected five-minute frame: ${edgeAfterRepeat} / ${edgeNoteAfterRepeat}`)
 }
 
 // The 19:13 UTC Terra pass becomes available at the 19:15 UTC frame. It must
-// replace, rather than accumulate with, the earlier Aqua support, and it must
-// leave the VIIRS-only hectare figure untouched.
+// replace, rather than accumulate with, the earlier Aqua support and extend the
+// one solid satellite outline and its matching area figure.
 await selectTime('2026-08-15T21:10:00+02:00')
 const modisBeforeTerra = await page.locator('.layer-note').first().innerText()
 const areaBeforeTerra = await page.locator('.snapshot-card--estimate strong').innerText()
 await selectTime('2026-08-15T21:15:00+02:00')
 const modisAfterTerra = await page.locator('.layer-note').first().innerText()
 const areaAfterTerra = await page.locator('.snapshot-card--estimate strong').innerText()
-const modisLegendCount = await page.getByText('MODIS-supported extent', { exact: true }).count()
-if (!modisBeforeTerra.includes('Aqua pass')
-  || !modisAfterTerra.includes('13 coarse pixels from the Terra pass')
-  || modisLegendCount !== 1) {
+const estimateMethodKey = await page.locator('.outline-method-key').innerText()
+if (!modisBeforeTerra.includes('high-confidence Aqua MODIS pixels')
+  || !modisAfterTerra.includes('13 high-confidence Terra MODIS pixels')
+  || !estimateMethodKey.includes('Satellite estimate')
+  || estimateMethodKey.includes('MODIS-supported extent')) {
   throw new Error(`MODIS support did not switch on the expected five-minute frame: ${modisBeforeTerra} / ${modisAfterTerra}`)
 }
-if (areaBeforeTerra.replace(/\s+/gu, '') !== areaAfterTerra.replace(/\s+/gu, '')) {
-  throw new Error(`MODIS changed the VIIRS-only hectare figure: ${areaBeforeTerra} -> ${areaAfterTerra}`)
+if (areaBeforeTerra.replace(/\s+/gu, '') === areaAfterTerra.replace(/\s+/gu, '')
+  || areaAfterTerra.replace(/\s+/gu, '') !== '2,984ha') {
+  throw new Error(`Merged MODIS geometry did not update the matching estimate area: ${areaBeforeTerra} -> ${areaAfterTerra}`)
 }
 
 await selectTime('2026-08-15T14:30:00+02:00')
@@ -240,5 +242,5 @@ if (databaseReportUpdate.logEntries !== 1) {
 if (liveErrors.length) throw new Error(`Live-report browser errors: ${liveErrors.join(' | ')}`)
 if (errors.length) throw new Error(`Browser errors: ${errors.join(' | ')}`)
 
-console.log(JSON.stringify({ asyncShell, mobileAsyncShell, states, aircraftEdgeTimeline: { edgeBeforeRepeat, edgeAfterRepeat, edgeNoteAfterRepeat }, modisExtentTimeline: { modisBeforeTerra, modisAfterTerra, areaBeforeTerra, areaAfterTerra, modisLegendCount }, bundledLatestAreaLogEntries, effisOn14August, effisOn15August, unrelatedTrafficControls, officialSourceLinks, chartBounds, databaseReportUpdate }, null, 2))
+console.log(JSON.stringify({ asyncShell, mobileAsyncShell, states, aircraftEdgeTimeline: { edgeBeforeRepeat, edgeAfterRepeat, edgeNoteAfterRepeat }, modisExtentTimeline: { modisBeforeTerra, modisAfterTerra, areaBeforeTerra, areaAfterTerra, estimateMethodKey }, bundledLatestAreaLogEntries, effisOn14August, effisOn15August, unrelatedTrafficControls, officialSourceLinks, chartBounds, databaseReportUpdate }, null, 2))
 await browser.close()

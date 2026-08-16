@@ -67,10 +67,9 @@ import {
   deriveModisSupportedExtent,
 } from './modisFireEstimate'
 
-// Each sensor is its own layer and each confidence level its own filter, so the
-// viewer chooses the configuration rather than inheriting a threshold we picked.
-// The hectare figure recomputes from whatever is checked; it is never a stored
-// constant.
+// Each raw sensor is its own layer and each confidence level its own filter. The
+// Best estimate is separate: its single solid outline follows a fixed,
+// documented VIIRS + newest-pass MODIS selection rule.
 const FIRMS_LAYER_KEYS = Object.fromEntries(FIRMS_SENSORS.map((sensor) => [sensor.key, `firms:${sensor.key}`]))
 // Independent-satellite agreement, kept separate from the published confidence
 // field. NASA's confidence value is never rewritten: a detection we cannot
@@ -95,7 +94,6 @@ const FIRMS_LAYER_DEFAULTS = {
 // reported high confidence there. Drawn as a single dissolved boundary rather
 // than a mosaic of pixel rectangles.
 const BEST_ESTIMATE_RULE = '2+ satellites agree and the cell has a high-confidence detection'
-const AIRCRAFT_EDGE_RULE = 'repeated near-core GRZLY direction changes; long reservoir-side and transit legs excluded'
 
 function dwdWindLayerKey(stationId) {
   return `dwdWind:${stationId}`
@@ -516,7 +514,7 @@ function DataModal({
                 <p><strong>Different products answer different questions.</strong> The viewer keeps reported area, satellite-derived geometry, thermal detections, aircraft fixes and model weather separate.</p>
               </div>
               <div className="method-steps">
-                <article><span>01</span><div><strong>Thermal anomaly</strong><p>FIRMS detections appear at their exact acquisition time. VIIRS areas are confidence-sensitive footprint-union estimates; MODIS and Meteosat are detections-only because their pixels are too coarse for an area figure here.</p></div></article>
+                <article><span>01</span><div><strong>Thermal anomaly</strong><p>FIRMS detections appear at their exact acquisition time. Raw sensor layers stay separate. The Best estimate merges its corroborated VIIRS core with only nearby high-confidence pixels from the newest MODIS pass; Meteosat remains detections-only.</p></div></article>
                 <article><span>02</span><div><strong>Reported area</strong><p>The line is a timestamped step series. A figure becomes visible when published; when its stated effective time differs, both times are retained and shown. Between reports it means “last reported,” not measured growth.</p></div></article>
                 <article><span>03</span><div><strong>EFFIS daily geometry</strong><p>The 14 and 15 August VIIRS-derived polygons are separate calendar-day products. Their locally calculated geometry area is not the official affected area; EFFIS provides no within-day acquisition time for five-minute animation.</p></div></article>
                 <article><span>04</span><div><strong>Aircraft observations</strong><p>Identified incident aircraft are shown from exact receiver fixes returned by the independently health-checked aircraft providers. Gaps stay empty, and a marker never claims a helicopter remained airborne.</p></div></article>
@@ -755,12 +753,50 @@ function FireViewer({ runtime, databaseError }) {
     [firmsDetections, frame.timestampMs],
   )
 
-  // Detections meeting the best-estimate rule, at the selected time. The outline
-  // follows the fire rather than the viewer's confidence filter, so hiding a
-  // confidence level restyles the detections without moving the boundary.
-  const bestEstimateDetections = useMemo(
+  // The independently corroborated VIIRS core remains the anchor for both the
+  // MODIS and aircraft selection rules.
+  const bestEstimateCoreDetections = useMemo(
     () => firmsDetectionsAtTime.filter((detection) => detection.isFireCore),
     [firmsDetectionsAtTime],
+  )
+
+  const viirsCoreOutlineRings = useMemo(
+    () => footprintOutlineRings(bestEstimateCoreDetections, {
+      gridCellM: 50,
+      origin: {
+        latitude: firmsData.locationReference.latitude,
+        longitude: firmsData.locationReference.longitude,
+      },
+    }),
+    [bestEstimateCoreDetections, firmsData.locationReference],
+  )
+
+  const aircraftSupportedEdge = useMemo(() => deriveAircraftSupportedEdge({
+    flights: displayFlights,
+    detections: bestEstimateCoreDetections,
+    outlineRings: viirsCoreOutlineRings,
+    frameTimestampMs: frame.timestampMs,
+    origin: firmsData.locationReference,
+    gridCellM: AIRCRAFT_EDGE_GRID_CELL_M,
+    timeBucketMs: AIRCRAFT_EDGE_TIME_BUCKET_MS,
+  }), [displayFlights, bestEstimateCoreDetections, viirsCoreOutlineRings, frame.timestampMs, firmsData.locationReference])
+
+  const modisSupportedExtent = useMemo(() => deriveModisSupportedExtent({
+    detections: firmsDetectionsAtTime,
+    coreDetections: bestEstimateCoreDetections,
+    aircraftEdgeCandidates: aircraftSupportedEdge.candidates,
+    frameTimestampMs: frame.timestampMs,
+    origin: firmsData.locationReference,
+    gridCellM: MODIS_EXTENT_GRID_CELL_M,
+    timeBucketMs: MODIS_EXTENT_TIME_BUCKET_MS,
+  }), [firmsDetectionsAtTime, bestEstimateCoreDetections, aircraftSupportedEdge.candidates, frame.timestampMs, firmsData.locationReference])
+
+  // There is one satellite estimate, not a VIIRS outline plus a competing MODIS
+  // outline. Qualifying pixels from the newest MODIS pass extend the same raster
+  // union and therefore the same solid boundary and hectare figure.
+  const bestEstimateDetections = useMemo(
+    () => [...bestEstimateCoreDetections, ...modisSupportedExtent.detections],
+    [bestEstimateCoreDetections, modisSupportedExtent.detections],
   )
 
   const fireOutlineRings = useMemo(
@@ -774,35 +810,13 @@ function FireViewer({ runtime, databaseError }) {
     [bestEstimateDetections, firmsData.locationReference],
   )
 
-  const aircraftSupportedEdge = useMemo(() => deriveAircraftSupportedEdge({
-    flights: displayFlights,
-    detections: bestEstimateDetections,
-    outlineRings: fireOutlineRings,
-    frameTimestampMs: frame.timestampMs,
-    origin: firmsData.locationReference,
-    gridCellM: AIRCRAFT_EDGE_GRID_CELL_M,
-    timeBucketMs: AIRCRAFT_EDGE_TIME_BUCKET_MS,
-  }), [displayFlights, bestEstimateDetections, fireOutlineRings, frame.timestampMs, firmsData.locationReference])
-
-  const modisSupportedExtent = useMemo(() => deriveModisSupportedExtent({
-    detections: firmsDetectionsAtTime,
-    coreDetections: bestEstimateDetections,
-    aircraftEdgeCandidates: aircraftSupportedEdge.candidates,
-    frameTimestampMs: frame.timestampMs,
-    origin: firmsData.locationReference,
-    gridCellM: MODIS_EXTENT_GRID_CELL_M,
-    timeBucketMs: MODIS_EXTENT_TIME_BUCKET_MS,
-  }), [firmsDetectionsAtTime, bestEstimateDetections, aircraftSupportedEdge.candidates, frame.timestampMs, firmsData.locationReference])
-
   const visibleFirmsDetections = useMemo(() => firmsDetectionsAtTime.filter((detection) => (
     layers[FIRMS_LAYER_KEYS[detection.sensorKey]]
       && activeConfidenceLevels.includes(detection.confidence.label)
   )), [firmsDetectionsAtTime, layers, activeConfidenceLevels])
 
-  // The estimate is recomputed here from the checked sensors and checked
-  // confidence levels rather than read from a stored figure, so what is shown
-  // always matches what is drawn. Sensors are estimated separately and never
-  // summed: the same ground seen by two satellites is two observations.
+  // The estimate is the area of the exact 50 m raster union used by the solid
+  // boundary, so the number and the map geometry cannot disagree.
   const bestEstimateAreaHa = useMemo(() => estimateFootprintArea(bestEstimateDetections, {
     origin: {
       latitude: firmsData.locationReference.latitude,
@@ -892,14 +906,14 @@ function FireViewer({ runtime, databaseError }) {
               {/* The best estimate sits beside the reported figure. EFFIS keeps its
                   own card below: at roughly five times the reported area it is an
                   envelope, and giving it headline position overstated the burn. */}
-              <div><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}</strong><span>satellite-core ha</span><small>{bestEstimateDetections.length ? `${BEST_ESTIMATE_RULE} · ${modisSupportedExtent.detections.length ? `+ ${modisSupportedExtent.detections.length} MODIS support px · ` : ''}${aircraftSupportedEdge.candidates.length ? `+ ${aircraftSupportedEdge.candidates.length} aircraft edge cells · ` : ''}derived` : 'no qualifying detections yet'}</small></div>
+              <div><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}</strong><span>best-estimate ha</span><small>{bestEstimateDetections.length ? `${bestEstimateCoreDetections.length} VIIRS core${modisSupportedExtent.detections.length ? ` + ${modisSupportedExtent.detections.length} ${modisSupportedExtent.satellites.join('/')} MODIS` : ''} · derived` : 'no qualifying detections yet'}</small></div>
             </div>
           </div>
 
           <div className="sidebar-section layers-section">
             <div className="section-heading"><span>FIRE OUTLINE</span></div>
             <div className="layer-checkboxes">
-              <label className="layer-checkbox" title={BEST_ESTIMATE_RULE}>
+              <label className="layer-checkbox" title={`${BEST_ESTIMATE_RULE}; ${MODIS_EXTENT_RULE}`}>
                 <input
                   type="checkbox"
                   checked={Boolean(layers[FIRE_OUTLINE_KEY])}
@@ -910,13 +924,12 @@ function FireViewer({ runtime, databaseError }) {
               </label>
             </div>
             <div className="outline-method-key" aria-label="Best estimate outline methods">
-              <span><i className="is-satellite" /> Satellite core</span>
-              {modisSupportedExtent.detections.length ? <span><i className="is-modis" /> MODIS-supported extent</span> : null}
+              <span><i className="is-satellite" /> Satellite estimate</span>
               {aircraftSupportedEdge.candidates.length ? <span><i className="is-aircraft" /> Aircraft-supported edge</span> : null}
             </div>
             <p className="layer-note">
               {bestEstimateDetections.length
-                ? `Solid boundary: detections where ${BEST_ESTIMATE_RULE}. ${modisSupportedExtent.detections.length ? `Violet dotted extent: ${modisSupportedExtent.detections.length} coarse pixel${modisSupportedExtent.detections.length === 1 ? '' : 's'} from the ${modisSupportedExtent.satellites.join('/')} pass, selected by ${MODIS_EXTENT_RULE} and dissolved on the same 50 m grid. ` : ''}${aircraftSupportedEdge.candidates.length ? `Amber dashed edge: ${aircraftSupportedEdge.candidates.length} ${aircraftSupportedEdge.callSigns.join(', ')} cells derived from ${AIRCRAFT_EDGE_RULE}, binned at 5 minutes and snapped to the same 50 m grid. ` : ''}Only the solid VIIRS core contributes to hectares; these are evidence outlines, not a confirmed burned-area perimeter.`
+                ? `Solid red: one ${Math.round(bestEstimateAreaHa).toLocaleString('en-GB')} ha satellite estimate from ${bestEstimateCoreDetections.length} corroborated VIIRS detections${modisSupportedExtent.detections.length ? ` plus ${modisSupportedExtent.detections.length} high-confidence ${modisSupportedExtent.satellites.join('/')} MODIS pixels from the newest pass` : ''}. 50 m grid; not a confirmed burned-area perimeter.${aircraftSupportedEdge.candidates.length ? ` Dashed amber: ${aircraftSupportedEdge.callSigns.join(', ')} context only; receiver data cannot confirm a drop.` : ''}`
                 : 'No detections meet the best-estimate rule at this time.'}
             </p>
           </div>
@@ -995,7 +1008,6 @@ function FireViewer({ runtime, databaseError }) {
             importedTracks={importedTracks}
             firmsDetections={visibleFirmsDetections}
             fireOutlineRings={layers[FIRE_OUTLINE_KEY] ? fireOutlineRings : []}
-            modisFireExtent={layers[FIRE_OUTLINE_KEY] ? modisSupportedExtent : null}
             aircraftFireEdge={layers[FIRE_OUTLINE_KEY] ? aircraftSupportedEdge : null}
             mapLabels={runtime.mapLabels}
             protectedArea={runtime.protectedArea}
@@ -1056,7 +1068,7 @@ function FireViewer({ runtime, databaseError }) {
 
               <div className="snapshot-grid">
                 <article className="snapshot-card snapshot-card--fire"><span><Flame size={15} /> REPORTED AREA</span><strong>{reportedAreaText}<small>{frame.reportedHa == null ? '' : 'ha'}</small></strong><p>{frame.areaLabel}</p></article>
-                <article className="snapshot-card snapshot-card--estimate"><span><Flame size={15} /> BEST ESTIMATE</span><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}<small>{bestEstimateDetections.length ? 'ha' : ''}</small></strong><p>{bestEstimateDetections.length ? `VIIRS-core area · ${bestEstimateDetections.length} corroborated detections${modisSupportedExtent.detections.length ? ` · ${modisSupportedExtent.detections.length} MODIS support pixels` : ''}${aircraftSupportedEdge.candidates.length ? ` · ${aircraftSupportedEdge.candidates.length} aircraft edge cells` : ''}` : 'no qualifying detections yet'}</p></article>
+                <article className="snapshot-card snapshot-card--estimate"><span><Flame size={15} /> BEST ESTIMATE</span><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}<small>{bestEstimateDetections.length ? 'ha' : ''}</small></strong><p>{bestEstimateDetections.length ? `${bestEstimateDetections.length} selected thermal detections · ${bestEstimateCoreDetections.length} VIIRS${modisSupportedExtent.detections.length ? ` + ${modisSupportedExtent.detections.length} ${modisSupportedExtent.satellites.join('/')} MODIS` : ''}` : 'no qualifying detections yet'}</p></article>
                 <article className="snapshot-card snapshot-card--effis"><span><Layers3 size={15} /> EFFIS DAILY GEOMETRY</span><strong>{currentEffisArea ? Math.round(currentEffisArea.areaHa).toLocaleString('en-GB') : '—'}<small>{currentEffisArea ? 'ha' : ''}</small></strong><p>{currentEffisArea ? `${currentEffisArea.productDate}${effisCarriedForward ? ' carried forward until replacement' : ''} · envelope containing fire activity, not burned area` : 'no EFFIS product available at selected time'}</p></article>
                 <article className="snapshot-card"><span><Satellite size={15} /> HOTSPOTS</span><strong>{visibleFirmsDetections.length}<small>px</small></strong><p>shaded by confidence · exact NASA FIRMS detections</p></article>
                 <article className="snapshot-card"><span><Helicopter size={15} /> AIR OPS</span><strong>{activeFlights.length}<small>recent</small></strong><p>{activeFlights.length ? 'fix within previous 5 min' : 'no recent observation'}</p></article>

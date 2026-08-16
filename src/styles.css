@@ -3024,11 +3024,6 @@ button.connection-card--upload {
   border-top-style: dashed;
 }
 
-.outline-method-key i.is-modis {
-  border-color: #9e5db0;
-  border-top-style: dotted;
-}
-
 .layer-note {
   margin: 9px 2px 0;
   font-size: 12.5px;
@@ -3145,10 +3140,6 @@ button.connection-card--upload {
 /* Best-estimate fire boundary. */
 .fire-outline {
   filter: drop-shadow(0 0 3px rgba(255, 47, 38, 0.45));
-}
-
-.modis-fire-extent {
-  filter: drop-shadow(0 0 3px rgba(91, 43, 105, 0.5));
 }
 
 .aircraft-fire-edge {

@@ -19,9 +19,10 @@ const FIRMS_SOURCE_URL = 'https://firms.modaps.eosdis.nasa.gov/'
 const MAX_DAY_RANGE = 10
 
 // Each sensor is a separate published product from a separate spacecraft, so
-// each gets its own map layer, its own colour and its own hectare estimate. They
-// are never merged into one number: overlapping detections from two satellites
-// are two independent observations, not one better observation.
+// each gets its own map layer and colour, and standalone sensor summaries stay
+// separate. The Best estimate is the deliberate exception: another module
+// selects only the newest nearby high-confidence MODIS pixels before the caller
+// unions them with its corroborated VIIRS core.
 export const FIRMS_SENSORS = [
   {
     key: 'viirsSnpp',
@@ -72,7 +73,7 @@ export const FIRMS_SENSORS = [
     providesArea: false,
     displayMode: 'footprint',
     pixelSizeLabel: '1 km nominal pixel',
-    areaExclusionReason: 'MODIS pixels are too coarse for an area estimate at this incident scale.',
+    areaExclusionReason: 'MODIS pixels are too coarse for a standalone per-sensor area. Only tightly filtered newest-pass pixels can extend the combined Best estimate.',
     apiSource: 'MODIS_NRT',
     name: 'MODIS Terra/Aqua',
     platform: 'Terra and Aqua',
@@ -191,7 +192,7 @@ export const FOOTPRINT_ESTIMATE_CAVEATS = [
   'Only ground that was actively flaming during an overpass can be detected. Ground that ignited and burned out between overpasses is never counted, and smoke or cloud removes further detections. The estimate therefore understates area for a fast-moving fire between passes.',
   'Because those two errors act in opposite directions and do not cancel predictably, this figure is neither an upper nor a lower bound on burned area.',
   'The footprint rectangle is axis-aligned in latitude and longitude from the published scan and track pixel dimensions. It approximates the true sensor parallelogram and ignores the scan-angle rotation.',
-  'Each sensor is estimated independently. Figures from different sensors must not be added together; the same ground observed twice is two observations, not twice the area.',
+  'Standalone sensor figures are estimated independently and must not be added. The Best estimate instead computes one geometric union of its selected VIIRS and newest-pass MODIS footprints, so overlapping ground is counted once.',
   'Corroboration records that two spacecraft observed the same cell. It raises confidence that something was burning there; it does not measure how much of the cell burned, and an uncorroborated detection is not thereby proven false.',
 ]
 
@@ -711,7 +712,7 @@ export function firmsSourceEntry(summaries) {
   return {
     name: 'NASA FIRMS',
     detail: plotted
-      ? `${plotted} detections from ${connected.length} sensor${connected.length === 1 ? '' : 's'}; area is derived only for ${areaCapable.length} VIIRS product${areaCapable.length === 1 ? '' : 's'}`
+      ? `${plotted} detections from ${connected.length} sensor${connected.length === 1 ? '' : 's'}; standalone area is derived only for ${areaCapable.length} VIIRS product${areaCapable.length === 1 ? '' : 's'}`
       : 'No detections in the selected snapshot or server response',
     cadence: 'Polar overpasses plus 10-minute MTG and 15-minute MSG scans; provider latency varies',
     url: FIRMS_SOURCE_URL,

@@ -7,6 +7,7 @@ import {
   MODIS_EXTENT_TIME_BUCKET_MS,
   deriveModisSupportedExtent,
 } from '../src/modisFireEstimate.js'
+import { estimateFootprintArea, footprintOutlineRings } from '../src/firmsDetections.js'
 
 const origin = { latitude: 50, longitude: 6 }
 const high = { label: 'high', rank: 3, raw: 95 }
@@ -92,13 +93,24 @@ assert.equal(extent.availableAt, '2026-08-15T12:05:00.000Z')
 assert.deepEqual(extent.satellites, ['Terra'])
 assert.equal(extent.gridCellM, MODIS_EXTENT_GRID_CELL_M)
 assert.equal(extent.timeBucketMs, MODIS_EXTENT_TIME_BUCKET_MS)
-assert.ok(extent.outlineRings.length > 0)
 assert.equal(Object.hasOwn(extent, 'areaHa'), false, 'coarse support must not produce a hectare figure')
+
+const bestEstimateDetections = [core, ...extent.detections]
+const combinedOutlineRings = footprintOutlineRings(bestEstimateDetections, {
+  origin,
+  gridCellM: MODIS_EXTENT_GRID_CELL_M,
+})
+assert.ok(combinedOutlineRings.length > 0, 'qualifying MODIS pixels should extend the existing outline union')
+assert.ok(
+  estimateFootprintArea(bestEstimateDetections, { origin }).unionHa
+    > estimateFootprintArea([core], { origin }).unionHa,
+  'the displayed area should describe the same extended satellite union',
+)
 
 const phi = origin.latitude * Math.PI / 180
 const metresPerLatitude = 111132.92 - 559.82 * Math.cos(2 * phi) + 1.175 * Math.cos(4 * phi)
 const metresPerLongitude = 111412.84 * Math.cos(phi) - 93.5 * Math.cos(3 * phi)
-extent.outlineRings.flat().forEach(([latitude, longitude]) => {
+combinedOutlineRings.flat().forEach(([latitude, longitude]) => {
   const xCells = (longitude - origin.longitude) * metresPerLongitude / MODIS_EXTENT_GRID_CELL_M
   const yCells = (latitude - origin.latitude) * metresPerLatitude / MODIS_EXTENT_GRID_CELL_M
   assert.ok(Math.abs(xCells - Math.round(xCells)) < 1e-8, 'longitude should use the shared 50 m grid')
@@ -119,7 +131,7 @@ const noCore = deriveModisSupportedExtent({
   frameTimestampMs: Date.parse('2026-08-15T12:05:00.000Z'),
   origin,
 })
-assert.deepEqual(noCore.outlineRings, [], 'MODIS cannot create a Best estimate without a VIIRS core')
+assert.deepEqual(noCore.detections, [], 'MODIS cannot create a Best estimate without a VIIRS core')
 
 const unsupportedNewest = deriveModisSupportedExtent({
   detections,

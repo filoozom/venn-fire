@@ -10,8 +10,6 @@
 // five-minute frame. It also requires every included pixel to remain close to
 // independently supported incident geometry.
 
-import { footprintOutlineRings } from './firmsDetections.js'
-
 export const MODIS_EXTENT_GRID_CELL_M = 50
 export const MODIS_EXTENT_TIME_BUCKET_MS = 5 * 60 * 1000
 export const MODIS_MAX_SUPPORT_GAP_M = 500
@@ -68,7 +66,6 @@ function rectangleToCellDistanceM(detection, candidate, projection, gridCellM) {
 function emptyExtent(gridCellM, timeBucketMs, maxSupportGapM) {
   return {
     detections: [],
-    outlineRings: [],
     satellites: [],
     passAcquiredAt: null,
     availableAt: null,
@@ -81,11 +78,11 @@ function emptyExtent(gridCellM, timeBucketMs, maxSupportGapM) {
 }
 
 /**
- * Derive the coarse MODIS component of the Best estimate outline.
+ * Select the coarse MODIS pixels that may extend the Best estimate outline.
  *
- * The result intentionally has no area field. Rasterising a 1 km active-fire
- * pixel on the shared 50 m display grid makes its uncertainty legible; it does
- * not make the source observation 50 m precise.
+ * The caller folds these pixels into the same 50 m raster union as the VIIRS
+ * core. Keeping selection here and geometry in one place prevents the map from
+ * presenting MODIS as a second, competing estimate.
  */
 export function deriveModisSupportedExtent({
   detections = [],
@@ -148,7 +145,6 @@ export function deriveModisSupportedExtent({
   const supportedDetections = supported.map((entry) => entry.detection)
   return {
     detections: supportedDetections,
-    outlineRings: footprintOutlineRings(supportedDetections, { origin, gridCellM }),
     satellites: [...new Set(supportedDetections.map((detection) => detection.satellite).filter(Boolean))].sort(),
     passAcquiredAt: new Date(Math.max(...supported.map((entry) => entry.timestampMs))).toISOString(),
     availableAt: new Date(latestFrameAtMs).toISOString(),
