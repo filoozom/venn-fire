@@ -27,6 +27,13 @@ export const INCIDENT_AIRCRAFT = new Map([
     aircraftDescription: 'Boeing CH-47F Chinook',
     displayType: 'helicopter',
   }],
+  ['48044c', {
+    callSign: 'GRZLY80',
+    registration: 'D-606',
+    aircraftType: 'H47',
+    aircraftDescription: 'Boeing CH-47F Chinook',
+    displayType: 'helicopter',
+  }],
 ])
 export const INCIDENT_CALLSIGN_PATTERNS = [/^GRZLY\d{1,3}$/i]
 export const INCIDENT_RADIUS_KM = 10

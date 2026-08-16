@@ -90,6 +90,13 @@ assert.deepEqual(INCIDENT_AIRCRAFT.get('480440'), {
   aircraftDescription: 'Boeing CH-47F Chinook',
   displayType: 'helicopter',
 })
+assert.deepEqual(INCIDENT_AIRCRAFT.get('48044c'), {
+  callSign: 'GRZLY80',
+  registration: 'D-606',
+  aircraftType: 'H47',
+  aircraftDescription: 'Boeing CH-47F Chinook',
+  displayType: 'helicopter',
+})
 assert.equal(CURRENT_AIRCRAFT_TRACE_PROVIDERS.length, 1)
 assert.equal(HISTORICAL_AIRCRAFT_TRACE_PROVIDERS.length, 2)
 assert.equal(REFRESH_QUEUE_TOPIC, 'venn-fire-refresh')
