@@ -59,7 +59,9 @@ export function trackedAircraftFromObservations(observations = []) {
       aircraftType: observation.aircraftType || existing.aircraftType || null,
       aircraftDescription: observation.aircraftDescription || existing.aircraftDescription || null,
       displayType: observation.displayType || existing.displayType || null,
-      selectionBasis: observation.selectionBasis || existing.selectionBasis || 'retained-incident-history',
+      selectionBasis: INCIDENT_AIRCRAFT.has(icao24)
+        ? 'verified-icao24'
+        : observation.selectionBasis || existing.selectionBasis || 'retained-incident-history',
     })
   }
   return [...tracked.values()]

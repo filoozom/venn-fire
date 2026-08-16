@@ -83,6 +83,13 @@ assert.ok(LIVE_AIRCRAFT_PROVIDERS.filter((provider) => provider.id !== 'adsb-fi'
   .every((provider) => provider.endpoint.includes('/point/50.54762/6.05757/10')))
 assert.equal(INCIDENT_AIRCRAFT.get('480849').registration, 'D-472')
 assert.equal(INCIDENT_AIRCRAFT.get('48044a').registration, 'D-604')
+assert.deepEqual(INCIDENT_AIRCRAFT.get('480440'), {
+  callSign: 'GRZLY81',
+  registration: 'D-479',
+  aircraftType: 'H47',
+  aircraftDescription: 'Boeing CH-47F Chinook',
+  displayType: 'helicopter',
+})
 assert.equal(CURRENT_AIRCRAFT_TRACE_PROVIDERS.length, 1)
 assert.equal(HISTORICAL_AIRCRAFT_TRACE_PROVIDERS.length, 2)
 assert.equal(REFRESH_QUEUE_TOPIC, 'venn-fire-refresh')
@@ -149,9 +156,28 @@ assert.equal(discoveredTrace.length, 1)
 assert.equal(discoveredTrace[0].aircraftType, 'H47')
 assert.equal(discoveredTrace[0].selectionBasis, 'incident-callsign')
 
+const d479Trace = normalizeAircraftTrace({
+  timestamp: Date.parse('2026-08-16T09:43:49.088Z') / 1_000,
+  r: 'D-479',
+  t: 'H47',
+  desc: 'BOEING-VERTOL CH-47 Chinook',
+  trace: [[10, 50.5047, 5.936376, 1_950, 83.7, 27.8, 0, 0, { flight: 'GRZLY81 ' }, 'adsb_icao']],
+}, {
+  icao24: '480440',
+  callSign: 'GRZLY81',
+  registration: 'D-479',
+  selectionBasis: 'incident-callsign',
+}, traceProvider)
+assert.equal(d479Trace.length, 1)
+assert.equal(d479Trace[0].registration, 'D-479')
+assert.equal(d479Trace[0].selectionBasis, 'incident-callsign')
+
 const traceTargets = trackedAircraftFromObservations(discoveredTrace)
 assert.equal(traceTargets.length, INCIDENT_AIRCRAFT.size + 1)
 assert.equal(traceTargets.find((aircraft) => aircraft.icao24 === '480999').callSign, 'GRZLY82')
+const promotedD479 = trackedAircraftFromObservations(d479Trace)
+  .find((aircraft) => aircraft.icao24 === '480440')
+assert.equal(promotedD479.selectionBasis, 'verified-icao24')
 
 const displayFlights = mergeIncidentFlights([{ id: 'g10', icao24: '44c1e5', callSign: 'G10', observations: [] }], [
   normalized[0],
