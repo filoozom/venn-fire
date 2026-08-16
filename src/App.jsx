@@ -810,6 +810,20 @@ function FireViewer({ runtime, databaseError }) {
     timeBucketMs: AIRCRAFT_EDGE_TIME_BUCKET_MS,
   }), [aircraftEstimateFlights, bestEstimateCoreDetections, viirsCoreOutlineRings, frame.timestampMs, firmsData.locationReference])
 
+  // The current red estimate uses only aircraft observations still inside the
+  // 24-hour display window. Re-running the same strict inference against all
+  // retained observations preserves its legitimate historical outer reach for
+  // the subdued touched-zone boundary; rejected route outliers pass neither.
+  const touchedAircraftEdge = useMemo(() => deriveAircraftSupportedEdge({
+    flights: displayFlights,
+    detections: bestEstimateCoreDetections,
+    outlineRings: viirsCoreOutlineRings,
+    frameTimestampMs: frame.timestampMs,
+    origin: firmsData.locationReference,
+    gridCellM: AIRCRAFT_EDGE_GRID_CELL_M,
+    timeBucketMs: AIRCRAFT_EDGE_TIME_BUCKET_MS,
+  }), [displayFlights, bestEstimateCoreDetections, viirsCoreOutlineRings, frame.timestampMs, firmsData.locationReference])
+
   const modisSupportedExtent = useMemo(() => deriveModisSupportedExtent({
     detections: firmsDetectionsAtTime,
     coreDetections: bestEstimateCoreDetections,
@@ -820,6 +834,17 @@ function FireViewer({ runtime, databaseError }) {
     timeBucketMs: MODIS_EXTENT_TIME_BUCKET_MS,
   }), [firmsDetectionsAtTime, bestEstimateCoreDetections, aircraftSupportedEdge.candidates, frame.timestampMs, firmsData.locationReference])
 
+  const touchedModisExtent = useMemo(() => deriveModisSupportedExtent({
+    detections: firmsDetectionsAtTime,
+    coreDetections: bestEstimateCoreDetections,
+    aircraftEdgeCandidates: touchedAircraftEdge.candidates,
+    frameTimestampMs: frame.timestampMs,
+    origin: firmsData.locationReference,
+    gridCellM: MODIS_EXTENT_GRID_CELL_M,
+    timeBucketMs: MODIS_EXTENT_TIME_BUCKET_MS,
+    retainAllSupportedPasses: true,
+  }), [firmsDetectionsAtTime, bestEstimateCoreDetections, touchedAircraftEdge.candidates, frame.timestampMs, firmsData.locationReference])
+
   // There is one estimate, not separate satellite and aircraft outlines.
   // Qualifying MODIS pixels and the conservative repeat-supported aircraft lobe
   // extend the same 50 m raster union, solid boundary and hectare figure.
@@ -827,7 +852,12 @@ function FireViewer({ runtime, databaseError }) {
     () => [...bestEstimateCoreDetections, ...modisSupportedExtent.detections],
     [bestEstimateCoreDetections, modisSupportedExtent.detections],
   )
+  const touchedEstimateDetections = useMemo(
+    () => [...bestEstimateCoreDetections, ...touchedModisExtent.detections],
+    [bestEstimateCoreDetections, touchedModisExtent.detections],
+  )
   const aircraftSupportPolygons = aircraftSupportedEdge.supportPolygons
+  const touchedSupportPolygons = touchedAircraftEdge.supportPolygons
 
   const fireOutlineRings = useMemo(
     () => footprintOutlineRings(bestEstimateDetections, {
@@ -839,6 +869,17 @@ function FireViewer({ runtime, databaseError }) {
       supportPolygons: aircraftSupportPolygons,
     }),
     [bestEstimateDetections, aircraftSupportPolygons, firmsData.locationReference],
+  )
+  const touchedZoneRings = useMemo(
+    () => footprintOutlineRings(touchedEstimateDetections, {
+      gridCellM: 50,
+      origin: {
+        latitude: firmsData.locationReference.latitude,
+        longitude: firmsData.locationReference.longitude,
+      },
+      supportPolygons: touchedSupportPolygons,
+    }),
+    [touchedEstimateDetections, touchedSupportPolygons, firmsData.locationReference],
   )
 
   const visibleFirmsDetections = useMemo(() => firmsDetectionsAtTime.filter((detection) => (
@@ -858,6 +899,15 @@ function FireViewer({ runtime, databaseError }) {
   }), [bestEstimateDetections, aircraftSupportPolygons, firmsData.locationReference])
   const bestEstimateAreaHa = bestEstimateArea.unionHa
   const aircraftSupportIncluded = bestEstimateArea.supportCellCount > 0
+  const touchedZoneArea = useMemo(() => estimateFootprintArea(touchedEstimateDetections, {
+    gridCellM: 50,
+    origin: {
+      latitude: firmsData.locationReference.latitude,
+      longitude: firmsData.locationReference.longitude,
+    },
+    supportPolygons: touchedSupportPolygons,
+  }), [touchedEstimateDetections, touchedSupportPolygons, firmsData.locationReference])
+  const touchedZoneAvailable = touchedZoneArea.unionHa > bestEstimateArea.unionHa
 
   const firmsAreaEstimates = useMemo(() => FIRMS_SENSORS
     .filter((sensor) => sensor.providesArea && layers[FIRMS_LAYER_KEYS[sensor.key]])
@@ -960,10 +1010,11 @@ function FireViewer({ runtime, databaseError }) {
             </div>
             <div className="outline-method-key" aria-label="Best estimate outline methods">
               <span><i className="is-satellite" /> Single combined outline</span>
+              {touchedZoneAvailable ? <span><i className="is-touched" /> Touched zone</span> : null}
             </div>
             <p className="layer-note">
               {bestEstimateDetections.length
-                ? `Solid red: one ${Math.round(bestEstimateAreaHa).toLocaleString('en-GB')} ha estimate from ${bestEstimateCoreDetections.length} corroborated VIIRS detections${modisSupportedExtent.detections.length ? ` plus ${modisSupportedExtent.detections.length} high-confidence ${modisSupportedExtent.satellites.join('/')} MODIS pixels from the newest pass` : ''}${aircraftSupportIncluded ? ` plus ${bestEstimateArea.supportCellCount} additional 50 m cells in ${aircraftSupportPolygons.length} compact lobe${aircraftSupportPolygons.length === 1 ? '' : 's'} bounded by repeated ${aircraftSupportedEdge.callSigns.join(', ')} direction changes` : ''}. One 50 m raster and one outline; not a confirmed burned-area perimeter.${aircraftSupportIncluded ? ' Receiver positions do not confirm a water drop.' : ''}`
+                ? `Solid red: one ${Math.round(bestEstimateAreaHa).toLocaleString('en-GB')} ha estimate from ${bestEstimateCoreDetections.length} corroborated VIIRS detections${modisSupportedExtent.detections.length ? ` plus ${modisSupportedExtent.detections.length} high-confidence ${modisSupportedExtent.satellites.join('/')} MODIS pixels from the newest pass` : ''}${aircraftSupportIncluded ? ` plus ${bestEstimateArea.supportCellCount} additional 50 m cells in ${aircraftSupportPolygons.length} compact lobe${aircraftSupportPolygons.length === 1 ? '' : 's'} bounded by repeated ${aircraftSupportedEdge.callSigns.join(', ')} direction changes` : ''}. One 50 m raster and one outline; not a confirmed burned-area perimeter.${touchedZoneAvailable ? ' Muted dashed edges retain the outermost strictly qualified historical MODIS and aircraft reach as a touched zone; they indicate possible previous fire reach, not active burning, and carry no hectare claim.' : ''}${aircraftSupportIncluded ? ' Receiver positions do not confirm a water drop.' : ''}`
                 : 'No detections meet the best-estimate rule at this time.'}
             </p>
           </div>
@@ -1042,6 +1093,7 @@ function FireViewer({ runtime, databaseError }) {
             importedTracks={visibleImportedTracks}
             firmsDetections={visibleFirmsDetections}
             fireOutlineRings={layers[FIRE_OUTLINE_KEY] ? fireOutlineRings : []}
+            touchedZoneRings={layers[FIRE_OUTLINE_KEY] ? touchedZoneRings : []}
             mapLabels={runtime.mapLabels}
             protectedArea={runtime.protectedArea}
             officialPerimeter={runtime.officialPerimeter.current}

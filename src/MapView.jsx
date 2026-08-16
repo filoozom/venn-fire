@@ -115,6 +115,7 @@ export default function MapView({
   importedTracks = [],
   firmsDetections = [],
   fireOutlineRings = [],
+  touchedZoneRings = [],
   mapLabels = [],
   protectedArea = [],
   officialPerimeter = null,
@@ -300,6 +301,21 @@ export default function MapView({
       ).addTo(group)
     })
 
+    // The touched zone keeps the outermost strictly qualified historical reach.
+    // It is drawn first, so the current solid estimate covers every overlapping
+    // segment and only aged-out outer edges remain visibly dashed.
+    if (touchedZoneRings.length) {
+      L.polygon(touchedZoneRings, {
+        color: '#8f675b',
+        weight: 1.8,
+        opacity: 0.82,
+        dashArray: '5 5',
+        fill: false,
+        interactive: false,
+        className: 'touched-zone-outline',
+      }).addTo(group)
+    }
+
     // One dissolved boundary around the complete selected 50 m union. Any
     // qualifying newest-pass MODIS pixels and repeat-supported aircraft lobe
     // have already been folded into these rings; no second edge is rendered.
@@ -413,7 +429,7 @@ export default function MapView({
         }), { direction: 'top', offset: [0, -18] })
         .addTo(group)
     })
-  }, [frameIndex, frame, flights, effisArea, effisCarriedForward, layers, importedTracks, firmsDetections, fireOutlineRings, protectedArea, officialPerimeter])
+  }, [frameIndex, frame, flights, effisArea, effisCarriedForward, layers, importedTracks, firmsDetections, fireOutlineRings, touchedZoneRings, protectedArea, officialPerimeter])
 
   return (
     <div className="map-surface" aria-label="Interactive fire situation map">

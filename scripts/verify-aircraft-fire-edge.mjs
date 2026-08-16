@@ -6,6 +6,7 @@ import {
   AIRCRAFT_EDGE_TIME_BUCKET_MS,
   deriveAircraftSupportedEdge,
 } from '../src/aircraftFireEstimate.js'
+import { AIRCRAFT_TRACE_LIFETIME_MS, visibleAircraftObservations } from '../src/aircraftTracks.js'
 import { estimateFootprintArea, footprintOutlineRings } from '../src/firmsDetections.js'
 
 const origin = { latitude: 50.54, longitude: 6.08 }
@@ -150,6 +151,29 @@ const beforeRepeat = deriveAircraftSupportedEdge({
   origin,
 })
 assert.equal(beforeRepeat.candidates.length, 0, 'one isolated manoeuvre must not be promoted retroactively')
+
+const afterDisplayExpiryMs = startMs + AIRCRAFT_TRACE_LIFETIME_MS + 20 * 60_000
+const currentAfterExpiry = deriveAircraftSupportedEdge({
+  flights: [{
+    ...incidentFlight,
+    observations: visibleAircraftObservations(incidentFlight.observations, afterDisplayExpiryMs),
+  }],
+  detections: [detection],
+  outlineRings,
+  frameTimestampMs: afterDisplayExpiryMs,
+  origin,
+})
+const touchedAfterExpiry = deriveAircraftSupportedEdge({
+  flights: [incidentFlight],
+  detections: [detection],
+  outlineRings,
+  frameTimestampMs: afterDisplayExpiryMs,
+  origin,
+})
+assert.equal(currentAfterExpiry.supportPolygons.length, 0,
+  'aged aircraft evidence must leave the current solid estimate')
+assert.equal(touchedAfterExpiry.supportPolygons.length, 1,
+  'strictly qualified aged evidence must remain available to the touched zone')
 
 const noCore = deriveAircraftSupportedEdge({ flights: [incidentFlight], origin })
 assert.deepEqual(noCore.extensionLines, [], 'aircraft positions cannot create a fire outline without a satellite core')

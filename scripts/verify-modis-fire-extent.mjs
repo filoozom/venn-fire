@@ -95,6 +95,18 @@ assert.equal(extent.gridCellM, MODIS_EXTENT_GRID_CELL_M)
 assert.equal(extent.timeBucketMs, MODIS_EXTENT_TIME_BUCKET_MS)
 assert.equal(Object.hasOwn(extent, 'areaHa'), false, 'coarse support must not produce a hectare figure')
 
+const touchedExtent = deriveModisSupportedExtent({
+  detections,
+  coreDetections: [core],
+  aircraftEdgeCandidates,
+  frameTimestampMs: Date.parse('2026-08-15T12:05:00.000Z'),
+  origin,
+  retainAllSupportedPasses: true,
+})
+assert.deepEqual(touchedExtent.detections, [previousPass, latestNearCore, latestNearAircraft],
+  'the touched zone should retain qualifying pixels from earlier passes without admitting unsupported pixels')
+assert.equal(touchedExtent.retainsHistoricalPasses, true)
+
 const bestEstimateDetections = [core, ...extent.detections]
 const combinedOutlineRings = footprintOutlineRings(bestEstimateDetections, {
   origin,

@@ -3019,6 +3019,11 @@ button.connection-card--upload {
   border-top: 2px solid #ff2f26;
 }
 
+.outline-method-key i.is-touched {
+  border-color: #8f675b;
+  border-top-style: dashed;
+}
+
 .layer-note {
   margin: 9px 2px 0;
   font-size: 12.5px;
