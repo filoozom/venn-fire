@@ -527,7 +527,7 @@ function DataModal({
                 <p><strong>Different products answer different questions.</strong> The viewer keeps reported area, raw thermal detections, aircraft fixes and model weather separate; only qualifying evidence enters the derived Best estimate.</p>
               </div>
               <div className="method-steps">
-                <article><span>01</span><div><strong>Thermal anomaly</strong><p>FIRMS detections appear at their exact acquisition time. Raw sensor layers stay separate. The Best estimate merges its corroborated VIIRS core with nearby high-confidence pixels from the newest MODIS pass and, only after repeat support, a conservative aircraft-bounded lobe on the same 50 m raster; Meteosat remains detections-only.</p></div></article>
+                <article><span>01</span><div><strong>Thermal anomaly</strong><p>FIRMS detections appear at their exact acquisition time. Raw sensor layers stay separate. The Best estimate merges its corroborated VIIRS core with nearby high-confidence pixels from the newest MODIS pass and, only after local repeat support, compact aircraft-bounded lobes on the same 50 m raster; Meteosat remains detections-only.</p></div></article>
                 <article><span>02</span><div><strong>Reported area</strong><p>The line is a timestamped step series. A figure becomes visible when published; when its stated effective time differs, both times are retained and shown. Between reports it means “last reported,” not measured growth.</p></div></article>
                 <article><span>03</span><div><strong>EFFIS daily geometry</strong><p>The 14 and 15 August VIIRS-derived polygons are separate calendar-day products. Their locally calculated geometry area is not the official affected area; EFFIS provides no within-day acquisition time for five-minute animation.</p></div></article>
                 <article><span>04</span><div><strong>Aircraft observations</strong><p>Identified incident aircraft are shown from exact receiver fixes returned by the independently health-checked aircraft providers. Gaps stay empty, fixes fade over 24 hours, and only repeated near-core GRZLY direction changes can extend the single Best estimate outline.</p></div></article>
@@ -827,10 +827,7 @@ function FireViewer({ runtime, databaseError }) {
     () => [...bestEstimateCoreDetections, ...modisSupportedExtent.detections],
     [bestEstimateCoreDetections, modisSupportedExtent.detections],
   )
-  const aircraftSupportPolygons = useMemo(
-    () => aircraftSupportedEdge.supportPolygon.length ? [aircraftSupportedEdge.supportPolygon] : [],
-    [aircraftSupportedEdge.supportPolygon],
-  )
+  const aircraftSupportPolygons = aircraftSupportedEdge.supportPolygons
 
   const fireOutlineRings = useMemo(
     () => footprintOutlineRings(bestEstimateDetections, {
@@ -966,7 +963,7 @@ function FireViewer({ runtime, databaseError }) {
             </div>
             <p className="layer-note">
               {bestEstimateDetections.length
-                ? `Solid red: one ${Math.round(bestEstimateAreaHa).toLocaleString('en-GB')} ha estimate from ${bestEstimateCoreDetections.length} corroborated VIIRS detections${modisSupportedExtent.detections.length ? ` plus ${modisSupportedExtent.detections.length} high-confidence ${modisSupportedExtent.satellites.join('/')} MODIS pixels from the newest pass` : ''}${aircraftSupportIncluded ? ` plus ${bestEstimateArea.supportCellCount} additional 50 m cells in the conservative lobe bounded by repeated ${aircraftSupportedEdge.callSigns.join(', ')} direction changes` : ''}. One 50 m raster and one outline; not a confirmed burned-area perimeter.${aircraftSupportIncluded ? ' Receiver positions do not confirm a water drop.' : ''}`
+                ? `Solid red: one ${Math.round(bestEstimateAreaHa).toLocaleString('en-GB')} ha estimate from ${bestEstimateCoreDetections.length} corroborated VIIRS detections${modisSupportedExtent.detections.length ? ` plus ${modisSupportedExtent.detections.length} high-confidence ${modisSupportedExtent.satellites.join('/')} MODIS pixels from the newest pass` : ''}${aircraftSupportIncluded ? ` plus ${bestEstimateArea.supportCellCount} additional 50 m cells in ${aircraftSupportPolygons.length} compact lobe${aircraftSupportPolygons.length === 1 ? '' : 's'} bounded by repeated ${aircraftSupportedEdge.callSigns.join(', ')} direction changes` : ''}. One 50 m raster and one outline; not a confirmed burned-area perimeter.${aircraftSupportIncluded ? ' Receiver positions do not confirm a water drop.' : ''}`
                 : 'No detections meet the best-estimate rule at this time.'}
             </p>
           </div>
@@ -1220,7 +1217,7 @@ function FireViewer({ runtime, databaseError }) {
               </div>
 
               <div className="coverage-note"><Radio size={15} /><p><strong>Aircraft evidence fades for 24 hours.</strong><span>Each exact fix and gap-limited connector becomes linearly more transparent against the selected five-minute frame, then disappears completely at 24 hours. PostgreSQL retains the source history.</span></p></div>
-              <div className="coverage-note"><Flame size={15} /><p><strong>Qualifying aircraft evidence extends the same solid Best estimate outline.</strong><span>Repeated near-core GRZLY direction changes enter on five-minute frames and bound the smallest conservative lobe on the shared 50 m raster. Long reservoir-side and transit legs are excluded; there is no separate aircraft edge, and receiver positions do not prove a drop or confirmed fire front.</span></p></div>
+              <div className="coverage-note"><Flame size={15} /><p><strong>Qualifying aircraft evidence extends the same solid Best estimate outline.</strong><span>Repeated GRZLY direction changes must remain within 1 km of the thermal core and within 900 m of another five-minute evidence frame. Each local cluster bounds its own compact lobe on the shared 50 m raster, so approach, reservoir and disconnected route legs cannot be bridged into the outline. Receiver positions do not prove a drop or confirmed fire front.</span></p></div>
               <div className="coverage-note"><Info size={15} /><p><strong>Wide-area checks separate this incident from nearby activity.</strong><span>{runtime.incidentAircraftMeta.negativeFindings?.[0]} {runtime.incidentAircraftMeta.negativeFindings?.[1]} The known Aachen/Walheim MLAT artifact is excluded.</span></p></div>
             </div>
           ) : null}

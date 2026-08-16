@@ -27,7 +27,9 @@ const outlineRings = footprintOutlineRings([detection], { origin, gridCellM: AIR
 const startMs = Date.parse('2026-08-15T10:00:00.000Z')
 
 function reversal(startOffsetMs, turnX, y) {
-  const xValues = [600, 900, 1_200, 1_500, turnX, 1_500, 1_200, 900, 600]
+  const direction = Math.sign(turnX) || 1
+  const xValues = [200, 350, 500, 650, Math.abs(turnX), 650, 500, 350, 200]
+    .map((x) => x * direction)
   return xValues.map((x, index) => ({
     timestampMs: startMs + startOffsetMs + index * 10_000,
     observedAt: new Date(startMs + startOffsetMs + index * 10_000).toISOString(),
@@ -40,11 +42,22 @@ const incidentFlight = {
   icao24: '480849',
   callSign: 'GRZLY81',
   observations: [
-    ...reversal(60_000, 1_650, 0),
-    ...reversal(6 * 60_000, 1_700, 300),
+    ...reversal(60_000, 850, 0),
+    ...reversal(6 * 60_000, 900, 300),
     // A repeated turn far from the thermal core represents a reservoir-side
     // route manoeuvre. It must not become fire-edge evidence.
     ...reversal(12 * 60_000, 6_000, 4_000),
+  ],
+}
+
+const approachOutliers = {
+  icao24: '480440',
+  callSign: 'GRZLY80',
+  observations: [
+    // This compact repeated pair would have passed the former 3.5 km core
+    // allowance and produced an approach corridor. It must now be excluded.
+    ...reversal(2 * 60_000, 2_500, 2_200),
+    ...reversal(8 * 60_000, 2_600, 2_300),
   ],
 }
 
@@ -58,7 +71,7 @@ const unrelatedFlight = {
 }
 
 const edge = deriveAircraftSupportedEdge({
-  flights: [incidentFlight, unrelatedFlight],
+  flights: [incidentFlight, approachOutliers, unrelatedFlight],
   detections: [detection],
   outlineRings,
   frameTimestampMs: startMs + 20 * 60_000,
@@ -67,8 +80,10 @@ const edge = deriveAircraftSupportedEdge({
 
 assert.equal(edge.candidates.length, 2, 'two repeated near-core GRZLY turns should support the edge')
 assert.deepEqual(edge.callSigns, ['GRZLY81'], 'unrelated callsigns must be excluded')
-assert.equal(edge.extensionLine.length, 4, 'the two evidence cells should connect to two core anchors')
-assert.ok(edge.supportPolygon.length >= 4, 'supported turns should close conservatively against the existing outline')
+assert.equal(edge.extensionLines.length, 1, 'one local evidence cluster should produce one compact extension')
+assert.equal(edge.extensionLines[0].length, 4, 'the two evidence cells should connect to two core anchors')
+assert.equal(edge.supportPolygons.length, 1, 'one local evidence cluster should produce one compact lobe')
+assert.ok(edge.supportPolygons[0].length >= 4, 'supported turns should close conservatively against the existing outline')
 assert.equal('areaHa' in edge, false, 'aircraft evidence must never generate a hectare figure')
 edge.candidates.forEach((candidate) => {
   assert.equal(candidate.frameAtMs % AIRCRAFT_EDGE_TIME_BUCKET_MS, 0, 'evidence should enter on a five-minute boundary')
@@ -87,16 +102,45 @@ const coreOnlyArea = estimateFootprintArea([detection], {
 const combinedArea = estimateFootprintArea([detection], {
   origin,
   gridCellM: AIRCRAFT_EDGE_GRID_CELL_M,
-  supportPolygons: [edge.supportPolygon],
+  supportPolygons: edge.supportPolygons,
 })
 const combinedOutline = footprintOutlineRings([detection], {
   origin,
   gridCellM: AIRCRAFT_EDGE_GRID_CELL_M,
-  supportPolygons: [edge.supportPolygon],
+  supportPolygons: edge.supportPolygons,
 })
 assert.ok(combinedArea.supportCellCount > 0, 'the supported lobe should add occupied 50 m cells')
 assert.ok(combinedArea.unionHa > coreOnlyArea.unionHa, 'the area must describe the same extended union as the outline')
 assert.notDeepEqual(combinedOutline, outlineRings, 'the supported lobe should alter the one dissolved outline')
+
+const secondFront = {
+  icao24: '48044c',
+  callSign: 'GRZLY80',
+  observations: [
+    ...reversal(2 * 60_000, -850, 0),
+    ...reversal(8 * 60_000, -900, 300),
+  ],
+}
+const separatedEdge = deriveAircraftSupportedEdge({
+  flights: [incidentFlight, secondFront],
+  detections: [detection],
+  outlineRings,
+  frameTimestampMs: startMs + 10 * 60_000,
+  origin,
+})
+assert.equal(separatedEdge.supportPolygons.length, 2,
+  'disconnected repeated turn clusters must remain separate compact lobes')
+separatedEdge.supportPolygons.forEach((polygon) => {
+  const coordinates = polygon.map((position) => [
+    (position[1] - origin.longitude) * metresPerLongitude,
+    (position[0] - origin.latitude) * metresPerLatitude,
+  ])
+  const xs = coordinates.map(([x]) => x)
+  const ys = coordinates.map(([, y]) => y)
+  assert.ok(Math.max(...xs) - Math.min(...xs) <= 1_500
+    && Math.max(...ys) - Math.min(...ys) <= 1_500,
+  'each supported lobe should remain spatially compact')
+})
 
 const beforeRepeat = deriveAircraftSupportedEdge({
   flights: [incidentFlight],
@@ -108,7 +152,7 @@ const beforeRepeat = deriveAircraftSupportedEdge({
 assert.equal(beforeRepeat.candidates.length, 0, 'one isolated manoeuvre must not be promoted retroactively')
 
 const noCore = deriveAircraftSupportedEdge({ flights: [incidentFlight], origin })
-assert.deepEqual(noCore.extensionLine, [], 'aircraft positions cannot create a fire outline without a satellite core')
-assert.deepEqual(noCore.supportPolygon, [], 'aircraft positions cannot create support geometry without a satellite core')
+assert.deepEqual(noCore.extensionLines, [], 'aircraft positions cannot create a fire outline without a satellite core')
+assert.deepEqual(noCore.supportPolygons, [], 'aircraft positions cannot create support geometry without a satellite core')
 
 console.log('Aircraft-supported fire-edge checks passed')

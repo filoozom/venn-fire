@@ -22,7 +22,7 @@ const MAX_DAY_RANGE = 10
 // each gets its own map layer and colour, and standalone sensor summaries stay
 // separate. The Best estimate is the deliberate exception: other modules select
 // only the newest nearby high-confidence MODIS pixels and any qualifying
-// aircraft-bounded lobe before the caller unions them with its corroborated
+// compact aircraft-bounded lobes before the caller unions them with its corroborated
 // VIIRS core on one raster.
 export const FIRMS_SENSORS = [
   {
@@ -193,7 +193,7 @@ export const FOOTPRINT_ESTIMATE_CAVEATS = [
   'Only ground that was actively flaming during an overpass can be detected. Ground that ignited and burned out between overpasses is never counted, and smoke or cloud removes further detections. The estimate therefore understates area for a fast-moving fire between passes.',
   'Because those two errors act in opposite directions and do not cancel predictably, this figure is neither an upper nor a lower bound on burned area.',
   'The footprint rectangle is axis-aligned in latitude and longitude from the published scan and track pixel dimensions. It approximates the true sensor parallelogram and ignores the scan-angle rotation.',
-  'Standalone sensor figures are estimated independently and must not be added. The Best estimate instead computes one geometric union of its selected VIIRS and newest-pass MODIS footprints plus any repeat-supported conservative aircraft lobe, so overlapping ground is counted once.',
+  'Standalone sensor figures are estimated independently and must not be added. The Best estimate instead computes one geometric union of its selected VIIRS and newest-pass MODIS footprints plus any compact repeat-supported aircraft lobes, so overlapping ground is counted once.',
   'Corroboration records that two spacecraft observed the same cell. It raises confidence that something was burning there; it does not measure how much of the cell burned, and an uncorroborated detection is not thereby proven false.',
 ]
 

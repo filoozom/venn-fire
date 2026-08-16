@@ -16,9 +16,12 @@ const MAX_TURN_LOOKAROUND_MS = 45 * 1000
 const MIN_TURN_LEG_M = 100
 const MIN_TURN_DEGREES = 70
 const TURN_CLUSTER_GAP_MS = 75 * 1000
-const MAX_CORE_DISTANCE_M = 3_500
+// Aircraft evidence is allowed to refine the edge of the corroborated thermal
+// footprint, not bridge an approach/pickup route back to the fire. The former
+// 3.5 km allowance admitted exactly those long corridors.
+const MAX_CORE_DISTANCE_M = 1_000
 const MIN_CORE_DISTANCE_M = AIRCRAFT_EDGE_GRID_CELL_M
-const REPEAT_SUPPORT_RADIUS_M = 1_750
+const REPEAT_SUPPORT_RADIUS_M = 900
 const MIN_REPEAT_SUPPORT = 2
 
 function projectionFor(origin) {
@@ -257,11 +260,61 @@ function samePosition(left, right) {
   return left?.[0] === right?.[0] && left?.[1] === right?.[1]
 }
 
+function compactCandidateClusters(candidates, projection) {
+  const clusters = []
+  candidates.slice().sort((left, right) => left.timestampMs - right.timestampMs).forEach((candidate) => {
+    const eligible = clusters
+      .map((cluster) => ({
+        cluster,
+        furthestM: Math.max(...cluster.map((member) => (
+          distance(toXY(member.position, projection), toXY(candidate.position, projection))
+        ))),
+      }))
+      .filter(({ furthestM }) => furthestM <= REPEAT_SUPPORT_RADIUS_M)
+      .sort((left, right) => left.furthestM - right.furthestM)
+    if (eligible.length) eligible[0].cluster.push(candidate)
+    else clusters.push([candidate])
+  })
+  return clusters.filter((cluster) => (
+    new Set(cluster.map((candidate) => candidate.frameAtMs)).size >= MIN_REPEAT_SUPPORT
+  ))
+}
+
+function supportGeometryForCluster(cluster, outlineRings, projection) {
+  const ordered = spatialOrder(cluster, projection)
+  const anchors = anchorsOnOneRing(
+    ordered[0].position,
+    ordered.at(-1).position,
+    outlineRings,
+    projection,
+  )
+  const startAnchor = anchors.start?.position
+  const endAnchor = anchors.end?.position
+  const extensionLine = [startAnchor, ...ordered.map((candidate) => candidate.position), endAnchor]
+    .filter(Boolean)
+    .filter((position, index, all) => index === 0 || !samePosition(position, all[index - 1]))
+
+  if (!anchors.ring || extensionLine.length < 3) return { extensionLine: [], supportPolygon: [] }
+  const clockwise = ringPath(anchors.ring, anchors.end.index, anchors.start.index, 1)
+  const counterClockwise = ringPath(anchors.ring, anchors.end.index, anchors.start.index, -1)
+  // Closing each local cluster over the shorter piece of the existing thermal
+  // boundary adds the smallest defensible lobe. Disconnected clusters never get
+  // bridged into a long strip or a triangle across the incident.
+  const boundaryPath = pathLength(clockwise, projection) <= pathLength(counterClockwise, projection)
+    ? clockwise
+    : counterClockwise
+  const supportPolygon = [...extensionLine, ...boundaryPath.slice(1)]
+  if (!samePosition(supportPolygon.at(-1), supportPolygon[0])) supportPolygon.push(supportPolygon[0])
+  return supportPolygon.length >= 4
+    ? { extensionLine, supportPolygon }
+    : { extensionLine: [], supportPolygon: [] }
+}
+
 /**
  * Derive the conservative lobe that can extend the existing best estimate.
  *
  * The result deliberately has no independent area field. The caller may rasterise
- * supportPolygon into the same 50 m union as the qualifying thermal footprints,
+ * supportPolygons into the same 50 m union as the qualifying thermal footprints,
  * but must never present the receiver route as its own perimeter or drop record.
  */
 export function deriveAircraftSupportedEdge({
@@ -275,7 +328,7 @@ export function deriveAircraftSupportedEdge({
 } = {}) {
   const projection = projectionFor(origin)
   if (!projection || !detections.length || !outlineRings.length) {
-    return { candidates: [], extensionLine: [], supportPolygon: [], callSigns: [], gridCellM, timeBucketMs }
+    return { candidates: [], extensionLines: [], supportPolygons: [], callSigns: [], gridCellM, timeBucketMs }
   }
 
   const candidates = flights
@@ -304,46 +357,25 @@ export function deriveAircraftSupportedEdge({
       ...candidate,
       position: snapToGrid(candidate.position, projection, gridCellM),
       observedAt: new Date(candidate.timestampMs).toISOString(),
-    }))
+  }))
 
-  if (supported.length < MIN_REPEAT_SUPPORT) {
-    return { candidates: [], extensionLine: [], supportPolygon: [], callSigns: [], gridCellM, timeBucketMs }
+  const clusters = compactCandidateClusters(supported, projection)
+  const supportGeometry = clusters
+    .map((cluster) => ({ cluster, ...supportGeometryForCluster(cluster, outlineRings, projection) }))
+    .filter((geometry) => geometry.supportPolygon.length)
+  const retained = supportGeometry.flatMap((geometry) => geometry.cluster)
+  if (!retained.length) {
+    return { candidates: [], extensionLines: [], supportPolygons: [], callSigns: [], gridCellM, timeBucketMs }
   }
-
-  const ordered = spatialOrder(supported, projection)
-  const anchors = anchorsOnOneRing(
-    ordered[0].position,
-    ordered.at(-1).position,
-    outlineRings,
-    projection,
-  )
-  const startAnchor = anchors.start?.position
-  const endAnchor = anchors.end?.position
-  const extensionLine = [startAnchor, ...ordered.map((candidate) => candidate.position), endAnchor]
-    .filter(Boolean)
-    .filter((position, index, all) => index === 0 || !samePosition(position, all[index - 1]))
-
-  let supportPolygon = []
-  if (anchors.ring && extensionLine.length >= 3) {
-    const clockwise = ringPath(anchors.ring, anchors.end.index, anchors.start.index, 1)
-    const counterClockwise = ringPath(anchors.ring, anchors.end.index, anchors.start.index, -1)
-    // Closing the inferred edge over the shorter piece of the existing thermal
-    // boundary adds the smallest defensible lobe instead of a convex hull that
-    // could swallow unrelated ground.
-    const boundaryPath = pathLength(clockwise, projection) <= pathLength(counterClockwise, projection)
-      ? clockwise
-      : counterClockwise
-    supportPolygon = [...extensionLine, ...boundaryPath.slice(1)]
-    if (!samePosition(supportPolygon.at(-1), supportPolygon[0])) supportPolygon.push(supportPolygon[0])
-    if (supportPolygon.length < 4) supportPolygon = []
-  }
+  const supportPolygons = supportGeometry.map((geometry) => geometry.supportPolygon)
+  const extensionLines = supportGeometry.map((geometry) => geometry.extensionLine)
 
   return {
-    candidates: supported.slice().sort((left, right) => left.timestampMs - right.timestampMs),
-    extensionLine,
-    supportPolygon,
-    callSigns: [...new Set(supported.map((candidate) => candidate.callSign))].sort(),
-    latestObservedAt: new Date(Math.max(...supported.map((candidate) => candidate.timestampMs))).toISOString(),
+    candidates: retained.slice().sort((left, right) => left.timestampMs - right.timestampMs),
+    extensionLines,
+    supportPolygons,
+    callSigns: [...new Set(retained.map((candidate) => candidate.callSign))].sort(),
+    latestObservedAt: new Date(Math.max(...retained.map((candidate) => candidate.timestampMs))).toISOString(),
     gridCellM,
     timeBucketMs,
   }
