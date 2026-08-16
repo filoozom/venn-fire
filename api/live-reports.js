@@ -1,4 +1,4 @@
-import { loadDataset, setNoStoreHeaders } from '../server/database.mjs'
+import { loadPublicDatasets, setNoStoreHeaders } from '../server/database.mjs'
 
 export const LIVE_REPORT_SOURCES = [
   {
@@ -465,10 +465,9 @@ export default async function handler(request, response) {
   }
 
   try {
-    const [alertsDataset, reportsDataset] = await Promise.all([
-      loadDataset('public-alerts'),
-      loadDataset('reports'),
-    ])
+    const datasets = await loadPublicDatasets(['public-alerts', 'reports'])
+    const alertsDataset = datasets['public-alerts']
+    const reportsDataset = datasets.reports
     if (!alertsDataset && !reportsDataset) throw new Error('Report datasets have not been seeded')
     return response.status(200).json(buildLiveReportsResponse({
       alertsDataset,

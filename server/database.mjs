@@ -1,23 +1,16 @@
 import { createHash } from 'node:crypto'
 
-import { neon } from '@neondatabase/serverless'
+import { postgresQuery, postgresUrl } from './postgres.mjs'
+import { PUBLIC_DATASET_KEYS, publicDatasetPayload } from './public-datasets.mjs'
 
-const databaseQueries = new Map()
 const schemaPromises = new WeakMap()
 
 export function databaseUrl(environment = process.env) {
-  return environment.DATABASE_URL?.trim()
-    || environment.POSTGRES_URL?.trim()
-    || ''
+  return postgresUrl(environment)
 }
 
 export function databaseQuery(url = databaseUrl()) {
-  if (!url) throw new Error('DATABASE_URL or POSTGRES_URL is required')
-  if (!databaseQueries.has(url)) {
-    const sql = neon(url)
-    databaseQueries.set(url, (text, parameters = []) => sql.query(text, parameters))
-  }
-  return databaseQueries.get(url)
+  return postgresQuery(url)
 }
 
 const VOLATILE_VERSION_KEYS = new Set([
@@ -65,6 +58,17 @@ export async function ensureDatabaseSchema(query = databaseQuery()) {
           source_updated_at timestamptz,
           captured_at timestamptz NOT NULL DEFAULT now(),
           PRIMARY KEY (dataset_key, content_hash)
+        )
+      `)
+      await query(`
+        CREATE TABLE IF NOT EXISTS app_public_datasets (
+          dataset_key text PRIMARY KEY,
+          schema_version integer NOT NULL DEFAULT 1,
+          payload jsonb NOT NULL,
+          content_hash text NOT NULL,
+          source_updated_at timestamptz,
+          refreshed_at timestamptz NOT NULL DEFAULT now(),
+          created_at timestamptz NOT NULL DEFAULT now()
         )
       `)
       await query(`
@@ -160,7 +164,33 @@ export async function saveDataset({
       source_updated_at = EXCLUDED.source_updated_at,
       refreshed_at = now()
   `, [key, schemaVersion, json, hash, sourceUpdatedAt])
+  const publicPayload = publicDatasetPayload(key, payload)
+  if (publicPayload != null) {
+    const publicJson = JSON.stringify(publicPayload)
+    const publicHash = publicPayload === payload ? hash : payloadHash(publicPayload)
+    await query(`
+      INSERT INTO app_public_datasets (
+        dataset_key, schema_version, payload, content_hash, source_updated_at, refreshed_at
+      ) VALUES ($1, $2, $3::jsonb, $4, $5::timestamptz, now())
+      ON CONFLICT (dataset_key) DO UPDATE SET
+        schema_version = EXCLUDED.schema_version,
+        payload = EXCLUDED.payload,
+        content_hash = EXCLUDED.content_hash,
+        source_updated_at = EXCLUDED.source_updated_at,
+        refreshed_at = now()
+    `, [key, schemaVersion, publicJson, publicHash, sourceUpdatedAt])
+  }
   return { key, hash, changed: versionRows.length > 0 }
+}
+
+function datasetsFromRows(rows) {
+  return Object.fromEntries(rows.map((row) => [row.dataset_key, {
+    schemaVersion: row.schema_version,
+    payload: row.payload,
+    contentHash: row.content_hash,
+    sourceUpdatedAt: row.source_updated_at == null ? null : new Date(row.source_updated_at).toISOString(),
+    refreshedAt: new Date(row.refreshed_at).toISOString(),
+  }]))
 }
 
 export async function loadDatasets(query = databaseQuery()) {
@@ -171,13 +201,70 @@ export async function loadDatasets(query = databaseQuery()) {
     FROM app_datasets
     ORDER BY dataset_key
   `)
-  return Object.fromEntries(rows.map((row) => [row.dataset_key, {
-    schemaVersion: row.schema_version,
-    payload: row.payload,
-    contentHash: row.content_hash,
-    sourceUpdatedAt: row.source_updated_at == null ? null : new Date(row.source_updated_at).toISOString(),
-    refreshedAt: new Date(row.refreshed_at).toISOString(),
-  }]))
+  return datasetsFromRows(rows)
+}
+
+export async function loadDatasetsByKeys(keys, query = databaseQuery()) {
+  const selectedKeys = [...new Set((keys ?? []).filter((key) => typeof key === 'string' && key))]
+  if (!selectedKeys.length) return {}
+  await ensureDatabaseSchema(query)
+  const rows = await query(`
+    SELECT dataset_key, schema_version, payload, content_hash,
+           source_updated_at, refreshed_at
+    FROM app_datasets
+    WHERE dataset_key = ANY($1::text[])
+    ORDER BY dataset_key
+  `, [selectedKeys])
+  return datasetsFromRows(rows)
+}
+
+export async function loadPublicDatasets(keys = PUBLIC_DATASET_KEYS, query = databaseQuery()) {
+  const selectedKeys = [...new Set((keys ?? []).filter((key) => typeof key === 'string' && key))]
+  if (!selectedKeys.length) return {}
+  await ensureDatabaseSchema(query)
+  const rows = await query(`
+    SELECT dataset_key, schema_version, payload, content_hash,
+           source_updated_at, refreshed_at
+    FROM app_public_datasets
+    WHERE dataset_key = ANY($1::text[])
+    ORDER BY dataset_key
+  `, [selectedKeys])
+  const datasets = datasetsFromRows(rows)
+  const missing = selectedKeys.filter((key) => !datasets[key])
+  if (missing.length) throw new Error(`Public database datasets are unavailable: ${missing.join(', ')}`)
+  return datasets
+}
+
+export async function rebuildPublicDatasets(query = databaseQuery()) {
+  await ensureDatabaseSchema(query)
+  const rows = await query(`
+    SELECT dataset_key, schema_version, payload, source_updated_at
+    FROM app_datasets
+    WHERE dataset_key = ANY($1::text[])
+    ORDER BY dataset_key
+  `, [PUBLIC_DATASET_KEYS])
+  for (const row of rows) {
+    const payload = publicDatasetPayload(row.dataset_key, row.payload)
+    const json = JSON.stringify(payload)
+    await query(`
+      INSERT INTO app_public_datasets (
+        dataset_key, schema_version, payload, content_hash, source_updated_at, refreshed_at
+      ) VALUES ($1, $2, $3::jsonb, $4, $5::timestamptz, now())
+      ON CONFLICT (dataset_key) DO UPDATE SET
+        schema_version = EXCLUDED.schema_version,
+        payload = EXCLUDED.payload,
+        content_hash = EXCLUDED.content_hash,
+        source_updated_at = EXCLUDED.source_updated_at,
+        refreshed_at = now()
+    `, [
+      row.dataset_key,
+      row.schema_version,
+      json,
+      payloadHash(payload),
+      row.source_updated_at,
+    ])
+  }
+  return { datasetCount: rows.length }
 }
 
 export async function loadDataset(key, query = databaseQuery()) {

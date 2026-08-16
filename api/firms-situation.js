@@ -7,7 +7,7 @@ import {
   parseFirmsCsv,
   summarizeSensorDetections,
 } from '../src/firmsDetections.js'
-import { loadDataset, setNoStoreHeaders } from '../server/database.mjs'
+import { loadPublicDatasets, setNoStoreHeaders } from '../server/database.mjs'
 
 const DROSSART = { latitude: 50.54762, longitude: 6.05757 }
 const INCIDENT_RADIUS_KM = 15
@@ -195,13 +195,17 @@ export default async function handler(request, response) {
   if (request.method !== 'GET') return response.status(405).json({ error: 'Method not allowed' })
 
   try {
-    const dataset = await loadDataset('firms')
+    const dataset = (await loadPublicDatasets(['firms'])).firms
     if (!dataset) throw new Error('FIRMS dataset has not been seeded')
     return response.status(200).json({
       ok: true,
       configured: Boolean(process.env.FIRMS_MAP_KEY?.trim()),
       refreshAfterSeconds: CACHE_SECONDS,
       ...dataset.payload,
+      detections: (dataset.payload.detections ?? []).map((detection) => ({
+        ...detection,
+        footprint: detection.footprint ?? detectionFootprint(detection),
+      })),
       databaseRefreshedAt: dataset.refreshedAt,
     })
   } catch (error) {

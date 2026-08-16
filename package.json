@@ -11,19 +11,24 @@
     "verify:refresh": "node scripts/verify-refresh-pipeline.mjs",
     "verify:flight-history": "node scripts/verify-flight-history.mjs",
     "verify:aircraft-fire-edge": "node scripts/verify-aircraft-fire-edge.mjs",
+    "verify:map-tracks": "node scripts/verify-map-tracks.mjs",
     "verify:modis-fire-extent": "node scripts/verify-modis-fire-extent.mjs",
     "verify:firms-sensors": "node scripts/verify-firms-sensors.mjs",
+    "verify:postgres": "node scripts/verify-postgres.mjs",
     "verify:live-reports": "node scripts/verify-live-reports.mjs",
     "verify:timeline": "node scripts/verify-timeline.mjs",
-    "visual-check": "node scripts/visual-check.mjs"
+    "visual-check": "node scripts/visual-check.mjs",
+    "db:bootstrap": "node scripts/bootstrap-postgres.mjs",
+    "db:copy": "node scripts/copy-postgres.mjs"
   },
   "dependencies": {
-    "@neondatabase/serverless": "^1.1.0",
+    "@vercel/functions": "^3.9.3",
     "@vercel/queue": "0.4.0",
     "@vitejs/plugin-react": "latest",
     "fflate": "^0.8.3",
     "leaflet": "^1.9.4",
     "lucide-react": "latest",
+    "pg": "^8.23.0",
     "react": "latest",
     "react-dom": "latest",
     "vite": "latest"

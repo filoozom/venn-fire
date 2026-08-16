@@ -1,15 +1,15 @@
-import { neon } from '@neondatabase/serverless'
+import {
+  databaseQuery as applicationDatabaseQuery,
+  databaseUrl as applicationDatabaseUrl,
+} from './database.mjs'
 
 export const FLIGHT_HISTORY_START = '2026-08-14T11:00:00.000Z'
 export const FLIGHT_HISTORY_LIMIT = 50_000
 
 const schemaPromises = new WeakMap()
-const databaseQueries = new Map()
 
 export function flightDatabaseUrl(environment = process.env) {
-  return environment.DATABASE_URL?.trim()
-    || environment.POSTGRES_URL?.trim()
-    || ''
+  return applicationDatabaseUrl(environment)
 }
 
 export function flightObservationKey(observation) {
@@ -35,15 +35,7 @@ function optionalNumber(value) {
   return Number.isFinite(number) ? number : null
 }
 
-function databaseQuery(databaseUrl) {
-  if (!databaseQueries.has(databaseUrl)) {
-    const sql = neon(databaseUrl)
-    databaseQueries.set(databaseUrl, (text, parameters = []) => sql.query(text, parameters))
-  }
-  return databaseQueries.get(databaseUrl)
-}
-
-async function ensureSchema(query) {
+export async function ensureFlightHistorySchema(query) {
   if (!schemaPromises.has(query)) {
     const promise = (async () => {
       await query(`
@@ -170,14 +162,14 @@ export function mergeFlightHistory(history, live) {
 
 export async function loadFlightHistory({
   databaseUrl = flightDatabaseUrl(),
-  query = databaseUrl ? databaseQuery(databaseUrl) : null,
+  query = databaseUrl ? applicationDatabaseQuery(databaseUrl) : null,
   since = FLIGHT_HISTORY_START,
   limit = FLIGHT_HISTORY_LIMIT,
 } = {}) {
   if (!databaseUrl && !query) {
     return { configured: false, ok: false, observations: [] }
   }
-  await ensureSchema(query)
+  await ensureFlightHistorySchema(query)
   const rows = await query(`
     SELECT * FROM (
       SELECT
@@ -260,14 +252,14 @@ async function upsertFlightObservations(observations, query) {
 
 export async function persistFlightObservations({ observations = [] }, {
   databaseUrl = flightDatabaseUrl(),
-  query = databaseUrl ? databaseQuery(databaseUrl) : null,
+  query = databaseUrl ? applicationDatabaseQuery(databaseUrl) : null,
   since = FLIGHT_HISTORY_START,
   limit = FLIGHT_HISTORY_LIMIT,
 } = {}) {
   if (!databaseUrl && !query) {
     return { configured: false, ok: false, persistedObservations: 0, observations: [] }
   }
-  await ensureSchema(query)
+  await ensureFlightHistorySchema(query)
   const persistedObservations = await upsertFlightObservations(observations, query)
   const history = await loadFlightHistory({ databaseUrl, query, since, limit })
   return {
@@ -285,7 +277,7 @@ export async function persistFlightPoll({
   conflicts = [],
 }, {
   databaseUrl = flightDatabaseUrl(),
-  query = databaseUrl ? databaseQuery(databaseUrl) : null,
+  query = databaseUrl ? applicationDatabaseQuery(databaseUrl) : null,
   since = FLIGHT_HISTORY_START,
   limit = FLIGHT_HISTORY_LIMIT,
 } = {}) {
@@ -293,7 +285,7 @@ export async function persistFlightPoll({
     return { configured: false, ok: false, persistedObservations: 0, observations: [] }
   }
 
-  await ensureSchema(query)
+  await ensureFlightHistorySchema(query)
   const polledAtMs = Date.parse(generatedAt)
   if (!Number.isFinite(polledAtMs)) throw new Error('Flight poll generatedAt must be an ISO-8601 timestamp')
   const bucketAt = new Date(Math.floor(polledAtMs / (5 * 60 * 1_000)) * 5 * 60 * 1_000).toISOString()

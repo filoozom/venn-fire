@@ -1,6 +1,26 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
+    "api/data.js": {
+      "maxDuration": 30,
+      "regions": ["fra1"]
+    },
+    "api/firms-situation.js": {
+      "maxDuration": 30,
+      "regions": ["fra1"]
+    },
+    "api/live-reports.js": {
+      "maxDuration": 30,
+      "regions": ["fra1"]
+    },
+    "api/live-situation.js": {
+      "maxDuration": 30,
+      "regions": ["fra1"]
+    },
+    "api/sentinel-quicklook.js": {
+      "maxDuration": 30,
+      "regions": ["fra1"]
+    },
     "api/refresh.js": {
       "maxDuration": 60,
       "regions": ["fra1"]
@@ -18,7 +38,8 @@
       ]
     },
     "api/ingest-controlled.js": {
-      "maxDuration": 60
+      "maxDuration": 60,
+      "regions": ["fra1"]
     }
   },
   "crons": [

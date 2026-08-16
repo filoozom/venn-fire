@@ -1,24 +1,5 @@
-import { databaseOverview, loadDatasets, setNoStoreHeaders } from '../server/database.mjs'
-
-const PUBLIC_DATASET_KEYS = new Set([
-  'aircraft',
-  'effis',
-  'ems',
-  'firms',
-  'incident-config',
-  'media-reports',
-  'local-authority-updates',
-  'official-perimeter',
-  'public-alerts',
-  'public-operations',
-  'reports',
-  'road-events',
-  'sentinel2',
-  'source-registry',
-  'weather-dwd',
-  'weather-open-meteo',
-  'weather-rmi',
-])
+import { databaseOverview, loadPublicDatasets, setNoStoreHeaders } from '../server/database.mjs'
+import { PUBLIC_DATASET_KEYS } from '../server/public-datasets.mjs'
 
 export default async function handler(request, response) {
   setNoStoreHeaders(response)
@@ -28,10 +9,10 @@ export default async function handler(request, response) {
   if (request.method !== 'GET') return response.status(405).json({ ok: false, error: 'Method not allowed' })
 
   try {
-    const [allDatasets, database] = await Promise.all([loadDatasets(), databaseOverview()])
-    const datasets = Object.fromEntries(
-      Object.entries(allDatasets).filter(([key]) => PUBLIC_DATASET_KEYS.has(key)),
-    )
+    const [datasets, database] = await Promise.all([
+      loadPublicDatasets(PUBLIC_DATASET_KEYS),
+      databaseOverview(),
+    ])
     return response.status(200).json({
       ok: true,
       generatedAt: new Date().toISOString(),

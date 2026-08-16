@@ -1,10 +1,7 @@
 import { useEffect, useRef } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import {
-  AIRCRAFT_PATH_MAX_GAP_MS,
-  AIRCRAFT_PATH_MAX_SPEED_KT,
-} from './data'
+import { plausibleObservationPaths } from './aircraftTracks'
 
 // Detections are shaded by NASA's published confidence rather than by satellite:
 // what matters when reading the map is how sure the observation is, not which
@@ -21,30 +18,6 @@ const INCIDENT_MAP_BOUNDS = [[50.49, 5.975], [50.575, 6.145]]
 const INCIDENT_MAP_PADDING = {
   paddingTopLeft: [18, 72],
   paddingBottomRight: [18, 190],
-}
-
-function haversineKm(left, right) {
-  const radians = Math.PI / 180
-  const deltaLat = (right.position[0] - left.position[0]) * radians
-  const deltaLon = (right.position[1] - left.position[1]) * radians
-  const value = Math.sin(deltaLat / 2) ** 2
-    + Math.cos(left.position[0] * radians) * Math.cos(right.position[0] * radians) * Math.sin(deltaLon / 2) ** 2
-  return 6371.0088 * 2 * Math.asin(Math.sqrt(value))
-}
-
-function plausibleObservationLinks(
-  observations,
-  maxGapMs = AIRCRAFT_PATH_MAX_GAP_MS,
-  maxSpeedKt = AIRCRAFT_PATH_MAX_SPEED_KT,
-) {
-  return observations.slice(1).flatMap((observation, index) => {
-    const previous = observations[index]
-    const elapsedMs = observation.timestampMs - previous.timestampMs
-    if (elapsedMs <= 0 || elapsedMs > maxGapMs) return []
-    const impliedSpeedKt = haversineKm(previous, observation) / 1.852 / (elapsedMs / 3_600_000)
-    if (impliedSpeedKt > maxSpeedKt) return []
-    return [{ previous, observation, impliedSpeedKt }]
-  })
 }
 
 const basemaps = {
@@ -399,31 +372,31 @@ export default function MapView({
           const visible = flight.observations.filter((observation) => observation.timestampMs <= frame.timestampMs)
           if (!visible.length) return
 
-          plausibleObservationLinks(visible).forEach(({ previous, observation, impliedSpeedKt }) => {
-            L.polyline([previous.position, observation.position], {
+          plausibleObservationPaths(visible).forEach((path) => {
+            L.polyline(path.map((observation) => observation.position), {
               color: flight.color,
               weight: 2.2,
               opacity: 0.78,
               dashArray: '5 6',
             })
-              .bindTooltip(`<strong>${flight.callSign}: observed-fix connector</strong><br>${localObservationTime(previous.observedAt)}–${localObservationTime(observation.observedAt)} CEST · ${impliedSpeedKt.toFixed(0)} kt implied<br><small>Straight line between two MLAT fixes; the intervening route was not sampled.</small>`, { sticky: true })
+              .bindTooltip(`<strong>${flight.callSign}: receiver-observed path</strong><br>${path.length.toLocaleString('en-GB')} exact fixes · ${localObservationTime(path[0].observedAt)}–${localObservationTime(path.at(-1).observedAt)} CEST<br><small>One efficient polyline; gaps over 2 minutes and implausible links are omitted. No position is inferred between fixes.</small>`, { sticky: true })
               .addTo(group)
           })
 
-          visible.forEach((observation) => {
-            L.circleMarker(observation.position, {
+          const latest = visible.at(-1)
+          const age = frame.timestampMs - latest.timestampMs
+          if (age < 0 || age > OBSERVATION_RECENCY_MS) {
+            L.circleMarker(latest.position, {
               radius: 3.5,
               color: '#dcecff',
               weight: 1,
               fillColor: flight.color,
               fillOpacity: 0.58,
             })
-              .bindTooltip(`<strong>${flight.callSign} observed</strong><br>${localObservationTime(observation.observedAt)} CEST · ${observation.altitudeFt ?? '—'} ft<br><small>${observation.updateType}; no position inferred between fixes</small>`, { direction: 'top' })
+              .bindTooltip(`<strong>${flight.callSign} last observed</strong><br>${localObservationTime(latest.observedAt)} CEST · ${latest.altitudeFt ?? '—'} ft<br><small>${latest.updateType}; no position inferred after this fix</small>`, { direction: 'top' })
               .addTo(group)
-          })
+          }
 
-          const latest = visible.at(-1)
-          const age = frame.timestampMs - latest.timestampMs
           if (age >= 0 && age <= OBSERVATION_RECENCY_MS) {
             L.marker(latest.position, { icon: aircraftIcon(flight), zIndexOffset: 900 })
               .bindTooltip(`<strong>${flight.callSign}: recent observation</strong><br>${localObservationTime(latest.observedAt)} CEST<br><small>This marker does not assert current airborne status.</small>`, { direction: 'top', offset: [0, -15] })

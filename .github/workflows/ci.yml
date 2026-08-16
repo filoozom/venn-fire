@@ -33,8 +33,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Verify leased refresh pipeline, flight history and aircraft edge
-        run: pnpm verify:refresh && pnpm verify:flight-history && pnpm verify:aircraft-fire-edge
+      - name: Verify PostgreSQL, refresh pipeline, flight history and aircraft rendering
+        run: pnpm verify:postgres && pnpm verify:refresh && pnpm verify:flight-history && pnpm verify:aircraft-fire-edge && pnpm verify:map-tracks
 
       - name: Verify FIRMS sensor capabilities and parsing
         run: pnpm verify:firms-sensors

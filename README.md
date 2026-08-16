@@ -18,14 +18,16 @@ Vercel Queue delayed wake-up (every 5 min)
   → five-minute browser timeline
 
 GitHub fallback schedule / deployment push
-  → public /api/refresh bootstrap and fallback
+  → zero-database /api/deployment revision probe
+  → one public /api/refresh bootstrap/fallback call
   → the same leased refresh + next Vercel Queue wake-up
 ```
 
-The linked serverless Postgres database is addressed through `DATABASE_URL` or `POSTGRES_URL`. Tables are created idempotently by the functions:
+The PostgreSQL database is addressed through `DATABASE_URL`/`POSTGRES_URL` or the certificate-verified `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `PG_CA_PEM` and `PGSSL_SERVERNAME` parameter form. The latter takes precedence when `PG_CA_PEM` is present. The runtime uses the standard PostgreSQL protocol, SCRAM channel binding and Vercel's database-pool lifecycle integration, and works with a TLS-enabled self-hosted server, PgBouncer endpoint or managed provider. Tables are created idempotently by the functions:
 
 - `app_datasets`: latest normalized payload for each dataset.
 - `app_dataset_versions`: immutable, content-addressed history when source content changes. Retrieval timestamps are excluded from the content hash.
+- `app_public_datasets`: compact current projections for the viewer. Canonical rows remain complete; repeated aircraft provider strings and reproducible FIRMS footprint coordinates are omitted only from this delivery copy to reduce database transfer.
 - `source_refresh_runs`: one status record for every claimed source/time bucket, including unchanged polls and errors.
 - `refresh_scheduler_ticks`: one leased status row per deployment/wake-up slot, preventing duplicate queue messages from branching the refresh chain.
 - `source_artifacts`: the content-addressed raw audit archive, including source API/feed responses and retained Sentinel quicklook bytes. Current counts and original-byte totals are reported by the database overview.
@@ -90,7 +92,7 @@ The Best estimate uses one solid red satellite boundary and one matching area fi
 
 Bütgenbach's Cloudflare policy blocks requests from the Node.js function network. Its official sitemap and article pages are therefore read through `/api/butgenbach-source`, a no-store Vercel Edge function that accepts only short-lived HMAC-signed requests for allow-listed paths on `butgenbach.be`. It is not an open proxy; the Node.js refresh worker still validates, parses and archives every official response in Postgres.
 
-The project is currently on Vercel Hobby, whose native cron frequency is not sufficient for five-minute work. A Vercel Queue message therefore wakes the private consumer at minute 02/07/12/... and schedules the next delayed message before polling providers. Queue delivery is durable and automatically retried. Push delivery is pinned to a deployment; the `refresh-scheduler` database record names the active deployment so an old chain stops after a release. `.github/workflows/refresh.yml` calls the public bootstrap endpoint on deployments and every 15 minutes as a fallback. Push runs wait until the production alias reports their exact commit before taking ownership; a newer push cancels an older release wait that can no longer own the alias. Scheduled and manually dispatched fallback runs accept whichever valid deployment currently owns the production alias and never cancel a release run. A once-daily native Vercel cron provides an additional recovery path allowed by Hobby. Every path activates the current deployment and schedules its next queue wake-up. The endpoint has no user-controlled URL or query target, and Postgres leases enforce the provider limits even if paths fire together.
+The project is currently on Vercel Hobby, whose native cron frequency is not sufficient for five-minute work. A Vercel Queue message therefore wakes the private consumer at minute 02/07/12/... and schedules the next delayed message before polling providers. Queue delivery is durable and automatically retried. Push delivery is pinned to a deployment; the `refresh-scheduler` database record names the active deployment so an old chain stops after a release. `.github/workflows/refresh.yml` polls the zero-database `/api/deployment` probe while a release is moving, then calls the mutating refresh endpoint exactly once. Its 15-minute schedule remains a fallback. Push runs wait until the production alias reports their exact commit before taking ownership; a newer push cancels an older release wait that can no longer own the alias. Scheduled and manually dispatched fallback runs accept whichever valid deployment currently owns the production alias and never cancel a release run. A once-daily native Vercel cron provides an additional recovery path allowed by Hobby. Every refresh path activates the current deployment and schedules its next queue wake-up. The endpoint has no user-controlled URL or query target, and Postgres leases enforce the provider limits even if paths fire together.
 
 ## Local development
 
@@ -111,7 +113,9 @@ Run the deterministic checks with:
 pnpm verify:refresh
 pnpm verify:flight-history
 pnpm verify:aircraft-fire-edge
+pnpm verify:map-tracks
 pnpm verify:firms-sensors
+pnpm verify:postgres
 pnpm verify:live-reports
 pnpm build
 ```
@@ -134,9 +138,11 @@ pnpm dlx vercel@latest --prod --yes
 
 Required production variables:
 
-- `DATABASE_URL` or `POSTGRES_URL`
+- `DATABASE_URL`/`POSTGRES_URL`, or `PGHOST` + `PGPASSWORD` + `PG_CA_PEM` (with optional `PGPORT`, `PGUSER`, `PGDATABASE` and `PGSSL_SERVERNAME`)
 - `FIRMS_MAP_KEY`
 - `INTERNAL_SOURCE_TOKEN` (sensitive; authenticates the fixed-host Bütgenbach Edge fetcher)
+
+For a self-hosted cutover, schema bootstrap, full history/artifact copy and Vercel environment replacement are documented in [`docs/self-hosted-postgres.md`](docs/self-hosted-postgres.md). The source database must allow one final read; the copy cannot bypass a provider-level quota suspension.
 
 Optional controlled-source variables:
 

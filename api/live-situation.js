@@ -1,4 +1,4 @@
-import { databaseOverview, loadDatasets, setNoStoreHeaders } from '../server/database.mjs'
+import { databaseOverview, loadPublicDatasets, setNoStoreHeaders } from '../server/database.mjs'
 
 export const INCIDENT = { latitude: 50.54762, longitude: 6.05757 }
 export const INCIDENT_AIRCRAFT = new Map([
@@ -423,7 +423,10 @@ export default async function handler(request, response) {
   if (request.method !== 'GET') return response.status(405).json({ error: 'Method not allowed' })
 
   try {
-    const [datasets, database] = await Promise.all([loadDatasets(), databaseOverview()])
+    const [datasets, database] = await Promise.all([
+      loadPublicDatasets(['weather-open-meteo', 'aircraft', 'reports']),
+      databaseOverview(),
+    ])
     const weather = datasets['weather-open-meteo']?.payload
     const aircraft = datasets.aircraft?.payload
     const reports = datasets.reports?.payload

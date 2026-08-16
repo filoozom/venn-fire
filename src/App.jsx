@@ -57,6 +57,7 @@ import {
   footprintOutlineRings,
   FIRMS_SENSORS,
   corroborateDetections,
+  detectionFootprint,
   estimateFootprintArea,
   firmsDetectionVisibleAt,
 } from './firmsDetections'
@@ -737,6 +738,7 @@ function FireViewer({ runtime, databaseError }) {
       displayMode: detection.displayMode ?? sensor?.displayMode ?? 'footprint',
       pixelSizeLabel: sensor?.pixelSizeLabel ?? detection.pixelSizeLabel ?? `${detection.scanKm} × ${detection.trackKm} km pixel`,
       areaExclusionReason: sensor?.areaExclusionReason ?? detection.areaExclusionReason ?? null,
+      footprint: detection.footprint ?? detectionFootprint(detection),
       position: [detection.latitude, detection.longitude],
       timestampMs: Date.parse(detection.acquiredAt),
       frame: Math.max(0, Math.ceil((Date.parse(detection.acquiredAt) - runtime.timelineStartMs) / FIVE_MINUTES_MS)),
