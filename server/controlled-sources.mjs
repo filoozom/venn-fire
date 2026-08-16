@@ -327,8 +327,65 @@ async function pullBody(url, headers) {
   return rawBody
 }
 
-async function unavailableResult(datasetKey, query) {
+function unavailablePayload(datasetKey, retrievedAt) {
+  if (datasetKey === 'road-events') {
+    return {
+      schemaVersion: 1,
+      retrievedAt,
+      source: {
+        name: 'Walloon road traffic events',
+        registryUrl: ROAD_SOURCE_URL,
+        dataModel: 'DATEX II (CEN/TS 16157)',
+        access: 'Awaiting contract-issued credentials',
+      },
+      configured: false,
+      currentRecordCount: 0,
+      eventCount: 0,
+      events: [],
+    }
+  }
+  if (datasetKey === 'official-perimeter') {
+    return {
+      schemaVersion: 1,
+      retrievedAt,
+      source: {
+        name: 'Field-confirmed incident perimeter',
+        access: 'Awaiting agency-issued GeoJSON feed',
+      },
+      configured: false,
+      current: null,
+      snapshotCount: 0,
+      snapshots: [],
+    }
+  }
+  return {
+    schemaVersion: 1,
+    retrievedAt,
+    source: {
+      name: 'Sanitized public incident operations feed',
+      access: 'Awaiting agency-approved feed',
+    },
+    configured: false,
+    eventCount: 0,
+    events: [],
+  }
+}
+
+async function unavailableResult(datasetKey, requestedAtMs, query) {
   const previous = await loadDataset(datasetKey, query)
+  if (!previous) {
+    const payload = unavailablePayload(datasetKey, new Date(requestedAtMs).toISOString())
+    const stored = await saveDataset({ key: datasetKey, payload }, query)
+    return {
+      itemCount: 0,
+      metadata: {
+        changed: stored.changed,
+        configured: false,
+        awaitingAccess: true,
+        dataAvailable: true,
+      },
+    }
+  }
   return {
     itemCount: previous?.payload?.eventCount ?? previous?.payload?.current?.features?.length ?? 0,
     metadata: { configured: false, awaitingAccess: true, dataAvailable: Boolean(previous) },
@@ -341,7 +398,7 @@ export async function refreshRoadEvents({ requestedAtMs, query, environment = pr
     environment.WALLONIA_DATEX_AUTHORIZATION?.trim()
       || (environment.WALLONIA_DATEX_USERNAME?.trim() && environment.WALLONIA_DATEX_PASSWORD?.trim()),
   )
-  if (!url || !hasCredentials) return unavailableResult('road-events', query)
+  if (!url || !hasCredentials) return unavailableResult('road-events', requestedAtMs, query)
   const rawBody = await pullBody(url, pullHeaders(environment, 'WALLONIA_DATEX', 'application/xml, text/xml'))
   return persistRoadEvents({
     rawBody,
@@ -353,7 +410,7 @@ export async function refreshRoadEvents({ requestedAtMs, query, environment = pr
 
 export async function refreshIncidentPerimeter({ requestedAtMs, query, environment = process.env }) {
   const url = environment.INCIDENT_PERIMETER_URL?.trim()
-  if (!url) return unavailableResult('official-perimeter', query)
+  if (!url) return unavailableResult('official-perimeter', requestedAtMs, query)
   const rawBody = await pullBody(url, pullHeaders(environment, 'INCIDENT_PERIMETER', 'application/geo+json, application/json'))
   return persistIncidentPerimeter({
     rawBody,
@@ -365,7 +422,7 @@ export async function refreshIncidentPerimeter({ requestedAtMs, query, environme
 
 export async function refreshPublicOperations({ requestedAtMs, query, environment = process.env }) {
   const url = environment.PUBLIC_OPERATIONS_URL?.trim()
-  if (!url) return unavailableResult('public-operations', query)
+  if (!url) return unavailableResult('public-operations', requestedAtMs, query)
   const rawBody = await pullBody(url, pullHeaders(environment, 'PUBLIC_OPERATIONS', 'application/json'))
   return persistPublicOperations({
     rawBody,
