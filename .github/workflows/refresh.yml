@@ -14,7 +14,9 @@ permissions:
 
 concurrency:
   group: production-data-refresh
-  cancel-in-progress: false
+  # A newer release supersedes an older push that is still waiting for its SHA.
+  # Scheduled fallbacks never cancel a release run; they queue behind it.
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
   refresh:
