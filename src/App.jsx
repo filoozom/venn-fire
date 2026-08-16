@@ -47,6 +47,11 @@ import {
   deriveAircraftSupportedEdge,
 } from './aircraftFireEstimate'
 import {
+  AIRCRAFT_TRACE_LIFETIME_MS,
+  aircraftCoverageWindows,
+  visibleAircraftObservations,
+} from './aircraftTracks'
+import {
   effisAreaForTimestamp,
   effisProductIsCarriedForward,
   FIVE_MINUTES_MS,
@@ -69,8 +74,8 @@ import {
 } from './modisFireEstimate'
 
 // Each raw sensor is its own layer and each confidence level its own filter. The
-// Best estimate is separate: its single solid outline follows a fixed,
-// documented VIIRS + newest-pass MODIS selection rule.
+// Best estimate is separate: its single solid outline follows fixed,
+// documented satellite and repeat-supported aircraft selection rules.
 const FIRMS_LAYER_KEYS = Object.fromEntries(FIRMS_SENSORS.map((sensor) => [sensor.key, `firms:${sensor.key}`]))
 // Independent-satellite agreement, kept separate from the published confidence
 // field. NASA's confidence value is never rewritten: a detection we cannot
@@ -135,7 +140,7 @@ function layerOptionsFor(effisArea, isCarriedForward, firmsSummaries = [], frame
       color: sensor.color,
     }
   }),
-  { key: 'aircraft', label: 'Aircraft observations', detail: 'Exact MLAT dots + gap-limited connectors', icon: Helicopter, color: '#3a7fcc' },
+  { key: 'aircraft', label: 'Aircraft observations', detail: 'Exact fixes · linear 24 h fade', icon: Helicopter, color: '#3a7fcc' },
   { key: 'wind', label: 'Drossart model wind', detail: frame?.drossartWind ? `Open-Meteo hourly grid · ${frame.drossartWind.ageMinutes} min old` : 'No model value at selected time', icon: Wind, color: '#478fc4' },
   { key: 'rmiWind', label: 'Mont Rigi station wind', detail: frame?.montRigiWind ? `RMI 10 min observation · ${frame.montRigiWind.ageMinutes} min old · awaiting validation` : 'No station observation within 20 min of selected time', icon: Wind, color: '#4f9e90' },
   ...dwdWindStations.map((station) => {
@@ -163,6 +168,10 @@ function observationState(flight, frame) {
     const visibleEvidence = (flight.evidenceObservations || [])
       .filter((evidence) => evidence.timestampMs <= frame.timestampMs)
     if (flight.evidenceObservations?.length && !visibleEvidence.length) return { key: 'future', label: 'NOT YET' }
+    if (visibleEvidence.length
+      && frame.timestampMs - visibleEvidence.at(-1).timestampMs >= AIRCRAFT_TRACE_LIFETIME_MS) {
+      return { key: 'expired', label: 'EXPIRED', latest: visibleEvidence.at(-1) }
+    }
     if (visibleEvidence.at(-1)?.state === 'landed') return { key: 'landed', label: 'LANDED PHOTO', latest: visibleEvidence.at(-1) }
     return { key: 'static', label: 'STATIC' }
   }
@@ -171,6 +180,9 @@ function observationState(flight, frame) {
   const latest = visible.at(-1)
   if (frame.timestampMs - latest.timestampMs <= OBSERVATION_RECENCY_MS) {
     return { key: 'recent', label: 'OBSERVED', latest }
+  }
+  if (frame.timestampMs - latest.timestampMs >= AIRCRAFT_TRACE_LIFETIME_MS) {
+    return { key: 'expired', label: 'EXPIRED', latest }
   }
   return { key: 'past', label: 'LAST SEEN', latest }
 }
@@ -512,13 +524,13 @@ function DataModal({
             <div className="method-layout">
               <div className="method-callout">
                 <Info size={19} />
-                <p><strong>Different products answer different questions.</strong> The viewer keeps reported area, satellite-derived geometry, thermal detections, aircraft fixes and model weather separate.</p>
+                <p><strong>Different products answer different questions.</strong> The viewer keeps reported area, raw thermal detections, aircraft fixes and model weather separate; only qualifying evidence enters the derived Best estimate.</p>
               </div>
               <div className="method-steps">
-                <article><span>01</span><div><strong>Thermal anomaly</strong><p>FIRMS detections appear at their exact acquisition time. Raw sensor layers stay separate. The Best estimate merges its corroborated VIIRS core with only nearby high-confidence pixels from the newest MODIS pass; Meteosat remains detections-only.</p></div></article>
+                <article><span>01</span><div><strong>Thermal anomaly</strong><p>FIRMS detections appear at their exact acquisition time. Raw sensor layers stay separate. The Best estimate merges its corroborated VIIRS core with nearby high-confidence pixels from the newest MODIS pass and, only after repeat support, a conservative aircraft-bounded lobe on the same 50 m raster; Meteosat remains detections-only.</p></div></article>
                 <article><span>02</span><div><strong>Reported area</strong><p>The line is a timestamped step series. A figure becomes visible when published; when its stated effective time differs, both times are retained and shown. Between reports it means “last reported,” not measured growth.</p></div></article>
                 <article><span>03</span><div><strong>EFFIS daily geometry</strong><p>The 14 and 15 August VIIRS-derived polygons are separate calendar-day products. Their locally calculated geometry area is not the official affected area; EFFIS provides no within-day acquisition time for five-minute animation.</p></div></article>
-                <article><span>04</span><div><strong>Aircraft observations</strong><p>Identified incident aircraft are shown from exact receiver fixes returned by the independently health-checked aircraft providers. Gaps stay empty, and a marker never claims a helicopter remained airborne.</p></div></article>
+                <article><span>04</span><div><strong>Aircraft observations</strong><p>Identified incident aircraft are shown from exact receiver fixes returned by the independently health-checked aircraft providers. Gaps stay empty, fixes fade over 24 hours, and only repeated near-core GRZLY direction changes can extend the single Best estimate outline.</p></div></article>
                 <article><span>05</span><div><strong>Situation reports</strong><p>The Governor of Liège page is polled every five minutes for official estimates and safety events. BRF figures remain distinctly labelled local reporting; every step links to its source.</p></div></article>
               </div>
               <div className="safety-note"><ShieldAlert size={17} /><span>This viewer is informational and must not be used for evacuation or preservation-of-life decisions. Follow BE-Alert and emergency services.</span></div>
@@ -638,7 +650,17 @@ function FireViewer({ runtime, databaseError }) {
     () => mergeIncidentFlights(runtime.flights, liveAircraftObservations),
     [liveAircraftObservations, runtime.flights],
   )
-  const receiverObservedFlights = displayFlights.filter((flight) => flight.observations?.length)
+  const visibleDisplayFlights = useMemo(
+    () => displayFlights.filter((flight) => observationState(flight, frame).key !== 'expired'),
+    [displayFlights, frame],
+  )
+  const visibleImportedTracks = useMemo(
+    () => importedTracks.filter((flight) => observationState(flight, frame).key !== 'expired'),
+    [importedTracks, frame],
+  )
+  const receiverObservedFlights = visibleDisplayFlights.filter((flight) => (
+    visibleAircraftObservations(flight.observations, frame.timestampMs).length
+  ))
   const receiverObservedCallSigns = receiverObservedFlights.map((flight) => flight.callSign).join(', ')
 
   useEffect(() => {
@@ -720,8 +742,8 @@ function FireViewer({ runtime, databaseError }) {
   ], [frame])
 
   const activeFlights = useMemo(
-    () => displayFlights.filter((flight) => observationState(flight, frame).key === 'recent'),
-    [displayFlights, frame],
+    () => visibleDisplayFlights.filter((flight) => observationState(flight, frame).key === 'recent'),
+    [visibleDisplayFlights, frame],
   )
 
   // Database-retained FIRMS detections, placed on the five-minute timeline by
@@ -773,15 +795,20 @@ function FireViewer({ runtime, databaseError }) {
     [bestEstimateCoreDetections, firmsData.locationReference],
   )
 
+  const aircraftEstimateFlights = useMemo(() => visibleDisplayFlights.map((flight) => ({
+    ...flight,
+    observations: visibleAircraftObservations(flight.observations, frame.timestampMs),
+  })).filter((flight) => flight.observations.length), [visibleDisplayFlights, frame.timestampMs])
+
   const aircraftSupportedEdge = useMemo(() => deriveAircraftSupportedEdge({
-    flights: displayFlights,
+    flights: aircraftEstimateFlights,
     detections: bestEstimateCoreDetections,
     outlineRings: viirsCoreOutlineRings,
     frameTimestampMs: frame.timestampMs,
     origin: firmsData.locationReference,
     gridCellM: AIRCRAFT_EDGE_GRID_CELL_M,
     timeBucketMs: AIRCRAFT_EDGE_TIME_BUCKET_MS,
-  }), [displayFlights, bestEstimateCoreDetections, viirsCoreOutlineRings, frame.timestampMs, firmsData.locationReference])
+  }), [aircraftEstimateFlights, bestEstimateCoreDetections, viirsCoreOutlineRings, frame.timestampMs, firmsData.locationReference])
 
   const modisSupportedExtent = useMemo(() => deriveModisSupportedExtent({
     detections: firmsDetectionsAtTime,
@@ -793,12 +820,16 @@ function FireViewer({ runtime, databaseError }) {
     timeBucketMs: MODIS_EXTENT_TIME_BUCKET_MS,
   }), [firmsDetectionsAtTime, bestEstimateCoreDetections, aircraftSupportedEdge.candidates, frame.timestampMs, firmsData.locationReference])
 
-  // There is one satellite estimate, not a VIIRS outline plus a competing MODIS
-  // outline. Qualifying pixels from the newest MODIS pass extend the same raster
-  // union and therefore the same solid boundary and hectare figure.
+  // There is one estimate, not separate satellite and aircraft outlines.
+  // Qualifying MODIS pixels and the conservative repeat-supported aircraft lobe
+  // extend the same 50 m raster union, solid boundary and hectare figure.
   const bestEstimateDetections = useMemo(
     () => [...bestEstimateCoreDetections, ...modisSupportedExtent.detections],
     [bestEstimateCoreDetections, modisSupportedExtent.detections],
+  )
+  const aircraftSupportPolygons = useMemo(
+    () => aircraftSupportedEdge.supportPolygon.length ? [aircraftSupportedEdge.supportPolygon] : [],
+    [aircraftSupportedEdge.supportPolygon],
   )
 
   const fireOutlineRings = useMemo(
@@ -808,8 +839,9 @@ function FireViewer({ runtime, databaseError }) {
         latitude: firmsData.locationReference.latitude,
         longitude: firmsData.locationReference.longitude,
       },
+      supportPolygons: aircraftSupportPolygons,
     }),
-    [bestEstimateDetections, firmsData.locationReference],
+    [bestEstimateDetections, aircraftSupportPolygons, firmsData.locationReference],
   )
 
   const visibleFirmsDetections = useMemo(() => firmsDetectionsAtTime.filter((detection) => (
@@ -819,12 +851,16 @@ function FireViewer({ runtime, databaseError }) {
 
   // The estimate is the area of the exact 50 m raster union used by the solid
   // boundary, so the number and the map geometry cannot disagree.
-  const bestEstimateAreaHa = useMemo(() => estimateFootprintArea(bestEstimateDetections, {
+  const bestEstimateArea = useMemo(() => estimateFootprintArea(bestEstimateDetections, {
+    gridCellM: 50,
     origin: {
       latitude: firmsData.locationReference.latitude,
       longitude: firmsData.locationReference.longitude,
     },
-  }).unionHa, [bestEstimateDetections, firmsData.locationReference])
+    supportPolygons: aircraftSupportPolygons,
+  }), [bestEstimateDetections, aircraftSupportPolygons, firmsData.locationReference])
+  const bestEstimateAreaHa = bestEstimateArea.unionHa
+  const aircraftSupportIncluded = bestEstimateArea.supportCellCount > 0
 
   const firmsAreaEstimates = useMemo(() => FIRMS_SENSORS
     .filter((sensor) => sensor.providesArea && layers[FIRMS_LAYER_KEYS[sensor.key]])
@@ -908,7 +944,7 @@ function FireViewer({ runtime, databaseError }) {
               {/* The best estimate sits beside the reported figure. EFFIS keeps its
                   own card below: at roughly five times the reported area it is an
                   envelope, and giving it headline position overstated the burn. */}
-              <div><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}</strong><span>best-estimate ha</span><small>{bestEstimateDetections.length ? `${bestEstimateCoreDetections.length} VIIRS core${modisSupportedExtent.detections.length ? ` + ${modisSupportedExtent.detections.length} ${modisSupportedExtent.satellites.join('/')} MODIS` : ''} · derived` : 'no qualifying detections yet'}</small></div>
+              <div><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}</strong><span>best-estimate ha</span><small>{bestEstimateDetections.length ? `${bestEstimateCoreDetections.length} VIIRS core${modisSupportedExtent.detections.length ? ` + ${modisSupportedExtent.detections.length} ${modisSupportedExtent.satellites.join('/')} MODIS` : ''}${aircraftSupportIncluded ? ` + ${aircraftSupportedEdge.callSigns.join('/')} edge` : ''} · derived` : 'no qualifying detections yet'}</small></div>
             </div>
           </div>
 
@@ -922,16 +958,15 @@ function FireViewer({ runtime, databaseError }) {
                   onChange={() => setLayers((value) => ({ ...value, [FIRE_OUTLINE_KEY]: !value[FIRE_OUTLINE_KEY] }))}
                 />
                 <span>Best estimate outline</span>
-                <em>{bestEstimateDetections.length ? `${Math.round(bestEstimateAreaHa).toLocaleString('en-GB')} sat. ha` : '—'}</em>
+                <em>{bestEstimateDetections.length ? `${Math.round(bestEstimateAreaHa).toLocaleString('en-GB')} derived ha` : '—'}</em>
               </label>
             </div>
             <div className="outline-method-key" aria-label="Best estimate outline methods">
-              <span><i className="is-satellite" /> Satellite estimate</span>
-              {aircraftSupportedEdge.candidates.length ? <span><i className="is-aircraft" /> Aircraft-supported edge</span> : null}
+              <span><i className="is-satellite" /> Single combined outline</span>
             </div>
             <p className="layer-note">
               {bestEstimateDetections.length
-                ? `Solid red: one ${Math.round(bestEstimateAreaHa).toLocaleString('en-GB')} ha satellite estimate from ${bestEstimateCoreDetections.length} corroborated VIIRS detections${modisSupportedExtent.detections.length ? ` plus ${modisSupportedExtent.detections.length} high-confidence ${modisSupportedExtent.satellites.join('/')} MODIS pixels from the newest pass` : ''}. 50 m grid; not a confirmed burned-area perimeter.${aircraftSupportedEdge.candidates.length ? ` Dashed amber: ${aircraftSupportedEdge.callSigns.join(', ')} context only; receiver data cannot confirm a drop.` : ''}`
+                ? `Solid red: one ${Math.round(bestEstimateAreaHa).toLocaleString('en-GB')} ha estimate from ${bestEstimateCoreDetections.length} corroborated VIIRS detections${modisSupportedExtent.detections.length ? ` plus ${modisSupportedExtent.detections.length} high-confidence ${modisSupportedExtent.satellites.join('/')} MODIS pixels from the newest pass` : ''}${aircraftSupportIncluded ? ` plus ${bestEstimateArea.supportCellCount} additional 50 m cells in the conservative lobe bounded by repeated ${aircraftSupportedEdge.callSigns.join(', ')} direction changes` : ''}. One 50 m raster and one outline; not a confirmed burned-area perimeter.${aircraftSupportIncluded ? ' Receiver positions do not confirm a water drop.' : ''}`
                 : 'No detections meet the best-estimate rule at this time.'}
             </p>
           </div>
@@ -988,7 +1023,7 @@ function FireViewer({ runtime, databaseError }) {
               <SourceMark tone={frame.weatherSourceKind === 'station-observation' ? 'rmi' : 'weather'} /><span><strong>{frame.weatherSourceKind === 'station-observation' ? 'Mont Rigi station' : 'Wind model fallback'}</strong><small>{frame.weatherSourceKind === 'station-observation' ? `10 min observation · ${frame.weatherAgeMinutes} min old · awaiting RMI validation` : 'Open-Meteo hourly grid value'}</small></span><em className={`health-dot ${frame.weatherSourceKind === 'station-observation' ? 'health-dot--amber' : ''}`} />
             </button>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
-              <SourceMark tone="adsb" /><span><strong>Aircraft</strong><small>{displayFlights.length} sourced set{importedTracks.length ? ` · ${importedTracks.length} static import` : ''}</small></span><em className="health-dot" /></button>
+              <SourceMark tone="adsb" /><span><strong>Aircraft</strong><small>{visibleDisplayFlights.length} visible set{visibleImportedTracks.length ? ` · ${visibleImportedTracks.length} static import` : ''}</small></span><em className="health-dot" /></button>
           </div>
 
           <div className="emergency-note">
@@ -1001,16 +1036,15 @@ function FireViewer({ runtime, databaseError }) {
           <MapView
             frameIndex={frameIndex}
             frame={frame}
-            flights={displayFlights}
+            flights={visibleDisplayFlights}
             effisArea={currentEffisArea}
             effisCarriedForward={effisCarriedForward}
             layers={layers}
             baseMode={baseMode}
             onMapReady={setMapActions}
-            importedTracks={importedTracks}
+            importedTracks={visibleImportedTracks}
             firmsDetections={visibleFirmsDetections}
             fireOutlineRings={layers[FIRE_OUTLINE_KEY] ? fireOutlineRings : []}
-            aircraftFireEdge={layers[FIRE_OUTLINE_KEY] ? aircraftSupportedEdge : null}
             mapLabels={runtime.mapLabels}
             protectedArea={runtime.protectedArea}
             officialPerimeter={runtime.officialPerimeter.current}
@@ -1057,7 +1091,7 @@ function FireViewer({ runtime, databaseError }) {
         <aside className="right-inspector">
           <div className="inspector-tabs">
             <button className={inspectorTab === 'situation' ? 'is-active' : ''} onClick={() => setInspectorTab('situation')} type="button">Situation</button>
-            <button className={inspectorTab === 'air' ? 'is-active' : ''} onClick={() => setInspectorTab('air')} type="button">Air ops <span>{displayFlights.length + importedTracks.length}</span></button>
+            <button className={inspectorTab === 'air' ? 'is-active' : ''} onClick={() => setInspectorTab('air')} type="button">Air ops <span>{visibleDisplayFlights.length + visibleImportedTracks.length}</span></button>
           </div>
 
           {inspectorTab === 'situation' ? (
@@ -1070,7 +1104,7 @@ function FireViewer({ runtime, databaseError }) {
 
               <div className="snapshot-grid">
                 <article className="snapshot-card snapshot-card--fire"><span><Flame size={15} /> REPORTED AREA</span><strong>{reportedAreaText}<small>{frame.reportedHa == null ? '' : 'ha'}</small></strong><p>{frame.areaLabel}</p></article>
-                <article className="snapshot-card snapshot-card--estimate"><span><Flame size={15} /> BEST ESTIMATE</span><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}<small>{bestEstimateDetections.length ? 'ha' : ''}</small></strong><p>{bestEstimateDetections.length ? `${bestEstimateDetections.length} selected thermal detections · ${bestEstimateCoreDetections.length} VIIRS${modisSupportedExtent.detections.length ? ` + ${modisSupportedExtent.detections.length} ${modisSupportedExtent.satellites.join('/')} MODIS` : ''}` : 'no qualifying detections yet'}</p></article>
+                <article className="snapshot-card snapshot-card--estimate"><span><Flame size={15} /> BEST ESTIMATE</span><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}<small>{bestEstimateDetections.length ? 'ha' : ''}</small></strong><p>{bestEstimateDetections.length ? `${bestEstimateDetections.length} selected thermal detections · ${bestEstimateCoreDetections.length} VIIRS${modisSupportedExtent.detections.length ? ` + ${modisSupportedExtent.detections.length} ${modisSupportedExtent.satellites.join('/')} MODIS` : ''}${aircraftSupportIncluded ? ` · ${bestEstimateArea.supportCellCount} aircraft-supported cells` : ''}` : 'no qualifying detections yet'}</p></article>
                 <article className="snapshot-card snapshot-card--effis"><span><Layers3 size={15} /> EFFIS DAILY GEOMETRY</span><strong>{currentEffisArea ? Math.round(currentEffisArea.areaHa).toLocaleString('en-GB') : '—'}<small>{currentEffisArea ? 'ha' : ''}</small></strong><p>{currentEffisArea ? `${currentEffisArea.productDate}${effisCarriedForward ? ' carried forward until replacement' : ''} · envelope containing fire activity, not burned area` : 'no EFFIS product available at selected time'}</p></article>
                 <article className="snapshot-card"><span><Satellite size={15} /> HOTSPOTS</span><strong>{visibleFirmsDetections.length}<small>px</small></strong><p>shaded by confidence · exact NASA FIRMS detections</p></article>
                 <article className="snapshot-card"><span><Helicopter size={15} /> AIR OPS</span><strong>{activeFlights.length}<small>recent</small></strong><p>{activeFlights.length ? 'fix within previous 5 min' : 'no recent observation'}</p></article>
@@ -1155,13 +1189,22 @@ function FireViewer({ runtime, databaseError }) {
               </div>
 
               <div className="flight-list">
-                {[...displayFlights, ...importedTracks].map((flight) => {
+                {[...visibleDisplayFlights, ...visibleImportedTracks].map((flight) => {
                   const state = observationState(flight, frame)
                   const isActive = state.key === 'recent'
                   const hasStarted = !['future'].includes(state.key)
-                  const observationCount = flight.observations?.length ?? null
-                  const coverageCount = flight.coverageWindows?.length ?? null
-                  const photoCount = flight.evidenceObservations?.filter((evidence) => evidence.kind === 'photo').length ?? 0
+                  const visibleObservations = flight.observations
+                    ? visibleAircraftObservations(flight.observations, frame.timestampMs)
+                    : null
+                  const observationCount = visibleObservations?.length ?? null
+                  const coverageCount = visibleObservations
+                    ? aircraftCoverageWindows(visibleObservations).length
+                    : null
+                  const photoCount = flight.evidenceObservations?.filter((evidence) => (
+                    evidence.kind === 'photo'
+                    && evidence.timestampMs <= frame.timestampMs
+                    && frame.timestampMs - evidence.timestampMs < AIRCRAFT_TRACE_LIFETIME_MS
+                  )).length ?? 0
                   return (
                     <article key={flight.id} className={`flight-card ${isActive ? 'is-active' : ''} ${hasStarted ? '' : 'is-future'}`}>
                       <div className="flight-head">
@@ -1176,8 +1219,8 @@ function FireViewer({ runtime, databaseError }) {
                 })}
               </div>
 
-              <div className="coverage-note"><Radio size={15} /><p><strong>Dots are observations; dashed lines are not flight paths.</strong><span>Five-minute point checks discover verified and GRZLY incident aircraft without extra provider calls; trace reconciliation fills exact ADS-B/MLAT fixes missed between polls. Straight connectors appear only across gaps ≤2 minutes and plausible speed.</span></p></div>
-              <div className="coverage-note"><Flame size={15} /><p><strong>The fire outline uses only repeated near-core GRZLY direction changes.</strong><span>Those evidence points enter on five-minute frames and are snapped to the same 50 m grid. Long reservoir-side and transit legs are excluded; the dashed extension is an inference, not a detected drop or confirmed fire front.</span></p></div>
+              <div className="coverage-note"><Radio size={15} /><p><strong>Aircraft evidence fades for 24 hours.</strong><span>Each exact fix and gap-limited connector becomes linearly more transparent against the selected five-minute frame, then disappears completely at 24 hours. PostgreSQL retains the source history.</span></p></div>
+              <div className="coverage-note"><Flame size={15} /><p><strong>Qualifying aircraft evidence extends the same solid Best estimate outline.</strong><span>Repeated near-core GRZLY direction changes enter on five-minute frames and bound the smallest conservative lobe on the shared 50 m raster. Long reservoir-side and transit legs are excluded; there is no separate aircraft edge, and receiver positions do not prove a drop or confirmed fire front.</span></p></div>
               <div className="coverage-note"><Info size={15} /><p><strong>Wide-area checks separate this incident from nearby activity.</strong><span>{runtime.incidentAircraftMeta.negativeFindings?.[0]} {runtime.incidentAircraftMeta.negativeFindings?.[1]} The known Aachen/Walheim MLAT artifact is excluded.</span></p></div>
             </div>
           ) : null}

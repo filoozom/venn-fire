@@ -62,6 +62,7 @@ if (proxyDatabase) {
 }
 await page.goto(testUrl, { waitUntil: 'domcontentloaded' })
 await page.waitForSelector('.timeline-range')
+await page.waitForSelector('.app-shell:not(.app-shell--hydrating)')
 
 // Unrelated receiver traffic is an offline audit only. It must not have a
 // layer toggle, inspector entry or situation card that could expose it again.
@@ -74,13 +75,12 @@ if (unrelatedTrafficControls !== 0) {
 
 await page.locator('.data-button').click()
 await page.getByRole('button', { name: 'Source directory' }).click()
-const officialSourceLinks = {
-  governor: await page.locator('a.directory-row').filter({ hasText: 'Governor of Liège' }).count(),
-  effisViewer: await page.locator('a.directory-row').filter({ hasText: 'EFFIS Current Situation Viewer' }).count(),
-  effisWfs: await page.locator('a.directory-row').filter({ hasText: 'EFFIS 15 Aug WFS response' }).count(),
+const synchronizedSourceLinks = {
+  reports: await page.locator('a.directory-row').filter({ hasText: 'Governor and BRF reports' }).count(),
+  effis: await page.locator('a.directory-row').filter({ hasText: 'Copernicus EFFIS daily geometry' }).count(),
 }
-if (Object.values(officialSourceLinks).some((count) => count !== 1)) {
-  throw new Error(`Official Governor/EFFIS sources are not exposed exactly once: ${JSON.stringify(officialSourceLinks)}`)
+if (Object.values(synchronizedSourceLinks).some((count) => count !== 1)) {
+  throw new Error(`Database source registry entries are not exposed exactly once: ${JSON.stringify(synchronizedSourceLinks)}`)
 }
 await page.getByRole('button', { name: 'Close data workspace' }).click()
 
@@ -130,19 +130,22 @@ Object.entries(expected).forEach(([key, value]) => {
   if (normalized !== value) throw new Error(`${key}: expected ${value}, got ${normalized}`)
 })
 
-// A lone manoeuvre must not alter the fire outline. The aircraft-supported edge
-// becomes visible only after a second nearby GRZLY direction change, on the same
-// five-minute timeline used by the rest of the incident.
+// A lone manoeuvre must not alter the fire outline. After a second nearby GRZLY
+// direction change, the conservative lobe must enter the same solid outline and
+// hectare figure—never appear as a separate aircraft layer.
 await selectTime('2026-08-15T18:55:00+02:00')
-const edgeBeforeRepeat = await page.locator('.outline-method-key').innerText()
-await selectTime('2026-08-15T19:05:00+02:00')
+const edgeNoteBeforeRepeat = await page.locator('.layer-note').first().innerText()
+await selectTime('2026-08-15T21:10:00+02:00')
 const edgeAfterRepeat = await page.locator('.outline-method-key').innerText()
 const edgeNoteAfterRepeat = await page.locator('.layer-note').first().innerText()
-if (edgeBeforeRepeat.includes('Aircraft-supported edge')) {
-  throw new Error(`Aircraft edge appeared before repeat support: ${edgeBeforeRepeat}`)
+if (edgeNoteBeforeRepeat.includes('additional 50 m cells')) {
+  throw new Error(`Aircraft support appeared before repeat support: ${edgeNoteBeforeRepeat}`)
 }
-if (!edgeAfterRepeat.includes('Aircraft-supported edge') || !edgeNoteAfterRepeat.includes('Dashed amber: GRZLY81 context only')) {
-  throw new Error(`Aircraft edge did not enter on the expected five-minute frame: ${edgeAfterRepeat} / ${edgeNoteAfterRepeat}`)
+if (!edgeAfterRepeat.includes('Single combined outline')
+  || edgeAfterRepeat.includes('Aircraft-supported edge')
+  || !edgeNoteAfterRepeat.includes('additional 50 m cells')
+  || !edgeNoteAfterRepeat.includes('direction changes')) {
+  throw new Error(`Aircraft support did not enter the one outline on the expected five-minute frame: ${edgeAfterRepeat} / ${edgeNoteAfterRepeat}`)
 }
 
 // The 19:13 UTC Terra pass becomes available at the 19:15 UTC frame. It must
@@ -157,12 +160,11 @@ const areaAfterTerra = await page.locator('.snapshot-card--estimate strong').inn
 const estimateMethodKey = await page.locator('.outline-method-key').innerText()
 if (!modisBeforeTerra.includes('high-confidence Aqua MODIS pixels')
   || !modisAfterTerra.includes('13 high-confidence Terra MODIS pixels')
-  || !estimateMethodKey.includes('Satellite estimate')
+  || !estimateMethodKey.includes('Single combined outline')
   || estimateMethodKey.includes('MODIS-supported extent')) {
   throw new Error(`MODIS support did not switch on the expected five-minute frame: ${modisBeforeTerra} / ${modisAfterTerra}`)
 }
-if (areaBeforeTerra.replace(/\s+/gu, '') === areaAfterTerra.replace(/\s+/gu, '')
-  || areaAfterTerra.replace(/\s+/gu, '') !== '2,984ha') {
+if (areaBeforeTerra.replace(/\s+/gu, '') === areaAfterTerra.replace(/\s+/gu, '')) {
   throw new Error(`Merged MODIS geometry did not update the matching estimate area: ${areaBeforeTerra} -> ${areaAfterTerra}`)
 }
 

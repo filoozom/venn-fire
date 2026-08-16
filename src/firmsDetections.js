@@ -20,9 +20,10 @@ const MAX_DAY_RANGE = 10
 
 // Each sensor is a separate published product from a separate spacecraft, so
 // each gets its own map layer and colour, and standalone sensor summaries stay
-// separate. The Best estimate is the deliberate exception: another module
-// selects only the newest nearby high-confidence MODIS pixels before the caller
-// unions them with its corroborated VIIRS core.
+// separate. The Best estimate is the deliberate exception: other modules select
+// only the newest nearby high-confidence MODIS pixels and any qualifying
+// aircraft-bounded lobe before the caller unions them with its corroborated
+// VIIRS core on one raster.
 export const FIRMS_SENSORS = [
   {
     key: 'viirsSnpp',
@@ -192,7 +193,7 @@ export const FOOTPRINT_ESTIMATE_CAVEATS = [
   'Only ground that was actively flaming during an overpass can be detected. Ground that ignited and burned out between overpasses is never counted, and smoke or cloud removes further detections. The estimate therefore understates area for a fast-moving fire between passes.',
   'Because those two errors act in opposite directions and do not cancel predictably, this figure is neither an upper nor a lower bound on burned area.',
   'The footprint rectangle is axis-aligned in latitude and longitude from the published scan and track pixel dimensions. It approximates the true sensor parallelogram and ignores the scan-angle rotation.',
-  'Standalone sensor figures are estimated independently and must not be added. The Best estimate instead computes one geometric union of its selected VIIRS and newest-pass MODIS footprints, so overlapping ground is counted once.',
+  'Standalone sensor figures are estimated independently and must not be added. The Best estimate instead computes one geometric union of its selected VIIRS and newest-pass MODIS footprints plus any repeat-supported conservative aircraft lobe, so overlapping ground is counted once.',
   'Corroboration records that two spacecraft observed the same cell. It raises confidence that something was burning there; it does not measure how much of the cell burned, and an uncorroborated detection is not thereby proven false.',
 ]
 
@@ -505,8 +506,116 @@ export function detectionFootprint(detection) {
  * and measures the occupied cells, which dissolves the overlap. The result is
  * reported alongside the naive sum so the amount of overlap stays visible.
  */
-export function estimateFootprintArea(detections, { gridCellM = 25, origin } = {}) {
-  const method = `Union of published sensor pixel footprints, dissolved on a ${gridCellM} m grid`
+function addDetectionCells(occupied, detection, projection, gridCellM) {
+  const halfHeight = detection.trackKm * 1000 / 2
+  const halfWidth = detection.scanKm * 1000 / 2
+  const centreY = (detection.latitude - projection.anchorLat) * projection.mPerLat
+  const centreX = (detection.longitude - projection.anchorLon) * projection.mPerLon
+  const south = centreY - halfHeight
+  const north = centreY + halfHeight
+  const west = centreX - halfWidth
+  const east = centreX + halfWidth
+
+  // A cell counts when its centre falls inside the footprint, tested on a
+  // half-open interval. Expanding to every touched cell instead would inflate
+  // every footprint by up to one cell on each edge, which biases the estimate
+  // upward; centre sampling is unbiased and exact when the footprint is a
+  // whole number of cells.
+  for (let cellY = Math.floor(south / gridCellM); cellY <= Math.ceil(north / gridCellM); cellY += 1) {
+    const centreOfCellY = (cellY + 0.5) * gridCellM
+    if (centreOfCellY < south - CELL_EDGE_EPSILON_M || centreOfCellY >= north - CELL_EDGE_EPSILON_M) continue
+    for (let cellX = Math.floor(west / gridCellM); cellX <= Math.ceil(east / gridCellM); cellX += 1) {
+      const centreOfCellX = (cellX + 0.5) * gridCellM
+      if (centreOfCellX < west - CELL_EDGE_EPSILON_M || centreOfCellX >= east - CELL_EDGE_EPSILON_M) continue
+      occupied.add(`${cellX}:${cellY}`)
+    }
+  }
+}
+
+function pointInPolygon([x, y], polygon) {
+  let inside = false
+  for (let current = 0, previous = polygon.length - 1; current < polygon.length; previous = current, current += 1) {
+    const [currentX, currentY] = polygon[current]
+    const [previousX, previousY] = polygon[previous]
+    const crosses = (currentY > y) !== (previousY > y)
+      && x < ((previousX - currentX) * (y - currentY)) / (previousY - currentY) + currentX
+    if (crosses) inside = !inside
+  }
+  return inside
+}
+
+function addSupportPolygonCells(occupied, supportPolygons, projection, gridCellM) {
+  supportPolygons.forEach((latLonPolygon) => {
+    if (!Array.isArray(latLonPolygon) || latLonPolygon.length < 4) return
+    const polygon = latLonPolygon
+      .map((position) => [
+        (Number(position?.[1]) - projection.anchorLon) * projection.mPerLon,
+        (Number(position?.[0]) - projection.anchorLat) * projection.mPerLat,
+      ])
+      .filter((position) => position.every(Number.isFinite))
+    if (polygon.length < 4) return
+
+    const xValues = polygon.map(([x]) => x)
+    const yValues = polygon.map(([, y]) => y)
+    const minCellX = Math.floor(Math.min(...xValues) / gridCellM) - 1
+    const maxCellX = Math.ceil(Math.max(...xValues) / gridCellM) + 1
+    const minCellY = Math.floor(Math.min(...yValues) / gridCellM) - 1
+    const maxCellY = Math.ceil(Math.max(...yValues) / gridCellM) + 1
+
+    for (let cellY = minCellY; cellY <= maxCellY; cellY += 1) {
+      for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
+        if (pointInPolygon([(cellX + 0.5) * gridCellM, (cellY + 0.5) * gridCellM], polygon)) {
+          occupied.add(`${cellX}:${cellY}`)
+        }
+      }
+    }
+
+    // Include the boundary itself even when a narrow supported lobe contains no
+    // cell centre. Sampling at a quarter cell keeps the line connected without
+    // inventing a wider buffer around the aircraft evidence.
+    for (let index = 1; index < polygon.length; index += 1) {
+      const start = polygon[index - 1]
+      const end = polygon[index]
+      const segmentLength = Math.hypot(end[0] - start[0], end[1] - start[1])
+      const steps = Math.max(1, Math.ceil(segmentLength / (gridCellM / 4)))
+      for (let step = 0; step <= steps; step += 1) {
+        const ratio = step / steps
+        const x = start[0] + (end[0] - start[0]) * ratio
+        const y = start[1] + (end[1] - start[1]) * ratio
+        occupied.add(`${Math.floor(x / gridCellM)}:${Math.floor(y / gridCellM)}`)
+      }
+    }
+  })
+}
+
+function rasterizedFootprintUnion(detections, { gridCellM, origin, supportPolygons = [] }) {
+  const anchorLat = origin?.latitude ?? detections[0].latitude
+  const anchorLon = origin?.longitude ?? detections[0].longitude
+  const projection = {
+    anchorLat,
+    anchorLon,
+    mPerLat: metresPerDegreeLatitude(anchorLat),
+    mPerLon: metresPerDegreeLongitude(anchorLat),
+  }
+  const occupied = new Set()
+  detections.forEach((detection) => addDetectionCells(occupied, detection, projection, gridCellM))
+  const sensorCellCount = occupied.size
+  addSupportPolygonCells(occupied, supportPolygons, projection, gridCellM)
+  return {
+    occupied,
+    projection,
+    sensorCellCount,
+    supportCellCount: occupied.size - sensorCellCount,
+  }
+}
+
+export function estimateFootprintArea(detections, {
+  gridCellM = 25,
+  origin,
+  supportPolygons = [],
+} = {}) {
+  const hasSupport = supportPolygons.some((polygon) => Array.isArray(polygon) && polygon.length >= 4)
+  const method = `Union of published sensor pixel footprints${hasSupport ? ' and qualifying support geometry' : ''}, dissolved on a ${gridCellM} m grid`
 
   if (!detections.length) {
     return {
@@ -514,6 +623,9 @@ export function estimateFootprintArea(detections, { gridCellM = 25, origin } = {
       sumHa: 0,
       overlapFactor: null,
       detectionCount: 0,
+      sensorUnionHa: 0,
+      supportCellCount: 0,
+      supportAreaHa: 0,
       gridCellM,
       method,
       isEstimate: true,
@@ -521,51 +633,29 @@ export function estimateFootprintArea(detections, { gridCellM = 25, origin } = {
     }
   }
 
-  const anchorLat = origin?.latitude ?? detections[0].latitude
-  const anchorLon = origin?.longitude ?? detections[0].longitude
-  const mPerLat = metresPerDegreeLatitude(anchorLat)
-  const mPerLon = metresPerDegreeLongitude(anchorLat)
-
-  const occupied = new Set()
   let sumSquareMetres = 0
-
   for (const detection of detections) {
     sumSquareMetres += detection.scanKm * detection.trackKm * 1e6
-
-    const halfHeight = detection.trackKm * 1000 / 2
-    const halfWidth = detection.scanKm * 1000 / 2
-    const centreY = (detection.latitude - anchorLat) * mPerLat
-    const centreX = (detection.longitude - anchorLon) * mPerLon
-
-    const south = centreY - halfHeight
-    const north = centreY + halfHeight
-    const west = centreX - halfWidth
-    const east = centreX + halfWidth
-
-    // A cell counts when its centre falls inside the footprint, tested on a
-    // half-open interval. Expanding to every touched cell instead would inflate
-    // every footprint by up to one cell on each edge, which biases the estimate
-    // upward; centre sampling is unbiased and exact when the footprint is a
-    // whole number of cells.
-    for (let cellY = Math.floor(south / gridCellM); cellY <= Math.ceil(north / gridCellM); cellY += 1) {
-      const centreOfCellY = (cellY + 0.5) * gridCellM
-      if (centreOfCellY < south - CELL_EDGE_EPSILON_M || centreOfCellY >= north - CELL_EDGE_EPSILON_M) continue
-      for (let cellX = Math.floor(west / gridCellM); cellX <= Math.ceil(east / gridCellM); cellX += 1) {
-        const centreOfCellX = (cellX + 0.5) * gridCellM
-        if (centreOfCellX < west - CELL_EDGE_EPSILON_M || centreOfCellX >= east - CELL_EDGE_EPSILON_M) continue
-        occupied.add(`${cellX}:${cellY}`)
-      }
-    }
   }
 
+  const { occupied, sensorCellCount, supportCellCount } = rasterizedFootprintUnion(detections, {
+    gridCellM,
+    origin,
+    supportPolygons,
+  })
   const unionHa = occupied.size * gridCellM * gridCellM / 10000
+  const sensorUnionHa = sensorCellCount * gridCellM * gridCellM / 10000
+  const supportAreaHa = supportCellCount * gridCellM * gridCellM / 10000
   const sumHa = sumSquareMetres / 10000
 
   return {
     unionHa,
     sumHa,
-    overlapFactor: unionHa > 0 ? sumHa / unionHa : null,
+    overlapFactor: sensorUnionHa > 0 ? sumHa / sensorUnionHa : null,
     detectionCount: detections.length,
+    sensorUnionHa,
+    supportCellCount,
+    supportAreaHa,
     gridCellM,
     method,
     isEstimate: true,
@@ -732,37 +822,21 @@ export function firmsSourceEntry(summaries) {
  * the difference between this outline and the EFFIS envelope: unburned ground
  * enclosed by detections stays visibly unburned.
  */
-export function footprintOutlineRings(detections, { gridCellM = 50, origin } = {}) {
+export function footprintOutlineRings(detections, {
+  gridCellM = 50,
+  origin,
+  supportPolygons = [],
+} = {}) {
   if (!detections.length) return []
-
-  const anchorLat = origin?.latitude ?? detections[0].latitude
-  const anchorLon = origin?.longitude ?? detections[0].longitude
-  const mPerLat = metresPerDegreeLatitude(anchorLat)
-  const mPerLon = metresPerDegreeLongitude(anchorLat)
 
   // Same occupancy test as estimateFootprintArea, so the outline and the hectare
   // figure always describe the same ground.
-  const occupied = new Set()
-  for (const detection of detections) {
-    const halfHeight = detection.trackKm * 1000 / 2
-    const halfWidth = detection.scanKm * 1000 / 2
-    const centreY = (detection.latitude - anchorLat) * mPerLat
-    const centreX = (detection.longitude - anchorLon) * mPerLon
-    const south = centreY - halfHeight
-    const north = centreY + halfHeight
-    const west = centreX - halfWidth
-    const east = centreX + halfWidth
-
-    for (let cellY = Math.floor(south / gridCellM); cellY <= Math.ceil(north / gridCellM); cellY += 1) {
-      const centreOfCellY = (cellY + 0.5) * gridCellM
-      if (centreOfCellY < south - CELL_EDGE_EPSILON_M || centreOfCellY >= north - CELL_EDGE_EPSILON_M) continue
-      for (let cellX = Math.floor(west / gridCellM); cellX <= Math.ceil(east / gridCellM); cellX += 1) {
-        const centreOfCellX = (cellX + 0.5) * gridCellM
-        if (centreOfCellX < west - CELL_EDGE_EPSILON_M || centreOfCellX >= east - CELL_EDGE_EPSILON_M) continue
-        occupied.add(`${cellX}:${cellY}`)
-      }
-    }
-  }
+  const { occupied, projection } = rasterizedFootprintUnion(detections, {
+    gridCellM,
+    origin,
+    supportPolygons,
+  })
+  const { anchorLat, anchorLon, mPerLat, mPerLon } = projection
 
   // A cell side is on the boundary when the neighbour across it is empty. Each
   // side is emitted with the occupied cell on its left, so following edges

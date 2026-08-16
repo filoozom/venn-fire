@@ -3019,11 +3019,6 @@ button.connection-card--upload {
   border-top: 2px solid #ff2f26;
 }
 
-.outline-method-key i.is-aircraft {
-  border-color: #d77a13;
-  border-top-style: dashed;
-}
-
 .layer-note {
   margin: 9px 2px 0;
   font-size: 12.5px;
@@ -3140,14 +3135,6 @@ button.connection-card--upload {
 /* Best-estimate fire boundary. */
 .fire-outline {
   filter: drop-shadow(0 0 3px rgba(255, 47, 38, 0.45));
-}
-
-.aircraft-fire-edge {
-  filter: drop-shadow(0 0 3px rgba(255, 173, 69, 0.55));
-}
-
-.aircraft-fire-edge-point {
-  filter: drop-shadow(0 0 2px rgba(99, 54, 3, 0.55));
 }
 
 /* Incident-log source attribution. */

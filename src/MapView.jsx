@@ -1,7 +1,11 @@
 import { useEffect, useRef } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { plausibleObservationPaths } from './aircraftTracks'
+import {
+  aircraftTraceOpacity,
+  fadingObservationPaths,
+  visibleAircraftObservations,
+} from './aircraftTracks'
 
 // Detections are shaded by NASA's published confidence rather than by satellite:
 // what matters when reading the map is how sure the observation is, not which
@@ -111,7 +115,6 @@ export default function MapView({
   importedTracks = [],
   firmsDetections = [],
   fireOutlineRings = [],
-  aircraftFireEdge = null,
   mapLabels = [],
   protectedArea = [],
   officialPerimeter = null,
@@ -188,7 +191,6 @@ export default function MapView({
     const group = overlayRef.current
     if (!group) return
     group.clearLayers()
-    const aircraftEdgeLayers = []
 
     // The Drossart marker was removed: it plotted the place name used in the
     // incident reports, not a fire measurement, and read as an ignition point.
@@ -298,9 +300,9 @@ export default function MapView({
       ).addTo(group)
     })
 
-    // One dissolved boundary around all selected satellite detections. The
-    // qualifying newest-pass MODIS pixels extend this same VIIRS-anchored
-    // geometry; there is no second MODIS outline.
+    // One dissolved boundary around the complete selected 50 m union. Any
+    // qualifying newest-pass MODIS pixels and repeat-supported aircraft lobe
+    // have already been folded into these rings; no second edge is rendered.
     if (fireOutlineRings.length) {
       L.polygon(fireOutlineRings, {
         color: '#ff2f26',
@@ -312,93 +314,41 @@ export default function MapView({
       }).addTo(group)
     }
 
-    // The dashed arc is deliberately separate from the solid satellite core.
-    // It connects repeated fire-side GRZLY direction changes, never the full
-    // reservoir-side route, and it is not included in the hectare figure.
-    if (aircraftFireEdge?.extensionLine?.length >= 3) {
-      const callSigns = aircraftFireEdge.callSigns.map(escapeHtml).join(', ')
-      aircraftEdgeLayers.push(L.polyline(aircraftFireEdge.extensionLine, {
-        color: '#fff2cf',
-        weight: 6,
-        opacity: 0.78,
-        dashArray: '9 7',
-        lineCap: 'round',
-        lineJoin: 'round',
-        interactive: false,
-      }).addTo(group))
-      const edgeLine = L.polyline(aircraftFireEdge.extensionLine, {
-        color: '#ffad45',
-        weight: 3.4,
-        opacity: 0.96,
-        dashArray: '9 7',
-        lineCap: 'round',
-        lineJoin: 'round',
-        className: 'aircraft-fire-edge',
-      })
-        .bindTooltip(
-          `<strong>Aircraft-supported edge hypothesis</strong><br>`
-          + `${aircraftFireEdge.candidates.length} repeated ${callSigns} direction-change cells<br>`
-          + `<small>5-minute evidence frames · ${aircraftFireEdge.gridCellM} m grid · not included in hectares</small><br>`
-          + '<small>Receiver positions do not confirm a water drop or fire perimeter.</small>',
-          { sticky: true },
-        )
-        .addTo(group)
-      aircraftEdgeLayers.push(edgeLine)
-
-      aircraftFireEdge.candidates.forEach((candidate) => {
-        const edgePoint = L.circleMarker(candidate.position, {
-          radius: 3.2,
-          color: '#fff3d7',
-          weight: 1,
-          fillColor: '#ffad45',
-          fillOpacity: 0.92,
-          className: 'aircraft-fire-edge-point',
-        })
-          .bindTooltip(
-            `<strong>${escapeHtml(candidate.callSign)} edge evidence</strong><br>`
-            + `${localObservationTime(candidate.observedAt)} CEST · ${candidate.turnDegrees.toFixed(0)}° direction change<br>`
-            + `${Math.round(candidate.coreDistanceM).toLocaleString('en-GB')} m from the corroborated thermal core<br>`
-            + '<small>Snapped to 50 m grid; operational purpose is not asserted.</small>',
-            { direction: 'top' },
-          )
-          .addTo(group)
-        aircraftEdgeLayers.push(edgePoint)
-      })
-    }
-
     if (layers.aircraft) {
       ;[...flights, ...importedTracks].forEach((flight) => {
         if (flight.observations?.length) {
-          const visible = flight.observations.filter((observation) => observation.timestampMs <= frame.timestampMs)
+          const visible = visibleAircraftObservations(flight.observations, frame.timestampMs)
           if (!visible.length) return
 
-          plausibleObservationPaths(visible).forEach((path) => {
-            L.polyline(path.map((observation) => observation.position), {
+          fadingObservationPaths(visible, frame.timestampMs).forEach((path) => {
+            L.polyline(path.observations.map((observation) => observation.position), {
               color: flight.color,
               weight: 2.2,
-              opacity: 0.78,
+              opacity: 0.78 * path.opacity,
               dashArray: '5 6',
             })
-              .bindTooltip(`<strong>${flight.callSign}: receiver-observed path</strong><br>${path.length.toLocaleString('en-GB')} exact fixes · ${localObservationTime(path[0].observedAt)}–${localObservationTime(path.at(-1).observedAt)} CEST<br><small>One efficient polyline; gaps over 2 minutes and implausible links are omitted. No position is inferred between fixes.</small>`, { sticky: true })
+              .bindTooltip(`<strong>${flight.callSign}: receiver-observed path</strong><br>${path.observations.length.toLocaleString('en-GB')} exact fixes · ${localObservationTime(path.observations[0].observedAt)}–${localObservationTime(path.observations.at(-1).observedAt)} CEST<br><small>Fades linearly and disappears after 24 hours. Gaps over 2 minutes and implausible links are omitted; no position is inferred between fixes.</small>`, { sticky: true })
               .addTo(group)
           })
 
           const latest = visible.at(-1)
           const age = frame.timestampMs - latest.timestampMs
+          const fadeOpacity = aircraftTraceOpacity(latest.timestampMs, frame.timestampMs)
           if (age < 0 || age > OBSERVATION_RECENCY_MS) {
             L.circleMarker(latest.position, {
               radius: 3.5,
               color: '#dcecff',
               weight: 1,
+              opacity: fadeOpacity,
               fillColor: flight.color,
-              fillOpacity: 0.58,
+              fillOpacity: 0.58 * fadeOpacity,
             })
-              .bindTooltip(`<strong>${flight.callSign} last observed</strong><br>${localObservationTime(latest.observedAt)} CEST · ${latest.altitudeFt ?? '—'} ft<br><small>${latest.updateType}; no position inferred after this fix</small>`, { direction: 'top' })
+              .bindTooltip(`<strong>${flight.callSign} last observed</strong><br>${localObservationTime(latest.observedAt)} CEST · ${latest.altitudeFt ?? '—'} ft<br><small>${latest.updateType}; fades completely after 24 hours; no position inferred after this fix</small>`, { direction: 'top' })
               .addTo(group)
           }
 
           if (age >= 0 && age <= OBSERVATION_RECENCY_MS) {
-            L.marker(latest.position, { icon: aircraftIcon(flight), zIndexOffset: 900 })
+            L.marker(latest.position, { icon: aircraftIcon(flight), opacity: fadeOpacity, zIndexOffset: 900 })
               .bindTooltip(`<strong>${flight.callSign}: recent observation</strong><br>${localObservationTime(latest.observedAt)} CEST<br><small>This marker does not assert current airborne status.</small>`, { direction: 'top', offset: [0, -15] })
               .addTo(group)
           }
@@ -416,9 +366,6 @@ export default function MapView({
           .addTo(group)
       })
     }
-
-    // Keep the inferred edge readable when its source aircraft layer is also on.
-    aircraftEdgeLayers.forEach((layer) => layer.bringToFront?.())
 
     if (layers.wind && frame.drossartWind) {
       const windIcon = windMapIcon({
@@ -466,7 +413,7 @@ export default function MapView({
         }), { direction: 'top', offset: [0, -18] })
         .addTo(group)
     })
-  }, [frameIndex, frame, flights, effisArea, effisCarriedForward, layers, importedTracks, firmsDetections, fireOutlineRings, aircraftFireEdge, protectedArea, officialPerimeter])
+  }, [frameIndex, frame, flights, effisArea, effisCarriedForward, layers, importedTracks, firmsDetections, fireOutlineRings, protectedArea, officialPerimeter])
 
   return (
     <div className="map-surface" aria-label="Interactive fire situation map">

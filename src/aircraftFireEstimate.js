@@ -216,25 +216,53 @@ function spatialOrder(candidates, projection) {
   })
 }
 
-function closestOutlinePoint(position, rings, projection) {
+function closestPointOnRing(position, ring, projection) {
   const target = toXY(position, projection)
-  let closest = null
-  let closestDistance = Number.POSITIVE_INFINITY
-  rings.forEach((ring) => ring.slice(0, -1).forEach((point) => {
+  return ring.slice(0, -1).reduce((closest, point, index) => {
     const pointDistance = distance(target, toXY(point, projection))
-    if (pointDistance < closestDistance) {
-      closest = point
-      closestDistance = pointDistance
-    }
-  }))
-  return closest
+    return pointDistance < closest.distanceM
+      ? { position: point, index, distanceM: pointDistance }
+      : closest
+  }, { position: null, index: -1, distanceM: Number.POSITIVE_INFINITY })
+}
+
+function anchorsOnOneRing(startPosition, endPosition, rings, projection) {
+  return rings.reduce((best, ring) => {
+    const vertices = ring.slice(0, -1)
+    if (vertices.length < 3) return best
+    const start = closestPointOnRing(startPosition, ring, projection)
+    const end = closestPointOnRing(endPosition, ring, projection)
+    const score = start.distanceM + end.distanceM
+    return score < best.score ? { ring: vertices, start, end, score } : best
+  }, { ring: null, start: null, end: null, score: Number.POSITIVE_INFINITY })
+}
+
+function ringPath(vertices, fromIndex, toIndex, direction) {
+  const path = [vertices[fromIndex]]
+  let cursor = fromIndex
+  while (cursor !== toIndex && path.length <= vertices.length) {
+    cursor = (cursor + direction + vertices.length) % vertices.length
+    path.push(vertices[cursor])
+  }
+  return path
+}
+
+function pathLength(path, projection) {
+  return path.slice(1).reduce((total, point, index) => (
+    total + distance(toXY(path[index], projection), toXY(point, projection))
+  ), 0)
+}
+
+function samePosition(left, right) {
+  return left?.[0] === right?.[0] && left?.[1] === right?.[1]
 }
 
 /**
- * Derive a visually separate extension to the satellite-only best estimate.
+ * Derive the conservative lobe that can extend the existing best estimate.
  *
- * The result deliberately has no area field: a receiver track has no payload or
- * drop-state information and cannot support a burned-hectare calculation.
+ * The result deliberately has no independent area field. The caller may rasterise
+ * supportPolygon into the same 50 m union as the qualifying thermal footprints,
+ * but must never present the receiver route as its own perimeter or drop record.
  */
 export function deriveAircraftSupportedEdge({
   flights = [],
@@ -247,7 +275,7 @@ export function deriveAircraftSupportedEdge({
 } = {}) {
   const projection = projectionFor(origin)
   if (!projection || !detections.length || !outlineRings.length) {
-    return { candidates: [], extensionLine: [], callSigns: [], gridCellM, timeBucketMs }
+    return { candidates: [], extensionLine: [], supportPolygon: [], callSigns: [], gridCellM, timeBucketMs }
   }
 
   const candidates = flights
@@ -279,21 +307,41 @@ export function deriveAircraftSupportedEdge({
     }))
 
   if (supported.length < MIN_REPEAT_SUPPORT) {
-    return { candidates: [], extensionLine: [], callSigns: [], gridCellM, timeBucketMs }
+    return { candidates: [], extensionLine: [], supportPolygon: [], callSigns: [], gridCellM, timeBucketMs }
   }
 
   const ordered = spatialOrder(supported, projection)
-  const startAnchor = closestOutlinePoint(ordered[0].position, outlineRings, projection)
-  const endAnchor = closestOutlinePoint(ordered.at(-1).position, outlineRings, projection)
+  const anchors = anchorsOnOneRing(
+    ordered[0].position,
+    ordered.at(-1).position,
+    outlineRings,
+    projection,
+  )
+  const startAnchor = anchors.start?.position
+  const endAnchor = anchors.end?.position
   const extensionLine = [startAnchor, ...ordered.map((candidate) => candidate.position), endAnchor]
     .filter(Boolean)
-    .filter((position, index, all) => (
-      index === 0 || position[0] !== all[index - 1][0] || position[1] !== all[index - 1][1]
-    ))
+    .filter((position, index, all) => index === 0 || !samePosition(position, all[index - 1]))
+
+  let supportPolygon = []
+  if (anchors.ring && extensionLine.length >= 3) {
+    const clockwise = ringPath(anchors.ring, anchors.end.index, anchors.start.index, 1)
+    const counterClockwise = ringPath(anchors.ring, anchors.end.index, anchors.start.index, -1)
+    // Closing the inferred edge over the shorter piece of the existing thermal
+    // boundary adds the smallest defensible lobe instead of a convex hull that
+    // could swallow unrelated ground.
+    const boundaryPath = pathLength(clockwise, projection) <= pathLength(counterClockwise, projection)
+      ? clockwise
+      : counterClockwise
+    supportPolygon = [...extensionLine, ...boundaryPath.slice(1)]
+    if (!samePosition(supportPolygon.at(-1), supportPolygon[0])) supportPolygon.push(supportPolygon[0])
+    if (supportPolygon.length < 4) supportPolygon = []
+  }
 
   return {
     candidates: supported.slice().sort((left, right) => left.timestampMs - right.timestampMs),
     extensionLine,
+    supportPolygon,
     callSigns: [...new Set(supported.map((candidate) => candidate.callSign))].sort(),
     latestObservedAt: new Date(Math.max(...supported.map((candidate) => candidate.timestampMs))).toISOString(),
     gridCellM,

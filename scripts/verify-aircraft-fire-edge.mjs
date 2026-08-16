@@ -6,7 +6,7 @@ import {
   AIRCRAFT_EDGE_TIME_BUCKET_MS,
   deriveAircraftSupportedEdge,
 } from '../src/aircraftFireEstimate.js'
-import { footprintOutlineRings } from '../src/firmsDetections.js'
+import { estimateFootprintArea, footprintOutlineRings } from '../src/firmsDetections.js'
 
 const origin = { latitude: 50.54, longitude: 6.08 }
 const phi = origin.latitude * Math.PI / 180
@@ -68,6 +68,7 @@ const edge = deriveAircraftSupportedEdge({
 assert.equal(edge.candidates.length, 2, 'two repeated near-core GRZLY turns should support the edge')
 assert.deepEqual(edge.callSigns, ['GRZLY81'], 'unrelated callsigns must be excluded')
 assert.equal(edge.extensionLine.length, 4, 'the two evidence cells should connect to two core anchors')
+assert.ok(edge.supportPolygon.length >= 4, 'supported turns should close conservatively against the existing outline')
 assert.equal('areaHa' in edge, false, 'aircraft evidence must never generate a hectare figure')
 edge.candidates.forEach((candidate) => {
   assert.equal(candidate.frameAtMs % AIRCRAFT_EDGE_TIME_BUCKET_MS, 0, 'evidence should enter on a five-minute boundary')
@@ -78,6 +79,24 @@ edge.candidates.forEach((candidate) => {
   assert.ok(Math.abs(y / AIRCRAFT_EDGE_GRID_CELL_M - 0.5 - Math.round(y / AIRCRAFT_EDGE_GRID_CELL_M - 0.5)) < 1e-8,
     'latitude should snap to the shared 50 m grid')
 })
+
+const coreOnlyArea = estimateFootprintArea([detection], {
+  origin,
+  gridCellM: AIRCRAFT_EDGE_GRID_CELL_M,
+})
+const combinedArea = estimateFootprintArea([detection], {
+  origin,
+  gridCellM: AIRCRAFT_EDGE_GRID_CELL_M,
+  supportPolygons: [edge.supportPolygon],
+})
+const combinedOutline = footprintOutlineRings([detection], {
+  origin,
+  gridCellM: AIRCRAFT_EDGE_GRID_CELL_M,
+  supportPolygons: [edge.supportPolygon],
+})
+assert.ok(combinedArea.supportCellCount > 0, 'the supported lobe should add occupied 50 m cells')
+assert.ok(combinedArea.unionHa > coreOnlyArea.unionHa, 'the area must describe the same extended union as the outline')
+assert.notDeepEqual(combinedOutline, outlineRings, 'the supported lobe should alter the one dissolved outline')
 
 const beforeRepeat = deriveAircraftSupportedEdge({
   flights: [incidentFlight],
@@ -90,5 +109,6 @@ assert.equal(beforeRepeat.candidates.length, 0, 'one isolated manoeuvre must not
 
 const noCore = deriveAircraftSupportedEdge({ flights: [incidentFlight], origin })
 assert.deepEqual(noCore.extensionLine, [], 'aircraft positions cannot create a fire outline without a satellite core')
+assert.deepEqual(noCore.supportPolygon, [], 'aircraft positions cannot create support geometry without a satellite core')
 
 console.log('Aircraft-supported fire-edge checks passed')
