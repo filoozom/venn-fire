@@ -13,7 +13,7 @@ page.on('console', (message) => {
 })
 page.on('pageerror', (error) => errors.push(error.message))
 if (proxyDatabase) {
-  await page.route('**/api/data', async (route) => {
+  await page.route('**/api/data**', async (route) => {
     const upstream = await route.fetch({ url: databaseUrl })
     await route.fulfill({ response: upstream })
   })
@@ -54,7 +54,7 @@ mobile.on('console', (message) => {
 })
 mobile.on('pageerror', (error) => mobileErrors.push(error.message))
 if (proxyDatabase) {
-  await mobile.route('**/api/data', async (route) => {
+  await mobile.route('**/api/data**', async (route) => {
     const upstream = await route.fetch({ url: databaseUrl })
     await route.fulfill({ response: upstream })
   })

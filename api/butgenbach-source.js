@@ -27,7 +27,7 @@ function allowedPath(value) {
     const decoded = decodeURIComponent(value)
     const segments = decoded.slice(1, -1).split('/')
     return segments.length >= 1 && segments.length <= 6
-      && segments.every((segment) => /^[\p{Letter}\p{Number}][\p{Letter}\p{Number}._~-]{0,180}$/u.test(segment))
+      && segments.every((segment) => /^[\p{Letter}\p{Number}][\p{Letter}\p{Number}._~-]{0,500}$/u.test(segment))
       ? value
       : null
   } catch {

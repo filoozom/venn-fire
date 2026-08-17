@@ -867,19 +867,21 @@ function effisAreaHectares(geometry) {
   return 0
 }
 
-async function refreshEffis({ requestedAtMs, query }) {
-  const generatedAt = new Date(requestedAtMs).toISOString()
-  const productDate = generatedAt.slice(0, 10)
+function effisRequestUrl(productDate) {
   const parameters = new URLSearchParams({
     SERVICE: 'WFS', VERSION: '1.1.0', REQUEST: 'GetFeature',
     TYPENAME: EFFIS_SOURCE.layer, SRSNAME: 'EPSG:4326', OUTPUTFORMAT: 'geojson',
     TIME: productDate, BBOX: '50.45,5.9,50.7,6.25,EPSG:4326',
   })
-  const sourceRequestUrl = `${EFFIS_SOURCE.endpoint}?${parameters}`
-  const [collection, previous] = await Promise.all([
-    fetchJson(sourceRequestUrl, { timeoutMs: 45_000, headers: { Accept: 'application/geo+json, application/json' } }),
-    previousPayload('effis', query, { products: [] }),
-  ])
+  return `${EFFIS_SOURCE.endpoint}?${parameters}`
+}
+
+async function loadEffisProduct(productDate, retrievedAt) {
+  const sourceRequestUrl = effisRequestUrl(productDate)
+  const collection = await fetchJson(sourceRequestUrl, {
+    timeoutMs: 45_000,
+    headers: { Accept: 'application/geo+json, application/json' },
+  })
   const ranked = (collection.features || [])
     .filter((feature) => feature.geometry && effisPoints(feature.geometry).length)
     .map((feature) => ({
@@ -890,14 +892,16 @@ async function refreshEffis({ requestedAtMs, query }) {
     }))
     .sort((left, right) => left.nearestKm - right.nearestKm)
   const selected = ranked[0]
-  if (!selected || selected.nearestKm > 10) throw new Error('No EFFIS feature was found within 10 km')
+  if (!selected || selected.nearestKm > 10) {
+    throw new Error(`No EFFIS feature was found within 10 km for ${productDate}`)
+  }
   const geometry = selected.feature.geometry
   const latLonRings = effisRings(geometry).map((ring) => ring.map(([longitude, latitude]) => [latitude, longitude]))
-  const product = {
+  return {
     featureId: selected.feature.id || selected.feature.properties?.id || null,
     productDate,
     productLabel: `${productDate} daily product`,
-    retrievedAt: generatedAt,
+    retrievedAt,
     source: 'Copernicus EFFIS',
     sourceEndpoint: EFFIS_SOURCE.endpoint,
     sourceRequestUrl,
@@ -910,6 +914,15 @@ async function refreshEffis({ requestedAtMs, query }) {
     caveat: 'Automated daily VIIRS geometry; not an official affected-area estimate or field-surveyed perimeter',
     rings: latLonRings,
   }
+}
+
+async function refreshEffis({ requestedAtMs, query }) {
+  const generatedAt = new Date(requestedAtMs).toISOString()
+  const productDate = generatedAt.slice(0, 10)
+  const [product, previous] = await Promise.all([
+    loadEffisProduct(productDate, generatedAt),
+    previousPayload('effis', query, { products: [] }),
+  ])
   const products = mergeRows(
     previous.products,
     [product],
@@ -919,6 +932,51 @@ async function refreshEffis({ requestedAtMs, query }) {
   const payload = { schemaVersion: 1, generatedAt, products }
   const stored = await saveDataset({ key: 'effis', payload }, query)
   return { itemCount: products.length, metadata: { changed: stored.changed, productDate } }
+}
+
+function effisDatesBefore(endDate) {
+  const dates = []
+  for (let cursor = Date.parse('2026-08-14T00:00:00.000Z');
+    cursor < Date.parse(`${endDate}T00:00:00.000Z`);
+    cursor += 24 * 60 * 60 * 1_000) {
+    dates.push(new Date(cursor).toISOString().slice(0, 10))
+  }
+  return dates
+}
+
+async function refreshEffisHistory({ requestedAtMs, query }) {
+  const generatedAt = new Date(requestedAtMs).toISOString()
+  const previous = await previousPayload('effis', query, { products: [] })
+  const retainedDates = new Set((previous.products || []).map((product) => product.productDate))
+  const missingDates = effisDatesBefore(generatedAt.slice(0, 10))
+    .filter((productDate) => !retainedDates.has(productDate))
+  if (!missingDates.length) {
+    return {
+      itemCount: previous.products?.length || 0,
+      metadata: { changed: false, missingDates: [], recoveredDates: [] },
+    }
+  }
+  const recovered = await Promise.all(missingDates.map((productDate) => (
+    loadEffisProduct(productDate, generatedAt)
+  )))
+  const products = mergeRows(
+    previous.products,
+    recovered,
+    (item) => item.productDate,
+    (left, right) => left.productDate.localeCompare(right.productDate),
+  )
+  const stored = await saveDataset({
+    key: 'effis',
+    payload: { schemaVersion: 1, generatedAt, products },
+  }, query)
+  return {
+    itemCount: products.length,
+    metadata: {
+      changed: stored.changed,
+      missingDates,
+      recoveredDates: recovered.map((product) => product.productDate),
+    },
+  }
 }
 
 const EMS_LISTING = 'https://rapidmapping.emergency.copernicus.eu/backend/dashboard-api/public-activations-info/'
@@ -1182,6 +1240,11 @@ export const REFRESH_SOURCES = [
     key: 'effis', label: 'Copernicus EFFIS daily geometry', intervalMinutes: 360, run: refreshEffis,
     providerUrl: EFFIS_SOURCE.documentation,
     coverage: 'Nearest daily VIIRS-derived algorithmic geometry; distinct from a field perimeter',
+  },
+  {
+    key: 'effis-history', label: 'Copernicus EFFIS historical-day recovery', intervalMinutes: 360, run: refreshEffisHistory,
+    providerUrl: EFFIS_SOURCE.documentation,
+    coverage: 'Leased recovery of missing incident-day geometries directly from the official WFS; no bundled geometry fallback',
   },
   {
     key: 'ems', label: 'Copernicus EMS activations', intervalMinutes: 60, run: refreshEms,

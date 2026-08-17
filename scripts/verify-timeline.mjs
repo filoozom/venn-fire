@@ -14,7 +14,7 @@ const browser = await chromium.launch({ headless: true })
 // The viewer shell must paint while the uncached database response is still in
 // flight. This guards against reintroducing a full-page loading interstitial.
 const shellPage = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
-await shellPage.route('**/api/data', async (route) => {
+await shellPage.route('**/api/data**', async (route) => {
   const upstream = await fetchDatabaseRoute(route)
   await new Promise((resolve) => setTimeout(resolve, 1_500))
   await route.fulfill({ response: upstream })
@@ -55,7 +55,7 @@ const errors = []
 
 page.on('pageerror', (error) => errors.push(error.message))
 if (proxyDatabase) {
-  await page.route('**/api/data', async (route) => {
+  await page.route('**/api/data**', async (route) => {
     const upstream = await fetchDatabaseRoute(route)
     await route.fulfill({ response: upstream })
   })
@@ -205,11 +205,11 @@ if (chartBounds.y < 0 || chartBounds.y + chartBounds.height > 44.01) {
 const livePage = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
 const liveErrors = []
 livePage.on('pageerror', (error) => liveErrors.push(error.message))
-await livePage.route('**/api/data', async (route) => {
+await livePage.route('**/api/data**', async (route) => {
   const upstream = await fetchDatabaseRoute(route)
   const payload = await upstream.json()
   payload.generatedAt = '2026-08-15T13:10:00.000Z'
-  payload.datasets.reports.payload = {
+  if (payload.datasets?.reports) payload.datasets.reports.payload = {
     ...payload.datasets.reports.payload,
     ok: true,
     complete: true,

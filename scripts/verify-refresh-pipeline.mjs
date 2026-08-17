@@ -68,6 +68,7 @@ const expectedSources = [
   'dwd',
   'firms',
   'effis',
+  'effis-history',
   'ems',
   'sentinel2',
 ]
@@ -667,7 +668,7 @@ try {
   assert.equal(proxiedUrl, `https://butgenbach.be${proxyPath}`)
   assert.match(proxyResponse.headers.get('cache-control'), /no-store/)
 
-  const nestedProxyPath = '/2026/08/wichtige-information-zum-hohen-venn/'
+  const nestedProxyPath = '/erlass-des-buergermeisters-ueber-das-voruebergehende-verbot-bestimmter-aktivitaeten-auf-dem-see-von-buetgenbach-um-die-wasserentnahme-im-rahmen-der-derzeitigen-brandbekaempfung-zu-ermoeglichen/'
   const nestedProxySignature = createHmac('sha256', proxyToken)
     .update(`${proxyTimestamp}\n${nestedProxyPath}`)
     .digest('hex')
