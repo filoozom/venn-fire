@@ -62,6 +62,9 @@ assert.equal(configured.application_name, 'fire-test')
 
 assert(PUBLIC_DATASET_KEYS.includes('aircraft'))
 assert(PUBLIC_DATASET_KEYS.includes('firms'))
+assert(!PUBLIC_DATASET_KEYS.includes('road-events'))
+assert(!PUBLIC_DATASET_KEYS.includes('official-perimeter'))
+assert(!PUBLIC_DATASET_KEYS.includes('public-operations'))
 assert.equal(publicDatasetPayload('private-dataset', { secret: true }), null)
 
 const publicAircraft = publicDatasetPayload('aircraft', {
@@ -87,7 +90,11 @@ assert.equal(publicAircraft.observations[0].callSign, 'GRZLY81')
 assert.equal(publicAircraft.observations[0].routeScope, 'full-route')
 
 const publicSourceRegistry = publicDatasetPayload('source-registry', {
-  sources: [{ key: 'reports' }],
+  sources: [
+    { key: 'reports', access: { kind: 'public', configured: true } },
+    { key: 'aircraft-history', directory: false },
+    { key: 'road-events', access: { kind: 'controlled', configured: false } },
+  ],
   coverageGaps: [{ key: 'internal-source-limit' }],
 })
 assert.deepEqual(publicSourceRegistry.sources, [{ key: 'reports' }])

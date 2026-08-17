@@ -8,11 +8,8 @@ export const PUBLIC_DATASET_KEYS = Object.freeze([
   'incident-config',
   'media-reports',
   'local-authority-updates',
-  'official-perimeter',
   'public-alerts',
-  'public-operations',
   'reports',
-  'road-events',
   'sentinel2',
   'source-registry',
   'weather-dwd',
@@ -21,6 +18,17 @@ export const PUBLIC_DATASET_KEYS = Object.freeze([
 ])
 
 const PUBLIC_DATASET_KEY_SET = new Set(PUBLIC_DATASET_KEYS)
+const PRIVATE_REGISTRY_SOURCE_KEYS = new Set([
+  'aircraft-artifacts',
+  'aircraft-traces',
+  'aircraft-history',
+  'aircraft-route-history',
+  'firms-history',
+  'effis-history-migration',
+  'road-events',
+  'official-perimeter',
+  'public-operations',
+])
 
 function definedFields(value, fields) {
   return Object.fromEntries(fields.flatMap((field) => (
@@ -80,7 +88,12 @@ function compactFirms(payload) {
 
 function compactSourceRegistry(payload) {
   const { coverageGaps: _internalCoverageGaps, ...publicPayload } = payload
-  return publicPayload
+  return {
+    ...publicPayload,
+    sources: (payload.sources ?? [])
+      .filter((source) => !PRIVATE_REGISTRY_SOURCE_KEYS.has(source.key))
+      .map(({ access: _privateAccess, directory: _privateDirectory, ...source }) => source),
+  }
 }
 
 function compactSentinel2(payload) {

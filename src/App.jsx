@@ -100,6 +100,31 @@ const FIRMS_LAYER_DEFAULTS = {
 // reported high confidence there. Drawn as a single dissolved boundary rather
 // than a mosaic of pixel rectangles.
 const BEST_ESTIMATE_RULE = '2+ satellites agree and the cell has a high-confidence detection'
+const NON_DIRECTORY_SOURCE_KEYS = new Set([
+  'aircraft-artifacts',
+  'aircraft-traces',
+  'aircraft-history',
+  'aircraft-route-history',
+  'firms-history',
+  'effis-history-migration',
+  'road-events',
+  'official-perimeter',
+  'public-operations',
+])
+const SOURCE_DIRECTORY_COPY = {
+  aircraft: { label: 'Incident aircraft', coverage: 'Live positions and complete available routes for aircraft observed in the incident area.' },
+  'open-meteo': { label: 'Open-Meteo weather model', coverage: 'Hourly forecast-model weather for the incident area.' },
+  reports: { label: 'Governor and BRF reports', coverage: 'Published affected-area estimates and timestamped incident updates.' },
+  'local-authority-updates': { label: 'Local-authority updates', coverage: 'Published incident notices from nearby municipalities, emergency services and police.' },
+  vedia: { label: 'Vedia incident reporting', coverage: 'Incident reporting from the regional news service.' },
+  'public-alerts': { label: 'BE-Alert public alerts', coverage: 'Public emergency alerts retained after they expire from the live feed.' },
+  rmi: { label: 'RMI Mont Rigi observations', coverage: 'Ten-minute observations from Mont Rigi; newest values may await quality validation.' },
+  dwd: { label: 'DWD nearby wind stations', coverage: 'Ten-minute wind observations from nearby German stations.' },
+  firms: { label: 'NASA FIRMS detections', coverage: 'Thermal detections from VIIRS, MODIS and Meteosat.' },
+  effis: { label: 'Copernicus EFFIS activity envelope', coverage: 'Daily VIIRS-derived activity envelope; not an official burned-area perimeter.' },
+  ems: { label: 'Copernicus EMS activations', coverage: 'Rapid Mapping activation catalogue and matching incident details when available.' },
+  sentinel2: { label: 'Sentinel-2 imagery and observed change', coverage: 'Cloud-masked before/after change evidence from 20 m Sentinel-2 imagery.' },
+}
 
 function dwdWindLayerKey(stationId) {
   return `dwdWind:${stationId}`
@@ -108,7 +133,6 @@ function dwdWindLayerKey(stationId) {
 function initialLayerState(runtime) {
   return {
     ...runtime.initialLayers,
-    officialPerimeter: Boolean(runtime.officialPerimeter?.current?.features?.length),
     sentinel2BurnChange: true,
     ...FIRMS_LAYER_DEFAULTS,
     ...Object.fromEntries(runtime.dwdWindStations.map((station) => [dwdWindLayerKey(station.id), true])),
@@ -122,24 +146,16 @@ function layerOptionsFor(
   firmsSummaries = [],
   frame = null,
   dwdWindStations = [],
-  officialPerimeter = null,
   sentinelAnalysis = null,
 ) {
   return [
-  ...(officialPerimeter?.features?.length ? [{
-    key: 'officialPerimeter',
-    label: 'Field-confirmed perimeter',
-    detail: `${officialPerimeter.features.length} agency GeoJSON feature${officialPerimeter.features.length === 1 ? '' : 's'}`,
-    icon: LocateFixed,
-    color: '#ff4f45',
-  }] : []),
-  { key: 'perimeter', label: 'EFFIS daily geometry', detail: effisArea ? `${effisArea.productDate}${isCarriedForward ? ' carried forward' : ''} · ${Math.round(effisArea.areaHa).toLocaleString('en-GB')} ha polygon` : 'No product available at selected time', icon: Layers3, color: '#e96838' },
+  { key: 'perimeter', label: 'EFFIS activity envelope', detail: effisArea ? `${effisArea.productDate}${isCarriedForward ? ' carried forward' : ''} · ${Math.round(effisArea.areaHa).toLocaleString('en-GB')} ha envelope` : 'No product available at selected time', icon: Layers3, color: '#e96838' },
   {
     key: 'sentinel2BurnChange',
-    label: 'Sentinel-2 burn change',
+    label: 'Sentinel-2 observed change',
     detail: sentinelAnalysis
-      ? `${sentinelAnalysis.supportCellCount.toLocaleString('en-GB')} qualified 50 m cells · ${Math.round((sentinelAnalysis.clearFraction ?? 0) * 100)}% cloud-clear crop · ${sentinelAnalysis.postScene?.acquiredAt?.slice(0, 10)}`
-      : 'No qualifying post-fire scene at selected time',
+      ? `${sentinelAnalysis.supportCellCount.toLocaleString('en-GB')} supported 50 m cells · ${Math.round((sentinelAnalysis.clearFraction ?? 0) * 100)}% of crop cloud-clear · ${sentinelAnalysis.postScene?.acquiredAt?.slice(0, 10)}`
+      : 'No usable post-fire image at selected time',
     icon: Satellite,
     color: '#7f55a5',
   },
@@ -160,7 +176,7 @@ function layerOptionsFor(
   }),
   { key: 'aircraft', label: 'Aircraft observations', detail: 'Exact fixes · linear 24 h fade', icon: Helicopter, color: '#3a7fcc' },
   { key: 'wind', label: 'Drossart model wind', detail: frame?.drossartWind ? `Open-Meteo hourly grid · ${frame.drossartWind.ageMinutes} min old` : 'No model value at selected time', icon: Wind, color: '#478fc4' },
-  { key: 'rmiWind', label: 'Mont Rigi station wind', detail: frame?.montRigiWind ? `RMI 10 min observation · ${frame.montRigiWind.ageMinutes} min old · awaiting validation` : 'No station observation within 20 min of selected time', icon: Wind, color: '#4f9e90' },
+  { key: 'rmiWind', label: 'Mont Rigi station wind', detail: frame?.montRigiWind ? `RMI 10 min observation · ${frame.montRigiWind.ageMinutes} min old · preliminary` : 'No station observation within 20 min of selected time', icon: Wind, color: '#4f9e90' },
   ...dwdWindStations.map((station) => {
     const reading = frame?.dwdWinds?.find((item) => item.id === station.id)
     return {
@@ -214,15 +230,39 @@ function sourceRunIsPartial(source) {
     source?.metadata?.failedProviders?.length
     || source?.metadata?.degradedProviders?.length
     || source?.metadata?.failedResponses?.length
-    || source?.metadata?.complete === false
-    || source?.metadata?.awaitingAccess === true
-    || source?.metadata?.configured === false,
+    || source?.metadata?.complete === false,
   )
+}
+
+function normalizeDegrees(value) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return null
+  return ((number % 360) + 360) % 360
+}
+
+function formatDegrees(value) {
+  const normalized = normalizeDegrees(value)
+  if (normalized == null) return '—'
+  return `${Math.round(normalized) % 360}°`
+}
+
+function formatDecimal(value, maximumFractionDigits = 1) {
+  if (value == null || value === '') return '—'
+  const number = Number(value)
+  if (!Number.isFinite(number)) return '—'
+  return number.toLocaleString('en-GB', { maximumFractionDigits })
+}
+
+function cadenceLabel(intervalMinutes) {
+  if (intervalMinutes === 60) return 'Hourly'
+  if (intervalMinutes > 60 && intervalMinutes % 60 === 0) return `Every ${intervalMinutes / 60} h`
+  return `Every ${intervalMinutes} min`
 }
 
 function windCardinal(deg) {
   const names = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
-  return names[Math.round(deg / 22.5) % 16]
+  const normalized = normalizeDegrees(deg)
+  return normalized == null ? '—' : names[Math.round(normalized / 22.5) % 16]
 }
 
 function observationState(flight, frame) {
@@ -452,6 +492,9 @@ function DataModal({
   const postFireQuicklook = sentinel2.firstPostFireScene?.quicklook?.stored ? sentinel2.firstPostFireScene : null
   const latestSentinelAnalysis = (sentinel2.analyses ?? []).filter((analysis) => analysis.status === 'ready').at(-1)
   const sourceRunByKey = new globalThis.Map(sourceRuns.map((run) => [run.sourceKey, run]))
+  const directorySources = activeSources
+    .filter((source) => !NON_DIRECTORY_SOURCE_KEYS.has(source.key))
+    .map((source) => ({ ...source, ...SOURCE_DIRECTORY_COPY[source.key] }))
 
   useEffect(() => {
     if (!open) return undefined
@@ -515,15 +558,15 @@ function DataModal({
       <section className="data-modal" role="dialog" aria-modal="true" aria-labelledby="data-modal-title">
         <header className="modal-header">
           <div>
-            <span className="kicker">DATA WORKSPACE</span>
-            <h2 id="data-modal-title">Sources & connections</h2>
+            <span className="kicker">DATA &amp; SOURCES</span>
+            <h2 id="data-modal-title">Data and source status</h2>
           </div>
-          <button className="icon-button" onClick={onClose} type="button" aria-label="Close data workspace"><X size={19} /></button>
+          <button className="icon-button" onClick={onClose} type="button" aria-label="Close data and sources"><X size={19} /></button>
         </header>
 
-        <nav className="modal-tabs" aria-label="Data workspace sections">
-          <button className={tab === 'connections' ? 'is-active' : ''} onClick={() => setTab('connections')} type="button">Connections</button>
-          <button className={tab === 'method' ? 'is-active' : ''} onClick={() => setTab('method')} type="button">Method & limits</button>
+        <nav className="modal-tabs" aria-label="Data and source sections">
+          <button className={tab === 'connections' ? 'is-active' : ''} onClick={() => setTab('connections')} type="button">Overview</button>
+          <button className={tab === 'method' ? 'is-active' : ''} onClick={() => setTab('method')} type="button">How to read this</button>
           <button className={tab === 'sources' ? 'is-active' : ''} onClick={() => setTab('sources')} type="button">Source directory</button>
         </nav>
 
@@ -533,9 +576,9 @@ function DataModal({
               <div className="connection-card connection-card--primary">
                 <div className="connection-icon"><Satellite size={20} /></div>
                 <div className="connection-copy">
-                  <div className="connection-title"><strong>NASA FIRMS</strong><span className="status-pill status-pill--connected"><Check size={11} /> DATABASE REFRESH</span></div>
-                  <p>{firmsDetectionCount} exact thermal-anomaly detections from Suomi-NPP, NOAA-20, NOAA-21, MODIS and Meteosat are retained in Postgres. The Vercel refresh function merges polar overpasses and geostationary scans into that history.</p>
-                  <span className="connection-meta">Scheduler evaluated every 5 min · provider fetched every 15 min · newest source acquisition {firmsState.latestAcquiredAt ? absoluteObservationTimeLabel(Date.parse(firmsState.latestAcquiredAt)) : 'unavailable'} · no browser-stored API key</span>
+                  <div className="connection-title"><strong>NASA FIRMS</strong><span className="status-pill status-pill--connected"><Check size={11} /> AUTO-UPDATED</span></div>
+                  <p>{firmsDetectionCount.toLocaleString('en-GB')} thermal detections from Suomi-NPP, NOAA-20, NOAA-21, Terra, Aqua and Meteosat are stored with their history.</p>
+                  <span className="connection-meta">Checked every 15 min · newest satellite observation {firmsState.latestAcquiredAt ? absoluteObservationTimeLabel(Date.parse(firmsState.latestAcquiredAt)) : 'unavailable'}</span>
                 </div>
               </div>
 
@@ -553,8 +596,8 @@ function DataModal({
                 <div className="connection-card">
                   <span className="connection-icon connection-icon--weather"><Wind size={20} /></span>
                   <span className="connection-copy">
-                    <span className="connection-title"><strong>Mont Rigi weather</strong><span className="status-pill status-pill--key">AWAITING QC</span></span>
-                    <p>Ten-minute measurements from RMI station 6494, 4.2 km from Drossart. RMI has not yet quality-validated any field in this near-real-time window.</p>
+                    <span className="connection-title"><strong>Mont Rigi weather</strong><span className="status-pill status-pill--key">PRELIMINARY</span></span>
+                    <p>Ten-minute measurements from RMI station 6494, 4.2 km from Drossart. The newest readings have not yet passed RMI quality validation.</p>
                     <span className="connection-meta">Official RMI station observations · Open-Meteo hourly model fallback</span>
                   </span>
                 </div>
@@ -569,9 +612,9 @@ function DataModal({
                     <img className="sentinel-preview" src={latestQuicklook.quicklook.databaseUrl} alt={`Sentinel-2 quicklook acquired ${latestQuicklook.acquiredAt}`} />
                   ) : <span className="connection-icon"><Satellite size={20} /></span>}
                   <span className="connection-copy">
-                    <span className="connection-title"><strong>Sentinel-2 burn change</strong><span className="status-pill status-pill--connected">{latestSentinelAnalysis ? `${latestSentinelAnalysis.supportCellCount} CELLS` : `${sentinel2.storedQuicklookCount ?? 0} STORED`}</span></span>
-                    <p>{latestSentinelAnalysis ? `${latestSentinelAnalysis.observedChangeAreaHa.toLocaleString('en-GB')} ha of cloud-clear 20 m dNBR change qualified into ${latestSentinelAnalysis.supportAreaHa.toLocaleString('en-GB')} ha of shared 50 m support cells; the crop was ${Math.round(latestSentinelAnalysis.clearFraction * 100)}% clear.` : latestQuicklook ? `Latest retained quicklook: ${latestQuicklook.name}.` : 'The catalogue is synchronized; no public quicklook has been stored yet.'}</p>
-                    <span className="connection-meta">B8A/B12 + SCL · pre/post L2A COG windows · five-minute catalogue checks · exact source crop values and derived geometry retained in Postgres</span>
+                    <span className="connection-title"><strong>Sentinel-2 observed change</strong><span className="status-pill status-pill--connected">{latestSentinelAnalysis ? `${latestSentinelAnalysis.supportCellCount.toLocaleString('en-GB')} CELLS` : `${sentinel2.storedQuicklookCount ?? 0} STORED`}</span></span>
+                    <p>{latestSentinelAnalysis ? `The latest clear pixels show ${formatDecimal(latestSentinelAnalysis.observedChangeAreaHa)} ha of spectral change consistent with fire. They occupy ${formatDecimal(latestSentinelAnalysis.supportAreaHa)} ha on the shared 50 m display grid; ${Math.round(latestSentinelAnalysis.clearFraction * 100)}% of the crop was cloud-clear.` : latestQuicklook ? `Latest retained image: ${latestQuicklook.name}.` : 'The catalogue is synchronized; no public image has been stored yet.'}</p>
+                    <span className="connection-meta">Near-infrared and short-wave infrared comparison · checked for new images every 5 min · analysed crop retained in PostgreSQL</span>
                   </span>
                 </div>
               </div>
@@ -589,14 +632,14 @@ function DataModal({
             <div className="method-layout">
               <div className="method-callout">
                 <Info size={19} />
-                <p><strong>Different products answer different questions.</strong> The viewer keeps reported area, raw thermal detections, aircraft fixes and model weather separate; only qualifying evidence enters the derived Best estimate.</p>
+                <p><strong>Different products answer different questions.</strong> Reported area, thermal detections, aircraft positions and weather remain separate. Only evidence that passes the stated rules contributes to the Best estimate.</p>
               </div>
               <div className="method-steps">
-                <article><span>01</span><div><strong>Observed fire evidence</strong><p>FIRMS detections appear at their exact acquisition time. The Best estimate merges its corroborated VIIRS core with nearby high-confidence pixels from the newest MODIS pass, cloud-clear Sentinel-2 B8A/B12 dNBR change anchored to that core, and only after local repeat support, compact aircraft-bounded lobes. Everything enters one 50 m raster and one outline; Meteosat remains detections-only.</p></div></article>
+                <article><span>01</span><div><strong>Best estimate</strong><p>The solid red outline combines corroborated VIIRS heat detections, supported pixels from the newest MODIS pass, cloud-clear Sentinel-2 change near the fire, and tightly filtered aircraft evidence. All accepted evidence uses the same 50 m grid. Meteosat never changes the estimate.</p></div></article>
                 <article><span>02</span><div><strong>Reported area</strong><p>The line is a timestamped step series. A figure becomes visible when published; when its stated effective time differs, both times are retained and shown. Between reports it means “last reported,” not measured growth.</p></div></article>
-                <article><span>03</span><div><strong>EFFIS daily geometry</strong><p>The 14 and 15 August VIIRS-derived polygons are separate calendar-day products. Their locally calculated geometry area is not the official affected area; EFFIS provides no within-day acquisition time for five-minute animation.</p></div></article>
-                <article><span>04</span><div><strong>Aircraft observations</strong><p>Verified identities and conservatively supported low-altitude incident-area candidates are shown from exact receiver fixes returned by independently health-checked providers. Candidate status never asserts an operational role. Gaps stay empty, fixes fade over 24 hours, and only repeated near-core GRZLY direction changes can extend the single Best estimate outline.</p></div></article>
-                <article><span>05</span><div><strong>Situation reports</strong><p>The Governor of Liège page is polled every five minutes for official estimates and safety events. BRF figures remain distinctly labelled local reporting; every step links to its source.</p></div></article>
+                <article><span>03</span><div><strong>EFFIS activity envelope</strong><p>EFFIS groups a day of VIIRS activity into a broad shape. Its calculated area can include ground between detections, so it is neither the reported affected area nor a field-confirmed perimeter.</p></div></article>
+                <article><span>04</span><div><strong>Aircraft observations</strong><p>Routes use exact receiver fixes. Missing coverage stays missing, and routes fade away after 24 hours. An aircraft seen near the incident is not automatically a firefighting aircraft; only repeated, near-fire GRZLY manoeuvres can influence the Best estimate.</p></div></article>
+                <article><span>05</span><div><strong>Situation reports</strong><p>Published estimates appear from their stated time and link to the original source. BRF figures remain labelled as local reporting rather than official measurements.</p></div></article>
               </div>
               <div className="safety-note"><ShieldAlert size={17} /><span>This viewer is informational and must not be used for evacuation or preservation-of-life decisions. Follow BE-Alert and emergency services.</span></div>
             </div>
@@ -605,20 +648,18 @@ function DataModal({
           {tab === 'sources' && (
             <div className="source-directory">
               <div className="directory-section-title">
-                <strong>Continuous database synchronizers</strong>
-                <small>{activeSources.filter((source) => source.access?.configured !== false).length}/{activeSources.length} connected or push-ready</small>
+                <strong>Live data sources</strong>
+                <small>{directorySources.length} sources checked automatically</small>
               </div>
-              {activeSources.map((source) => {
+              {directorySources.map((source) => {
                 const run = sourceRunByKey.get(source.key)
-                const state = source.access?.configured === false
-                  ? 'AWAITING ACCESS'
-                  : run?.status === 'failed' ? 'FAILED'
+                const state = run?.status === 'failed' ? 'FAILED'
                     : run?.status === 'running' ? 'SYNCING'
                       : sourceRunIsPartial(run) ? 'PARTIAL'
-                        : `${source.intervalMinutes} MIN`
+                        : cadenceLabel(source.intervalMinutes)
                 const content = (
                   <>
-                    <SourceMark tone={source.key === 'firms' ? 'nasa' : source.key === 'effis' || source.key === 'ems' || source.key === 'sentinel2' ? 'effis' : source.key.includes('meteo') || source.key === 'dwd' ? 'weather' : source.key === 'reports' || source.key === 'vedia' ? 'report' : source.key === 'local-authority-updates' || source.access?.kind === 'controlled' ? 'official' : 'adsb'} />
+                    <SourceMark tone={source.key === 'firms' ? 'nasa' : source.key === 'effis' || source.key === 'ems' || source.key === 'sentinel2' ? 'effis' : source.key.includes('meteo') || source.key === 'dwd' || source.key === 'rmi' ? 'weather' : source.key === 'reports' || source.key === 'vedia' ? 'report' : source.key === 'local-authority-updates' || source.key === 'public-alerts' ? 'official' : 'adsb'} />
                     <span><strong>{source.label}</strong><small>{source.coverage}</small></span>
                     <em>{state}</em>
                     {source.providerUrl ? <ExternalLink size={15} /> : <CircleHelp size={15} />}
@@ -640,7 +681,8 @@ function DataModal({
                   <ExternalLink size={15} />
                 </a>
               ))}
-              <div className="source-footnote"><CircleHelp size={15} /><p>Current datasets, historical versions and migrated source artifacts are retained in Postgres. The browser reads the database only; provider credentials never reach the viewer.</p></div>
+              <div className="source-footnote"><Database size={15} /><p>Current records and their history are stored in PostgreSQL. Source links open the original provider.</p></div>
+              <div className="source-footnote"><CircleHelp size={15} /><p>Timestamped aircraft-track exports or georeferenced satellite and aerial imagery could improve this record. <a href="https://apyos.com" target="_blank" rel="noreferrer">Contact us if you have access to this information.</a></p></div>
             </div>
           )}
         </div>
@@ -675,8 +717,12 @@ function FireViewer({ runtime, databaseError }) {
   const aircraftHistoryUnavailable = aircraftLoadStatus === 'error'
   const aircraftHistoryLoading = aircraftLoadStatus === 'loading'
   const sourceRuns = runtime.database?.sources ?? []
-  const hasFailedSource = sourceRuns.some((source) => source.status === 'failed')
-  const hasPartialSource = sourceRuns.some(sourceRunIsPartial)
+  const publicSourceKeys = new Set((runtime.sourceRegistry.sources ?? [])
+    .filter((source) => !NON_DIRECTORY_SOURCE_KEYS.has(source.key))
+    .map((source) => source.key))
+  const publicSourceRuns = sourceRuns.filter((source) => publicSourceKeys.has(source.sourceKey))
+  const hasFailedSource = publicSourceRuns.some((source) => source.status === 'failed')
+  const hasPartialSource = publicSourceRuns.some(sourceRunIsPartial)
   const syncState = {
     status: databaseError ? 'stale' : hasFailedSource || hasPartialSource || aircraftHistoryUnavailable ? 'partial' : 'live',
     generatedAt: runtime.generatedAt,
@@ -721,8 +767,8 @@ function FireViewer({ runtime, databaseError }) {
       })),
   }), [visibleSentinelAnalyses])
   const layerOptions = useMemo(
-    () => layerOptionsFor(currentEffisArea, effisCarriedForward, firmsData.sensors, frame, runtime.dwdWindStations, runtime.officialPerimeter.current, currentSentinelAnalysis),
-    [currentEffisArea, effisCarriedForward, firmsData.sensors, frame, runtime.dwdWindStations, runtime.officialPerimeter.current, currentSentinelAnalysis],
+    () => layerOptionsFor(currentEffisArea, effisCarriedForward, firmsData.sensors, frame, runtime.dwdWindStations, currentSentinelAnalysis),
+    [currentEffisArea, effisCarriedForward, firmsData.sensors, frame, runtime.dwdWindStations, currentSentinelAnalysis],
   )
   const reportedAreaText = frame.reportedAreaText
 
@@ -832,13 +878,13 @@ function FireViewer({ runtime, databaseError }) {
       id: 'mont-rigi',
       name: 'Mont Rigi',
       distanceLabel: '4.2 km',
-      status: 'RMI · awaiting validation',
+      status: 'RMI · preliminary',
       color: '#8fd7c7',
       ...frame.montRigiWind,
     }] : []),
     ...(frame.dwdWinds || []).map((reading) => ({
       ...reading,
-      distanceLabel: `${reading.distanceKm.toFixed(1)} km`,
+      distanceLabel: `${formatDecimal(reading.distanceKm)} km`,
       status: 'DWD · preliminary',
       color: '#b9a0e8',
     })),
@@ -856,7 +902,7 @@ function FireViewer({ runtime, databaseError }) {
       sensorColor: sensor?.color ?? '#efaa3c',
       providesArea: sensor?.providesArea === true,
       displayMode: detection.displayMode ?? sensor?.displayMode ?? 'footprint',
-      pixelSizeLabel: sensor?.pixelSizeLabel ?? detection.pixelSizeLabel ?? `${detection.scanKm} × ${detection.trackKm} km pixel`,
+      pixelSizeLabel: sensor?.pixelSizeLabel ?? detection.pixelSizeLabel ?? `${formatDecimal(detection.scanKm)} × ${formatDecimal(detection.trackKm)} km pixel`,
       areaExclusionReason: sensor?.areaExclusionReason ?? detection.areaExclusionReason ?? null,
       footprint: detection.footprint ?? detectionFootprint(detection),
       position: [detection.latitude, detection.longitude],
@@ -909,27 +955,6 @@ function FireViewer({ runtime, databaseError }) {
     timeBucketMs: AIRCRAFT_EDGE_TIME_BUCKET_MS,
   }), [aircraftEstimateFlights, bestEstimateCoreDetections, viirsCoreOutlineRings, frame.timestampMs, firmsData.locationReference])
 
-  // The current red estimate uses only aircraft observations still inside the
-  // 24-hour display window. Re-running the same strict inference against all
-  // retained observations preserves its legitimate historical outer reach for
-  // the subdued touched-zone boundary; rejected route outliers pass neither.
-  const touchedAircraftEdgeFlights = useMemo(() => displayFlights.map((flight) => ({
-    ...flight,
-    observations: (flight.observations || []).filter((observation) => (
-      observation.routeScope !== 'full-route'
-    )),
-  })), [displayFlights])
-
-  const touchedAircraftEdge = useMemo(() => deriveAircraftSupportedEdge({
-    flights: touchedAircraftEdgeFlights,
-    detections: bestEstimateCoreDetections,
-    outlineRings: viirsCoreOutlineRings,
-    frameTimestampMs: frame.timestampMs,
-    origin: firmsData.locationReference,
-    gridCellM: AIRCRAFT_EDGE_GRID_CELL_M,
-    timeBucketMs: AIRCRAFT_EDGE_TIME_BUCKET_MS,
-  }), [touchedAircraftEdgeFlights, bestEstimateCoreDetections, viirsCoreOutlineRings, frame.timestampMs, firmsData.locationReference])
-
   const modisSupportedExtent = useMemo(() => deriveModisSupportedExtent({
     detections: firmsDetectionsAtTime,
     coreDetections: bestEstimateCoreDetections,
@@ -940,17 +965,6 @@ function FireViewer({ runtime, databaseError }) {
     timeBucketMs: MODIS_EXTENT_TIME_BUCKET_MS,
   }), [firmsDetectionsAtTime, bestEstimateCoreDetections, aircraftSupportedEdge.candidates, frame.timestampMs, firmsData.locationReference])
 
-  const touchedModisExtent = useMemo(() => deriveModisSupportedExtent({
-    detections: firmsDetectionsAtTime,
-    coreDetections: bestEstimateCoreDetections,
-    aircraftEdgeCandidates: touchedAircraftEdge.candidates,
-    frameTimestampMs: frame.timestampMs,
-    origin: firmsData.locationReference,
-    gridCellM: MODIS_EXTENT_GRID_CELL_M,
-    timeBucketMs: MODIS_EXTENT_TIME_BUCKET_MS,
-    retainAllSupportedPasses: true,
-  }), [firmsDetectionsAtTime, bestEstimateCoreDetections, touchedAircraftEdge.candidates, frame.timestampMs, firmsData.locationReference])
-
   // There is one estimate, not separate satellite and aircraft outlines.
   // Qualifying MODIS pixels and the conservative repeat-supported aircraft lobe
   // extend the same 50 m raster union, solid boundary and hectare figure.
@@ -958,12 +972,7 @@ function FireViewer({ runtime, databaseError }) {
     () => [...bestEstimateCoreDetections, ...modisSupportedExtent.detections],
     [bestEstimateCoreDetections, modisSupportedExtent.detections],
   )
-  const touchedEstimateDetections = useMemo(
-    () => [...bestEstimateCoreDetections, ...touchedModisExtent.detections],
-    [bestEstimateCoreDetections, touchedModisExtent.detections],
-  )
   const aircraftSupportPolygons = aircraftSupportedEdge.supportPolygons
-  const touchedSupportPolygons = touchedAircraftEdge.supportPolygons
 
   const fireOutlineRings = useMemo(
     () => footprintOutlineRings(bestEstimateDetections, {
@@ -977,19 +986,6 @@ function FireViewer({ runtime, databaseError }) {
     }),
     [bestEstimateDetections, aircraftSupportPolygons, sentinelSupportCells, firmsData.locationReference],
   )
-  const touchedZoneRings = useMemo(
-    () => footprintOutlineRings(touchedEstimateDetections, {
-      gridCellM: 50,
-      origin: {
-        latitude: firmsData.locationReference.latitude,
-        longitude: firmsData.locationReference.longitude,
-      },
-      supportPolygons: touchedSupportPolygons,
-      supportCells: sentinelSupportCells,
-    }),
-    [touchedEstimateDetections, touchedSupportPolygons, sentinelSupportCells, firmsData.locationReference],
-  )
-
   const visibleFirmsDetections = useMemo(() => firmsDetectionsAtTime.filter((detection) => (
     layers[FIRMS_LAYER_KEYS[detection.sensorKey]]
       && activeConfidenceLevels.includes(detection.confidence.label)
@@ -1009,16 +1005,6 @@ function FireViewer({ runtime, databaseError }) {
   const bestEstimateAreaHa = bestEstimateArea.unionHa
   const aircraftSupportIncluded = bestEstimateArea.polygonSupportCellCount > 0
   const sentinelSupportIncluded = sentinelSupportCells.length > 0
-  const touchedZoneArea = useMemo(() => estimateFootprintArea(touchedEstimateDetections, {
-    gridCellM: 50,
-    origin: {
-      latitude: firmsData.locationReference.latitude,
-      longitude: firmsData.locationReference.longitude,
-    },
-    supportPolygons: touchedSupportPolygons,
-    supportCells: sentinelSupportCells,
-  }), [touchedEstimateDetections, touchedSupportPolygons, sentinelSupportCells, firmsData.locationReference])
-  const touchedZoneAvailable = touchedZoneArea.unionHa > bestEstimateArea.unionHa
 
   const firmsAreaEstimates = useMemo(() => FIRMS_SENSORS
     .filter((sensor) => sensor.providesArea && layers[FIRMS_LAYER_KEYS[sensor.key]])
@@ -1080,7 +1066,7 @@ function FireViewer({ runtime, databaseError }) {
         </div>
 
         <div className="header-actions">
-          <div className="updated-state"><span className={`live-pulse ${syncState.status === 'live' ? '' : 'is-bundled'}`} /><div><small>{syncState.status === 'live' ? 'SOURCE POLLS CURRENT' : syncState.status === 'partial' ? 'CURRENT POLLS · COVERAGE GAPS' : 'DATABASE VIEW STALE'}</small><strong>{frames.at(-1).dayLabel} · {frames.at(-1).shortTime} CEST</strong></div></div>
+          <div className="updated-state"><span className={`live-pulse ${syncState.status === 'live' ? '' : 'is-bundled'}`} /><div><small>{syncState.status === 'live' ? 'LATEST DATA AVAILABLE' : syncState.status === 'partial' ? 'LATEST DATA · SOME SOURCES PARTIAL' : 'DATABASE VIEW STALE'}</small><strong>{frames.at(-1).dayLabel} · {frames.at(-1).shortTime} CEST</strong></div></div>
           <button className="data-button" type="button" onClick={() => setDataOpen(true)}><Database size={15} /><span>Data & sources</span></button>
         </div>
       </header>
@@ -1102,7 +1088,7 @@ function FireViewer({ runtime, databaseError }) {
               {/* The best estimate sits beside the reported figure. EFFIS keeps its
                   own card below: at roughly five times the reported area it is an
                   envelope, and giving it headline position overstated the burn. */}
-              <div><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}</strong><span>best-estimate ha</span><small>{bestEstimateDetections.length ? `${bestEstimateCoreDetections.length} VIIRS core${modisSupportedExtent.detections.length ? ` + ${modisSupportedExtent.detections.length} ${modisSupportedExtent.satellites.join('/')} MODIS` : ''}${sentinelSupportIncluded ? ' + Sentinel-2 dNBR' : ''}${aircraftSupportIncluded ? ` + ${aircraftSupportedEdge.callSigns.join('/')} edge` : ''} · derived` : 'no qualifying detections yet'}</small></div>
+              <div><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}</strong><span>best-estimate ha</span><small>{bestEstimateDetections.length ? `${bestEstimateCoreDetections.length} VIIRS core${modisSupportedExtent.detections.length ? ` + ${modisSupportedExtent.detections.length} ${modisSupportedExtent.satellites.join('/')} MODIS` : ''}${sentinelSupportIncluded ? ' + Sentinel-2 change' : ''}${aircraftSupportIncluded ? ` + ${aircraftSupportedEdge.callSigns.join('/')} aircraft evidence` : ''} · derived` : 'no qualifying detections yet'}</small></div>
             </div>
           </div>
 
@@ -1121,11 +1107,10 @@ function FireViewer({ runtime, databaseError }) {
             </div>
             <div className="outline-method-key" aria-label="Best estimate outline methods">
               <span><i className="is-satellite" /> Single combined outline</span>
-              {touchedZoneAvailable ? <span><i className="is-touched" /> Touched zone</span> : null}
             </div>
             <p className="layer-note">
               {bestEstimateDetections.length
-                ? `Solid red: one ${Math.round(bestEstimateAreaHa).toLocaleString('en-GB')} ha estimate from ${bestEstimateCoreDetections.length} corroborated VIIRS detections${modisSupportedExtent.detections.length ? ` plus ${modisSupportedExtent.detections.length} high-confidence ${modisSupportedExtent.satellites.join('/')} MODIS pixels from the newest pass` : ''}${sentinelSupportIncluded ? ` plus ${currentSentinelAnalysis.supportCellCount.toLocaleString('en-GB')} cloud-clear Sentinel-2 dNBR cells from ${currentSentinelAnalysis.postScene.acquiredAt.slice(0, 10)} (${bestEstimateArea.directSupportCellCount.toLocaleString('en-GB')} newly extending the existing union)` : ''}${aircraftSupportIncluded ? ` plus ${bestEstimateArea.polygonSupportCellCount} additional 50 m aircraft cells in ${aircraftSupportPolygons.length} compact lobe${aircraftSupportPolygons.length === 1 ? '' : 's'} bounded by repeated ${aircraftSupportedEdge.callSigns.join(', ')} direction changes` : ''}. Every input is dissolved on the same 50 m raster into one outline; this is not a confirmed burned-area perimeter.${touchedZoneAvailable ? ` Muted dashed edges retain the outermost strictly qualified historical MODIS${sentinelSupportIncluded ? ', Sentinel-2' : ''} and aircraft reach as a touched zone; they indicate possible previous fire reach, not active burning, and carry no hectare claim.` : ''}${sentinelSupportIncluded ? ` The Sentinel crop was ${Math.round(currentSentinelAnalysis.clearFraction * 100)}% cloud-clear; obscured pixels are unknown, never classified as unburned.` : ''}${aircraftSupportIncluded ? ' Receiver positions do not confirm a water drop.' : ''}`
+                ? `One 50 m grid: ${bestEstimateCoreDetections.length} corroborated VIIRS detections${modisSupportedExtent.detections.length ? `, ${modisSupportedExtent.detections.length} high-confidence ${modisSupportedExtent.satellites.join('/')} MODIS pixels from the newest pass` : ''}${sentinelSupportIncluded ? `, ${currentSentinelAnalysis.supportCellCount.toLocaleString('en-GB')} clear Sentinel-2 change cells` : ''}${aircraftSupportIncluded ? `, and ${bestEstimateArea.polygonSupportCellCount} aircraft-supported cells from repeated ${aircraftSupportedEdge.callSigns.join(', ')} direction changes` : ''}. Evidence-based, not field-confirmed.${sentinelSupportIncluded ? ` Sentinel coverage: ${Math.round(currentSentinelAnalysis.clearFraction * 100)}%; obscured ground remains unknown.` : ''}${aircraftSupportIncluded ? ' Aircraft positions do not confirm a water drop.' : ''}`
                 : 'No detections meet the best-estimate rule at this time.'}
             </p>
           </div>
@@ -1168,21 +1153,21 @@ function FireViewer({ runtime, databaseError }) {
           </div>
 
           <div className="sidebar-section source-summary">
-            <div className="section-heading"><span>SOURCE HEALTH</span><button type="button" onClick={() => setDataOpen(true)}>Manage</button></div>
+            <div className="section-heading"><span>SOURCE STATUS</span><button type="button" onClick={() => setDataOpen(true)}>Details</button></div>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
               <SourceMark tone="nasa" /><span><strong>FIRMS</strong><small>{`${firmsData.detections.length} exact detections · ${visibleFirmsDetections.length} shown · newest acquisition ${firmsData.latestAcquiredAt ? observationTimeLabel(Date.parse(firmsData.latestAcquiredAt), frame.timestampMs) : 'unavailable'}`}</small></span><em className={`health-dot ${firmsState.status === 'live' ? '' : 'health-dot--amber'}`} />
             </button>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
-              <SourceMark tone="effis" /><span><strong>EFFIS daily geometry</strong><small>{currentEffisArea ? `${currentEffisArea.productDate}${effisCarriedForward ? ' carried forward' : ''} · envelope containing fire activity, not burned area` : 'not yet available at selected time'}</small></span><em className="health-dot health-dot--amber" />
+              <SourceMark tone="effis" /><span><strong>EFFIS activity envelope</strong><small>{currentEffisArea ? `${currentEffisArea.productDate}${effisCarriedForward ? ' carried forward' : ''} · contains fire activity but may include unaffected ground` : 'not yet available at selected time'}</small></span><em className="health-dot health-dot--amber" />
             </button>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
-              <SourceMark tone="effis" /><span><strong>Sentinel-2 burn change</strong><small>{currentSentinelAnalysis ? `${currentSentinelAnalysis.postScene.acquiredAt.slice(0, 10)} · ${currentSentinelAnalysis.supportCellCount} qualified cells · ${Math.round(currentSentinelAnalysis.clearFraction * 100)}% cloud-clear crop` : 'no qualifying post-fire scene at selected time'}</small></span><em className={`health-dot ${currentSentinelAnalysis ? '' : 'health-dot--amber'}`} />
+              <SourceMark tone="effis" /><span><strong>Sentinel-2 observed change</strong><small>{currentSentinelAnalysis ? `${currentSentinelAnalysis.postScene.acquiredAt.slice(0, 10)} · ${currentSentinelAnalysis.supportCellCount.toLocaleString('en-GB')} supported cells · ${Math.round(currentSentinelAnalysis.clearFraction * 100)}% of crop cloud-clear` : 'no usable post-fire image at selected time'}</small></span><em className={`health-dot ${currentSentinelAnalysis ? '' : 'health-dot--amber'}`} />
             </button>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
               <SourceMark tone="official" /><span><strong>Affected-area reports</strong><small>{frame.reportedAreaText} ha · {frame.areaLabel}</small></span><em className={`health-dot ${syncState.reportsComplete ? '' : 'health-dot--amber'}`} />
             </button>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
-              <SourceMark tone={frame.weatherSourceKind === 'station-observation' ? 'rmi' : 'weather'} /><span><strong>{frame.weatherSourceKind === 'station-observation' ? 'Mont Rigi station' : 'Wind model fallback'}</strong><small>{frame.weatherSourceKind === 'station-observation' ? `10 min observation · ${frame.weatherAgeMinutes} min old · awaiting RMI validation` : 'Open-Meteo hourly grid value'}</small></span><em className={`health-dot ${frame.weatherSourceKind === 'station-observation' ? 'health-dot--amber' : ''}`} />
+              <SourceMark tone={frame.weatherSourceKind === 'station-observation' ? 'rmi' : 'weather'} /><span><strong>{frame.weatherSourceKind === 'station-observation' ? 'Mont Rigi station' : 'Wind model fallback'}</strong><small>{frame.weatherSourceKind === 'station-observation' ? `10 min observation · ${frame.weatherAgeMinutes} min old · preliminary` : 'Open-Meteo hourly grid value'}</small></span><em className={`health-dot ${frame.weatherSourceKind === 'station-observation' ? 'health-dot--amber' : ''}`} />
             </button>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
               <SourceMark tone="adsb" /><span><strong>Aircraft</strong><small>{aircraftHistoryLoading
@@ -1212,10 +1197,8 @@ function FireViewer({ runtime, databaseError }) {
             firmsDetections={visibleFirmsDetections}
             sentinelBurnGeometry={layers.sentinel2BurnChange ? sentinelBurnGeometry : null}
             fireOutlineRings={layers[FIRE_OUTLINE_KEY] ? fireOutlineRings : []}
-            touchedZoneRings={layers[FIRE_OUTLINE_KEY] ? touchedZoneRings : []}
             mapLabels={runtime.mapLabels}
             protectedArea={runtime.protectedArea}
-            officialPerimeter={runtime.officialPerimeter.current}
           />
 
           <div className="map-topbar">
@@ -1230,7 +1213,7 @@ function FireViewer({ runtime, databaseError }) {
 
           <div className="map-warning">
             <ShieldAlert size={15} />
-            <p><strong>Official instructions take precedence</strong><span>This historical viewer does not determine current access or safety.</span></p>
+            <p><strong>Official instructions take precedence</strong><span>This observation viewer does not determine current access or safety.</span></p>
             <a href="https://www.be-alert.be/en" target="_blank" rel="noreferrer">BE-Alert <ExternalLink size={12} /></a>
           </div>
 
@@ -1259,7 +1242,7 @@ function FireViewer({ runtime, databaseError }) {
         <aside className="right-inspector">
           <div className="inspector-tabs">
             <button className={inspectorTab === 'situation' ? 'is-active' : ''} onClick={() => setInspectorTab('situation')} type="button">Situation</button>
-            <button className={inspectorTab === 'air' ? 'is-active' : ''} onClick={() => setInspectorTab('air')} type="button">Air ops <span>{visibleDisplayFlights.length + visibleImportedTracks.length}</span></button>
+            <button className={inspectorTab === 'air' ? 'is-active' : ''} onClick={() => setInspectorTab('air')} type="button">Aircraft <span>{visibleDisplayFlights.length + visibleImportedTracks.length}</span></button>
           </div>
 
           {inspectorTab === 'situation' ? (
@@ -1272,48 +1255,48 @@ function FireViewer({ runtime, databaseError }) {
 
               <div className="snapshot-grid">
                 <article className="snapshot-card snapshot-card--fire"><span><Flame size={15} /> REPORTED AREA</span><strong>{reportedAreaText}<small>{frame.reportedHa == null ? '' : 'ha'}</small></strong><p>{frame.areaLabel}</p></article>
-                <article className="snapshot-card snapshot-card--estimate"><span><Flame size={15} /> BEST ESTIMATE</span><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}<small>{bestEstimateDetections.length ? 'ha' : ''}</small></strong><p>{bestEstimateDetections.length ? `${bestEstimateDetections.length} selected thermal detections · ${bestEstimateCoreDetections.length} VIIRS${modisSupportedExtent.detections.length ? ` + ${modisSupportedExtent.detections.length} ${modisSupportedExtent.satellites.join('/')} MODIS` : ''}${sentinelSupportIncluded ? ` · ${currentSentinelAnalysis.supportCellCount} Sentinel dNBR cells` : ''}${aircraftSupportIncluded ? ` · ${bestEstimateArea.polygonSupportCellCount} aircraft-supported cells` : ''}` : 'no qualifying detections yet'}</p></article>
-                <article className="snapshot-card snapshot-card--effis"><span><Layers3 size={15} /> EFFIS DAILY GEOMETRY</span><strong>{currentEffisArea ? Math.round(currentEffisArea.areaHa).toLocaleString('en-GB') : '—'}<small>{currentEffisArea ? 'ha' : ''}</small></strong><p>{currentEffisArea ? `${currentEffisArea.productDate}${effisCarriedForward ? ' carried forward until replacement' : ''} · envelope containing fire activity, not burned area` : 'no EFFIS product available at selected time'}</p></article>
-                <article className="snapshot-card"><span><Satellite size={15} /> HOTSPOTS</span><strong>{visibleFirmsDetections.length}<small>px</small></strong><p>shaded by confidence · exact NASA FIRMS detections</p></article>
-                <article className="snapshot-card"><span><Helicopter size={15} /> AIR OPS</span><strong>{aircraftHistoryLoading ? '—' : flightsSeenOnSelectedDay.length}<small>{aircraftHistoryLoading ? 'loading' : 'seen today'}</small></strong><p>{aircraftHistoryLoading
+                <article className="snapshot-card snapshot-card--estimate"><span><Flame size={15} /> BEST ESTIMATE</span><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}<small>{bestEstimateDetections.length ? 'ha' : ''}</small></strong><p>{bestEstimateDetections.length ? `${bestEstimateDetections.length} selected thermal detections · ${bestEstimateCoreDetections.length} VIIRS${modisSupportedExtent.detections.length ? ` + ${modisSupportedExtent.detections.length} ${modisSupportedExtent.satellites.join('/')} MODIS` : ''}${sentinelSupportIncluded ? ` · ${currentSentinelAnalysis.supportCellCount.toLocaleString('en-GB')} Sentinel-2 change cells` : ''}${aircraftSupportIncluded ? ` · ${bestEstimateArea.polygonSupportCellCount.toLocaleString('en-GB')} aircraft-supported cells` : ''}` : 'no qualifying detections yet'}</p></article>
+                <article className="snapshot-card snapshot-card--effis"><span><Layers3 size={15} /> EFFIS ACTIVITY ENVELOPE</span><strong>{currentEffisArea ? Math.round(currentEffisArea.areaHa).toLocaleString('en-GB') : '—'}<small>{currentEffisArea ? 'ha' : ''}</small></strong><p>{currentEffisArea ? `${currentEffisArea.productDate}${effisCarriedForward ? ' carried forward until replacement' : ''} · may include ground between detections` : 'no EFFIS product available at selected time'}</p></article>
+                <article className="snapshot-card"><span><Satellite size={15} /> FIRMS DETECTIONS</span><strong>{visibleFirmsDetections.length.toLocaleString('en-GB')}</strong><p>retained up to selected time · shaded by reported confidence</p></article>
+                <article className="snapshot-card"><span><Helicopter size={15} /> AIRCRAFT</span><strong>{aircraftHistoryLoading ? '—' : flightsSeenOnSelectedDay.length}<small>{aircraftHistoryLoading ? 'loading' : 'seen today'}</small></strong><p>{aircraftHistoryLoading
                   ? 'retained flight data is loading separately'
                   : aircraftHistoryUnavailable
                     ? 'retained flight data is temporarily unavailable'
                     : latestSelectedDayFlight
                       ? `latest ${latestSelectedDayFlight.flight.callSign} · ${observationTimeLabel(latestSelectedDayFlight.latest.timestampMs, frame.timestampMs)}`
                       : 'no exact receiver fix on selected day'}</p></article>
-                <article className="snapshot-card snapshot-card--wind"><span><Wind size={15} /> WIND FROM</span><strong>{windCardinal(frame.windDirection)}<small>{frame.windDirection.toFixed(0)}°</small></strong><p>{frame.windSpeed.toFixed(1)} km/h · gust {frame.gust.toFixed(0)} · {frame.weatherSourceKind === 'station-observation' ? 'station obs.' : 'model'}</p></article>
+                <article className="snapshot-card snapshot-card--wind"><span><Wind size={15} /> WIND FROM</span><strong>{windCardinal(frame.windDirection)}<small>{formatDegrees(frame.windDirection)}</small></strong><p>{formatDecimal(frame.windSpeed)} km/h · gust {formatDecimal(frame.gust)} · {frame.weatherSourceKind === 'station-observation' ? 'station obs.' : 'model'}</p></article>
               </div>
 
               <div className="conditions-card">
                 <div className="section-heading"><span>FIRE WEATHER</span><small>{frame.weatherSourceKind === 'station-observation' ? `Mont Rigi · 10 min · ${frame.weatherAgeMinutes} min old` : 'Drossart · hourly model fallback'}</small></div>
                 <div className="wind-hero">
-                  <span className="big-wind-arrow" title={`Wind travelling toward ${(frame.windDirection + 180) % 360}°`}>
-                    <svg viewBox="0 0 24 24" style={{ '--wind-rotation': `${(frame.windDirection + 180) % 360}deg` }} aria-hidden="true">
+                  <span className="big-wind-arrow" title={`Wind travelling toward ${formatDegrees(Number(frame.windDirection) + 180)}`}>
+                    <svg viewBox="0 0 24 24" style={{ '--wind-rotation': `${normalizeDegrees(Number(frame.windDirection) + 180) ?? 0}deg` }} aria-hidden="true">
                       <path d="M12 20V4M6.5 9.5 12 4l5.5 5.5" />
                     </svg>
                   </span>
-                  <div><strong>{windCardinal(frame.windDirection)}</strong><span>from {frame.windDirection}° · wind blowing toward {(frame.windDirection + 180) % 360}°</span></div>
-                  <p><strong>{frame.windSpeed.toFixed(1)}</strong><span>km/h</span><small>gusts {frame.gust.toFixed(1)}</small></p>
+                  <div><strong>{windCardinal(frame.windDirection)}</strong><span>from {formatDegrees(frame.windDirection)} · blowing toward {formatDegrees(Number(frame.windDirection) + 180)}</span></div>
+                  <p><strong>{formatDecimal(frame.windSpeed)}</strong><span>km/h</span><small>gusts {formatDecimal(frame.gust)}</small></p>
                 </div>
                 <div className="condition-row">
-                  <span><ThermometerSun size={15} /> Temperature<strong>{frame.temperature.toFixed(1)}°C</strong></span>
-                  <span><Droplets size={15} /> Humidity<strong>{frame.humidity.toFixed(1)}%</strong></span>
+                  <span><ThermometerSun size={15} /> Temperature<strong>{formatDecimal(frame.temperature)}°C</strong></span>
+                  <span><Droplets size={15} /> Humidity<strong>{formatDecimal(frame.humidity)}%</strong></span>
                 </div>
                 <p className={`weather-provenance ${frame.weatherSourceKind === 'station-observation' ? 'is-unvalidated' : ''}`}>
                   {frame.weatherSourceKind === 'station-observation'
-                    ? `RMI station 6494, ${frame.weatherStationDistanceKm} km from Drossart. Near-real-time measurement awaiting RMI quality validation; conditions at the fire may differ.`
+                    ? `RMI station 6494, ${formatDecimal(frame.weatherStationDistanceKm)} km from Drossart. Preliminary near-real-time measurement; conditions at the fire may differ.`
                     : 'Open-Meteo model-grid fallback, not a station measurement.'}
                 </p>
                 <div className="wind-source-comparison">
                   <div className="wind-source-comparison__head"><strong>Nearby wind sources</strong><small>independent · never blended</small></div>
                   {nearbyWindReadings.map((reading) => (
                     <div className="wind-source-reading" key={reading.id}>
-                      <span className="wind-source-reading__arrow" style={{ '--source-color': reading.color, '--wind-rotation': `${(reading.windDirection + 180) % 360}deg` }}>
+                      <span className="wind-source-reading__arrow" style={{ '--source-color': reading.color, '--wind-rotation': `${normalizeDegrees(Number(reading.windDirection) + 180) ?? 0}deg` }}>
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20V4M6.5 9.5 12 4l5.5 5.5" /></svg>
                       </span>
                       <span><strong>{reading.name}</strong><small>{reading.distanceLabel} · {reading.status}</small></span>
-                      <span><strong>{windCardinal(reading.windDirection)} <small>from</small></strong><small>{reading.windSpeed.toFixed(1)} km/h · {reading.ageMinutes} min old</small></span>
+                      <span><strong>{windCardinal(reading.windDirection)} <small>from {formatDegrees(reading.windDirection)}</small></strong><small>{formatDecimal(reading.windSpeed)} km/h · {reading.ageMinutes} min old</small></span>
                     </div>
                   ))}
                 </div>
@@ -1357,7 +1340,7 @@ function FireViewer({ runtime, databaseError }) {
             <div className="inspector-scroll air-ops-panel">
               <div className="air-ops-summary">
                 <span className="kicker">TRACK COVERAGE</span>
-                <h2>Aerial operations</h2>
+                <h2>Aircraft observations</h2>
                 <p>{aircraftHistoryLoading
                   ? 'Retained aircraft fixes are loading asynchronously; the incident map and other live sources are already usable.'
                   : aircraftHistoryUnavailable
@@ -1538,7 +1521,7 @@ function AsyncViewerShell({ databaseError, onRetry }) {
         </main>
 
         <aside className="right-inspector async-inspector" aria-hidden="true">
-          <div className="inspector-tabs"><span>Situation</span><span>Air ops</span></div>
+          <div className="inspector-tabs"><span>Situation</span><span>Aircraft</span></div>
           <div className="async-inspector-body">
             <span className="async-skeleton async-skeleton--label" />
             <span className="async-skeleton async-skeleton--clock" />

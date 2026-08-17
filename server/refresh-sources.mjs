@@ -29,13 +29,6 @@ import {
   saveArtifact,
   saveDataset,
 } from './database.mjs'
-import {
-  controlledSourceAccess,
-  refreshIncidentPerimeter,
-  refreshPublicOperations,
-  refreshRoadEvents,
-  ROAD_SOURCE_URL,
-} from './controlled-sources.mjs'
 import { backfillLegacyEffisHistory } from './effis-sources.mjs'
 import {
   flightObservationKey,
@@ -1375,129 +1368,105 @@ export const REFRESH_SOURCES = [
   {
     key: 'aircraft', label: 'Live incident aircraft', intervalMinutes: 5, run: refreshAircraft,
     providerUrl: 'https://airplanes.live/api-guide/',
-    coverage: 'One incident-area point request to adsb.fi and ADSB.lol every five minutes, hourly Airplanes.live health checks, verified identities, GRZLY callsigns and candidates with response-aircraft evidence, exact accepted fixes and every raw response retained',
+    coverage: 'Live positions and complete available routes for aircraft observed in the incident area.',
   },
   {
     key: 'aircraft-artifacts', label: 'Retained aircraft poll recovery', intervalMinutes: 5, run: refreshAircraftArtifacts,
+    directory: false,
     providerUrl: null,
     coverage: 'Reprocesses retained raw point responses without provider calls, promoting only identities with response-aircraft evidence and backfilling exact fixes',
   },
   {
     key: 'aircraft-traces', label: 'Current aircraft trace catch-up', intervalMinutes: 5, run: refreshCurrentAircraftTraces,
+    directory: false,
     providerUrl: 'https://www.adsb.lol/',
     coverage: 'Current-day ADSB.lol traces for recently retained incident aircraft recover complete available incident-connected route sessions every five minutes after an incident-area qualification',
   },
   {
     key: 'aircraft-history', label: 'Completed aircraft history catch-up', intervalMinutes: 360, run: refreshHistoricalAircraftTraces,
+    directory: false,
     providerUrl: 'https://globe.airplanes.live/',
     coverage: 'Previous-day Airplanes.live and ADSB.lol full traces for every retained incident aircraft; only sessions that entered the incident area are accepted, then their complete exact fixes and raw source files are retained',
   },
   {
     key: 'aircraft-route-history', label: 'Completed aircraft full-route recovery', intervalMinutes: 5, run: refreshAircraftRouteHistory,
+    directory: false,
     providerUrl: 'https://globe.airplanes.live/',
     coverage: 'Resumable one-day-at-a-time recovery of complete incident-connected route sessions for aircraft already qualified in the incident area on every completed incident day',
   },
   {
     key: 'open-meteo', label: 'Open-Meteo model weather', intervalMinutes: 5, run: refreshOpenMeteo,
     providerUrl: 'https://open-meteo.com/',
-    coverage: 'Hourly model-grid temperature, humidity, wind and gust, retained on the five-minute timeline',
+    coverage: 'Hourly forecast-model weather for the incident area.',
   },
   {
     key: 'reports', label: 'Governor and BRF reports', intervalMinutes: 5, run: refreshReports,
     providerUrl: 'https://gouverneur.provincedeliege.be/actualites/incendie-dans-les-hautes-fagnes-la-phase-provinciale-declenchee',
-    coverage: 'Strict official/local affected-area reports and explicitly timestamped incident notices',
+    coverage: 'Published affected-area estimates and timestamped incident updates.',
   },
   {
     key: 'local-authority-updates', label: 'Official local-authority updates', intervalMinutes: 5, run: refreshMunicipalUpdates,
     providerUrl: 'https://www.stavelot.be/actualites',
-    coverage: 'Incident notices from Stavelot, Malmedy, Jalhay, Baelen, Eupen, Waimes, Bütgenbach, VHP, HLZ DG and Eifel Police, with raw responses retained',
+    coverage: 'Published incident notices from nearby municipalities, emergency services and police.',
   },
   {
     key: 'vedia', label: 'Vedia incident reporting', intervalMinutes: 5, run: refreshVedia,
     providerUrl: 'https://www.vedia.be/jsonapi/node/content',
-    coverage: 'New and revised incident articles, source summaries and publication timestamps; always labelled local media',
+    coverage: 'Incident reporting from the regional news service.',
   },
   {
     key: 'public-alerts', label: 'BE-Alert CAP feed', intervalMinutes: 5, run: refreshAlerts,
     providerUrl: ALERT_PORTAL_URL,
-    coverage: 'Current CAP warnings plus every alert accumulated since collection began',
-  },
-  {
-    key: 'road-events', label: 'Walloon DATEX II road events', intervalMinutes: 5, run: refreshRoadEvents,
-    providerUrl: ROAD_SOURCE_URL,
-    coverage: 'Incidents, congestion, works and closures from the official Walloon real-time road feed',
-    accessKey: 'roadEvents',
-  },
-  {
-    key: 'official-perimeter', label: 'Field-confirmed perimeter', intervalMinutes: 5, run: refreshIncidentPerimeter,
-    providerUrl: null,
-    coverage: 'Agency-issued GeoJSON perimeter snapshots and their raw source revisions',
-    accessKey: 'officialPerimeter',
-  },
-  {
-    key: 'public-operations', label: 'Sanitized incident operations', intervalMinutes: 5, run: refreshPublicOperations,
-    providerUrl: null,
-    coverage: 'Publishable dispatch, water pickup/drop, closure, evacuation and aggregate-compliance events',
-    accessKey: 'publicOperations',
+    coverage: 'Public emergency alerts retained after they expire from the live feed.',
   },
   {
     key: 'rmi', label: 'RMI Mont Rigi observations', intervalMinutes: 10, run: refreshRmi,
     providerUrl: 'https://opendata.meteo.be/',
-    coverage: 'Ten-minute official station temperature, humidity, precipitation, wind, gust and validation flags',
+    coverage: 'Ten-minute observations from Mont Rigi; newest values may await quality validation.',
   },
   {
     key: 'dwd', label: 'DWD nearby wind stations', intervalMinutes: 10, run: refreshDwd,
     providerUrl: DWD_ROOT,
-    coverage: 'Ten-minute wind and quality levels from three nearby German stations',
+    coverage: 'Ten-minute wind observations from nearby German stations.',
   },
   {
     key: 'firms', label: 'NASA FIRMS detections', intervalMinutes: 15, run: refreshFirms,
     providerUrl: 'https://firms.modaps.eosdis.nasa.gov/',
-    coverage: 'Exact VIIRS and MODIS thermal detections plus GOES_NRT Meteosat detections with approximate viewing-geometry ground footprints from five products',
+    coverage: 'Thermal detections from VIIRS, MODIS and Meteosat.',
   },
   {
     key: 'firms-history', label: 'NASA FIRMS ignition-day recovery', intervalMinutes: 360, run: refreshFirmsHistory,
+    directory: false,
     providerUrl: 'https://firms.modaps.eosdis.nasa.gov/',
     coverage: 'One-time official API recovery of the missing 14 August two-day sensor window; raw responses and completion marker retained in Postgres',
   },
   {
-    key: 'effis', label: 'Copernicus EFFIS daily geometry', intervalMinutes: 360, run: refreshEffis,
+    key: 'effis', label: 'Copernicus EFFIS activity envelope', intervalMinutes: 360, run: refreshEffis,
     providerUrl: EFFIS_SOURCE.documentation,
-    coverage: 'Nearest daily VIIRS-derived algorithmic geometry; distinct from a field perimeter',
+    coverage: 'Daily VIIRS-derived activity envelope; not an official burned-area perimeter.',
   },
   {
     key: 'effis-history-migration', label: 'Copernicus EFFIS historical-day recovery', intervalMinutes: 360, run: refreshEffisHistory,
+    directory: false,
     providerUrl: EFFIS_SOURCE.documentation,
     coverage: 'Checksum-validated one-time recovery of the two pre-database daily products from the immutable project revision, archived and retained in Postgres',
   },
   {
     key: 'ems', label: 'Copernicus EMS activations', intervalMinutes: 60, run: refreshEms,
     providerUrl: 'https://mapping.emergency.copernicus.eu/activations/',
-    coverage: 'Rapid Mapping activation catalogue and full match details when an activation appears',
+    coverage: 'Rapid Mapping activation catalogue and matching incident details when available.',
   },
   {
-    key: 'sentinel2', label: 'Sentinel-2 catalogue, quicklooks and burn change', intervalMinutes: 5, run: refreshSentinel2,
+    key: 'sentinel2', label: 'Sentinel-2 imagery and observed change', intervalMinutes: 5, run: refreshSentinel2,
     providerUrl: 'https://dataspace.copernicus.eu/',
-    coverage: 'Five-minute catalogue checks; official L2A metadata and public JPEG quicklooks plus cloud-masked 20 m B8A/B12 dNBR change from public L2A COG windows, dissolved onto the shared 50 m estimate grid and archived in Postgres',
+    coverage: 'Cloud-masked before/after change evidence from 20 m Sentinel-2 imagery.',
   },
 ]
 
-function registrySources(environment = process.env) {
-  const controlled = controlledSourceAccess(environment)
-  return REFRESH_SOURCES.map(({ run, accessKey, ...source }) => {
-    const access = accessKey ? controlled[accessKey] : null
-    return {
-      ...source,
-      access: access
-        ? {
-            kind: 'controlled',
-            configured: access.pullConfigured || access.pushReady,
-            pullConfigured: access.pullConfigured,
-            pushEndpointReady: access.pushReady,
-          }
-        : { kind: 'public', configured: true },
-    }
-  })
+function registrySources() {
+  return REFRESH_SOURCES
+    .filter((source) => source.directory !== false)
+    .map(({ run, directory, ...source }) => source)
 }
 
 export async function refreshAllSources({ requestedAtMs = Date.now() } = {}) {

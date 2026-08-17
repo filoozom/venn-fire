@@ -36,10 +36,6 @@
           "initialDelaySeconds": 0
         }
       ]
-    },
-    "api/ingest-controlled.js": {
-      "maxDuration": 60,
-      "regions": ["fra1"]
     }
   },
   "crons": [

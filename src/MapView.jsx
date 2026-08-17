@@ -53,24 +53,44 @@ const basemaps = {
 
 function windCardinal(deg) {
   const names = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
-  return names[Math.round(deg / 22.5) % 16]
+  const normalized = normalizeDegrees(deg)
+  return normalized == null ? '—' : names[Math.round(normalized / 22.5) % 16]
+}
+
+function normalizeDegrees(value) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return null
+  return ((number % 360) + 360) % 360
+}
+
+function formatDegrees(value) {
+  const normalized = normalizeDegrees(value)
+  if (normalized == null) return '—'
+  return `${Math.round(normalized) % 360}°`
+}
+
+function formatDecimal(value, maximumFractionDigits = 1) {
+  if (value == null || value === '') return '—'
+  const number = Number(value)
+  if (!Number.isFinite(number)) return '—'
+  return number.toLocaleString('en-GB', { maximumFractionDigits })
 }
 
 function windMapIcon({ label, wind, accent }) {
   return L.divIcon({
     className: 'wind-source-marker',
-    html: `<span style="--wind-accent:${accent}"><svg viewBox="0 0 24 24" style="--wind-rotation:${(wind.windDirection + 180) % 360}deg" aria-hidden="true"><path d="M12 20V4M6.5 9.5 12 4l5.5 5.5"/></svg><b>${label}</b></span>`,
+    html: `<span style="--wind-accent:${accent}"><svg viewBox="0 0 24 24" style="--wind-rotation:${normalizeDegrees(Number(wind.windDirection) + 180) ?? 0}deg" aria-hidden="true"><path d="M12 20V4M6.5 9.5 12 4l5.5 5.5"/></svg><b>${label}</b></span>`,
     iconSize: [42, 42],
     iconAnchor: [21, 21],
   })
 }
 
 function windTooltip({ name, wind, source, status, distanceKm = 0 }) {
-  const gust = Number.isFinite(wind.gust) ? ` · gust ${wind.gust.toFixed(1)} km/h` : ''
+  const gust = Number.isFinite(wind.gust) ? ` · gust ${formatDecimal(wind.gust)} km/h` : ''
   return `<strong>${escapeHtml(name)}</strong><br>`
-    + `Wind from ${windCardinal(wind.windDirection)} (${wind.windDirection.toFixed(0)}°), blowing toward ${windCardinal((wind.windDirection + 180) % 360)}<br>`
-    + `${wind.windSpeed.toFixed(1)} km/h${gust} · ${wind.ageMinutes} min old<br>`
-    + `<small>${escapeHtml(source)}${distanceKm ? ` · ${distanceKm.toFixed(1)} km from Drossart` : ''}${status ? ` · ${escapeHtml(status)}` : ''}</small>`
+    + `Wind from ${windCardinal(wind.windDirection)} (${formatDegrees(wind.windDirection)}), blowing toward ${windCardinal(Number(wind.windDirection) + 180)} (${formatDegrees(Number(wind.windDirection) + 180)})<br>`
+    + `${formatDecimal(wind.windSpeed)} km/h${gust} · ${wind.ageMinutes} min old<br>`
+    + `<small>${escapeHtml(source)}${distanceKm ? ` · ${formatDecimal(distanceKm)} km from Drossart` : ''}${status ? ` · ${escapeHtml(status)}` : ''}</small>`
 }
 
 function aircraftIcon(flight, heading = 0) {
@@ -116,10 +136,8 @@ export default function MapView({
   firmsDetections = [],
   sentinelBurnGeometry = null,
   fireOutlineRings = [],
-  touchedZoneRings = [],
   mapLabels = [],
   protectedArea = [],
-  officialPerimeter = null,
 }) {
   const nodeRef = useRef(null)
   const mapRef = useRef(null)
@@ -234,21 +252,6 @@ export default function MapView({
         .addTo(group)
     }
 
-    if (layers.officialPerimeter && officialPerimeter?.features?.length) {
-      L.geoJSON(officialPerimeter, {
-        style: {
-          color: '#ff4f45',
-          fillColor: '#ff4f45',
-          weight: 3,
-          opacity: 0.95,
-          fillOpacity: 0.08,
-        },
-      })
-        .bindPopup('<div class="map-popup"><span class="eyebrow">FIELD-CONFIRMED GEOMETRY</span><strong>Agency perimeter feed</strong><small>Stored from the controlled GeoJSON source with every changed revision retained in Postgres.</small></div>')
-        .bindTooltip('<strong>Field-confirmed incident perimeter</strong><br><small>Agency GeoJSON feed</small>', { sticky: true })
-        .addTo(group)
-    }
-
     if (layers.perimeter && effisArea) {
       L.polygon(effisArea.rings, {
         className: 'fire-perimeter-glow',
@@ -269,8 +272,8 @@ export default function MapView({
         fillOpacity: 0.07,
         dashArray: '8 5',
       })
-        .bindPopup(`<div class="map-popup"><span class="eyebrow">COPERNICUS EFFIS · VIIRS NRT</span><strong>${Math.round(effisArea.areaHa).toLocaleString('en-GB')} ha algorithmic geometry</strong><small>${effisArea.productLabel}${effisCarriedForward ? ' · carried forward as last available product' : ''} · ${effisArea.nominalResolutionM} m nominal sensor pixels</small><small>An <strong>envelope containing fire activity</strong>, not a burned area. EFFIS dissolves VIIRS detection pixels into one polygon, so unburned ground between detections is enclosed. EFFIS does not use this product for burned-area statistics.</small><small>Calculated from the WFS polygon; not field-confirmed and not synchronized within the day.</small><small>Separate reporting at this selected time: ${frame.reportedAreaText} ha (${frame.areaLabel}).</small><a href="${effisArea.sourceRequestUrl}" target="_blank" rel="noreferrer">Open source WFS GeoJSON</a><a href="https://forest-fire.emergency.copernicus.eu/apps/effis.csv/?c=629562.19,6608535.18&amp;z=8.544845581054688&amp;t=sentinel2" target="_blank" rel="noreferrer">Open EFFIS viewer</a></div>`)
-        .bindTooltip(`<strong>EFFIS VIIRS-derived daily geometry</strong><br>${Math.round(effisArea.areaHa).toLocaleString('en-GB')} ha calculated polygon area · ${effisArea.productLabel}<br><small>Algorithmic envelope, not the official affected-area estimate</small>`, { sticky: true })
+        .bindPopup(`<div class="map-popup"><span class="eyebrow">COPERNICUS EFFIS · VIIRS NRT</span><strong>${Math.round(effisArea.areaHa).toLocaleString('en-GB')} ha activity envelope</strong><small>${effisArea.productLabel}${effisCarriedForward ? ' · carried forward as last available product' : ''} · ${effisArea.nominalResolutionM} m nominal sensor pixels</small><small>This shape contains the day's fire activity but can also enclose unaffected ground between detections. It is not a burned-area estimate or a field-confirmed perimeter.</small><small>Separate reporting at this selected time: ${frame.reportedAreaText} ha (${frame.areaLabel}).</small><a href="${effisArea.sourceRequestUrl}" target="_blank" rel="noreferrer">Open source WFS GeoJSON</a><a href="https://forest-fire.emergency.copernicus.eu/apps/effis.csv/?c=629562.19,6608535.18&amp;z=8.544845581054688&amp;t=sentinel2" target="_blank" rel="noreferrer">Open EFFIS viewer</a></div>`)
+        .bindTooltip(`<strong>EFFIS daily activity envelope</strong><br>${Math.round(effisArea.areaHa).toLocaleString('en-GB')} ha calculated polygon area · ${effisArea.productLabel}<br><small>May include unaffected ground between detections</small>`, { sticky: true })
         .addTo(group)
 
     }
@@ -311,11 +314,11 @@ export default function MapView({
       const footprintDetail = detection.displayMode === 'centroid'
         ? 'Exact detection centroid; no defensible footprint geometry available'
         : computedGeostationary
-          ? `Approximate projection from native sampling and ${detection.subSatelliteLongitude ?? 'unknown'}° service longitude; FIRMS publishes no pixel polygon`
+          ? `Approximate projection from native sampling and ${Number.isFinite(Number(detection.subSatelliteLongitude)) ? formatDegrees(detection.subSatelliteLongitude) : 'unknown'} service longitude; FIRMS publishes no pixel polygon`
           : 'Thermal anomaly, not a burned-area polygon'
       layer.bindTooltip(
         `<strong>${detection.confidence.label} confidence</strong><br>`
-        + `${detection.sensorName}${detection.satellite ? ` · ${detection.satellite}` : ''} · ${detection.frpMw ?? '—'} MW FRP<br>`
+        + `${detection.sensorName}${detection.satellite ? ` · ${detection.satellite}` : ''} · ${formatDecimal(detection.frpMw)} MW FRP<br>`
         + pixelDetail
         + `${detection.corroboratingSensors > 1 ? `<br>${detection.corroboratingSensors} satellites saw this cell` : ''}`
         + `<br><small>NASA FIRMS · ${detection.acquiredAt.replace('T', ' ').slice(0, 16)} UTC</small>`
@@ -337,28 +340,13 @@ export default function MapView({
         onEachFeature: (feature, layer) => {
           const properties = feature.properties ?? {}
           layer.bindTooltip(
-            `<strong>Sentinel-2 cloud-clear burn change</strong><br>`
-            + `${Number(properties.supportCellCount ?? 0).toLocaleString('en-GB')} qualified 50 m cells · ${Number(properties.supportAreaHa ?? 0).toLocaleString('en-GB')} ha grid coverage<br>`
-            + `<small>B8A/B12 dNBR · acquired ${escapeHtml(String(properties.acquiredAt ?? '').replace('T', ' ').slice(0, 16))} UTC · ${Math.round(Number(properties.clearFraction ?? 0) * 100)}% of the analysis crop cloud-clear</small><br>`
-            + '<small>Positive spectral change anchored to the corroborated fire core; not a field-confirmed perimeter or severity class. Obscured pixels remain unknown.</small>',
+            `<strong>Sentinel-2 observed change</strong><br>`
+            + `${Number(properties.supportCellCount ?? 0).toLocaleString('en-GB')} supported 50 m cells · ${formatDecimal(properties.supportAreaHa)} ha grid coverage<br>`
+            + `<small>Near-infrared comparison · acquired ${escapeHtml(String(properties.acquiredAt ?? '').replace('T', ' ').slice(0, 16))} UTC · ${Math.round(Number(properties.clearFraction ?? 0) * 100)}% of the crop cloud-clear</small><br>`
+            + '<small>Spectral change consistent with fire and connected to the corroborated fire core. It is not a field-confirmed perimeter; obscured pixels remain unknown.</small>',
             { sticky: true },
           )
         },
-      }).addTo(group)
-    }
-
-    // The touched zone keeps the outermost strictly qualified historical reach.
-    // It is drawn first, so the current solid estimate covers every overlapping
-    // segment and only aged-out outer edges remain visibly dashed.
-    if (touchedZoneRings.length) {
-      L.polygon(touchedZoneRings, {
-        color: '#8f675b',
-        weight: 1.8,
-        opacity: 0.82,
-        dashArray: '5 5',
-        fill: false,
-        interactive: false,
-        className: 'touched-zone-outline',
       }).addTo(group)
     }
 
@@ -446,7 +434,7 @@ export default function MapView({
           name: 'Mont Rigi station 6494',
           wind: frame.montRigiWind,
           source: 'RMI ten-minute observation',
-          status: 'awaiting RMI validation',
+          status: 'preliminary',
           distanceKm: 4.2,
         }), { direction: 'top', offset: [0, -18] })
         .addTo(group)
@@ -465,7 +453,7 @@ export default function MapView({
         }), { direction: 'top', offset: [0, -18] })
         .addTo(group)
     })
-  }, [frameIndex, frame, flights, effisArea, effisCarriedForward, layers, importedTracks, firmsDetections, sentinelBurnGeometry, fireOutlineRings, touchedZoneRings, protectedArea, officialPerimeter])
+  }, [frameIndex, frame, flights, effisArea, effisCarriedForward, layers, importedTracks, firmsDetections, sentinelBurnGeometry, fireOutlineRings, protectedArea])
 
   return (
     <div className="map-surface" aria-label="Interactive fire situation map">

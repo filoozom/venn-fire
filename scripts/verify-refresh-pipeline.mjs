@@ -24,11 +24,6 @@ import { buildProviderArtifact } from '../server/source-artifacts.mjs'
 import { parseLegacyEffisSource } from '../server/effis-sources.mjs'
 import { parseLegacyReportSource } from '../server/report-sources.mjs'
 import { payloadHash, setNoStoreHeaders } from '../server/database.mjs'
-import {
-  normalizeDatexRoadEvents,
-  normalizeIncidentPerimeter,
-  normalizePublicOperations,
-} from '../server/controlled-sources.mjs'
 import { normalizeVediaArticle } from '../server/media-sources.mjs'
 import {
   MUNICIPAL_PROVIDERS,
@@ -69,9 +64,6 @@ const expectedSources = [
   'local-authority-updates',
   'vedia',
   'public-alerts',
-  'road-events',
-  'official-perimeter',
-  'public-operations',
   'rmi',
   'dwd',
   'firms',
@@ -503,38 +495,6 @@ assert.equal(headers.get('Cache-Control'), 'no-store, max-age=0')
 assert.equal(headers.get('CDN-Cache-Control'), 'no-store')
 assert.equal(headers.get('Vercel-CDN-Cache-Control'), 'no-store')
 
-const datexEvents = normalizeDatexRoadEvents(`
-  <d2:situationRecord xmlns:d2="urn:datex" id="road-1" xsi:type="RoadOrCarriagewayOrLaneManagement">
-    <d2:situationRecordCreationTime>2026-08-15T15:00:00Z</d2:situationRecordCreationTime>
-    <d2:roadName>E42</d2:roadName>
-    <d2:generalPublicComment><d2:value>Closed near Malmedy</d2:value></d2:generalPublicComment>
-    <d2:locationForDisplay><d2:latitude>50.43</d2:latitude><d2:longitude>6.03</d2:longitude></d2:locationForDisplay>
-  </d2:situationRecord>
-`, '2026-08-15T15:05:00.000Z')
-assert.equal(datexEvents.length, 1)
-assert.equal(datexEvents[0].id, 'road-1')
-assert.equal(datexEvents[0].roadName, 'E42')
-assert.ok(datexEvents[0].distanceKmFromDrossart < 20)
-
-const perimeter = normalizeIncidentPerimeter({
-  type: 'FeatureCollection',
-  features: [{
-    type: 'Feature',
-    properties: { authority: 'fixture' },
-    geometry: { type: 'Polygon', coordinates: [[[6.05, 50.54], [6.07, 50.54], [6.07, 50.56], [6.05, 50.54]]] },
-  }],
-})
-assert.equal(perimeter.features.length, 1)
-
-const operations = normalizePublicOperations({ events: [{
-  id: 'drop-1',
-  observedAt: '2026-08-15T15:00:00Z',
-  type: 'water-drop',
-  title: 'Published water-drop event',
-  position: [50.55, 6.06],
-}] }, '2026-08-15T15:05:00.000Z')
-assert.equal(operations[0].type, 'water-drop')
-
 const media = normalizeVediaArticle({
   id: 'fixture-article',
   attributes: {
@@ -796,4 +756,4 @@ try {
   else process.env.INTERNAL_SOURCE_TOKEN = previousProxyToken
 }
 
-console.log(`refresh pipeline verified: ${REFRESH_SOURCES.length} leased sources, local-authority/public/controlled adapters, five-minute grid, semantic history, no-store APIs`)
+console.log(`refresh pipeline verified: ${REFRESH_SOURCES.length} leased sources, public data adapters, five-minute grid, semantic history, no-store APIs`)

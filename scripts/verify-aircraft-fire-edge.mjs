@@ -163,17 +163,8 @@ const currentAfterExpiry = deriveAircraftSupportedEdge({
   frameTimestampMs: afterDisplayExpiryMs,
   origin,
 })
-const touchedAfterExpiry = deriveAircraftSupportedEdge({
-  flights: [incidentFlight],
-  detections: [detection],
-  outlineRings,
-  frameTimestampMs: afterDisplayExpiryMs,
-  origin,
-})
 assert.equal(currentAfterExpiry.supportPolygons.length, 0,
   'aged aircraft evidence must leave the current solid estimate')
-assert.equal(touchedAfterExpiry.supportPolygons.length, 1,
-  'strictly qualified aged evidence must remain available to the touched zone')
 
 const noCore = deriveAircraftSupportedEdge({ flights: [incidentFlight], origin })
 assert.deepEqual(noCore.extensionLines, [], 'aircraft positions cannot create a fire outline without a satellite core')

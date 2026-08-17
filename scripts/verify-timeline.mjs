@@ -84,18 +84,33 @@ await page.getByText(/seen on selected day/).first().waitFor()
 await page.locator('.data-button').click()
 const publicImplementationLimits = await page.getByText('Known limits that are not synchronized', { exact: true }).count()
   + await page.getByText(/No fire-service or crisis-centre GeoJSON perimeter feed\/export has been supplied/).count()
+  + await page.getByText(/Walloon DATEX II|Field-confirmed perimeter|Sanitized incident operations|AWAITING ACCESS|Touched zone/i).count()
 if (publicImplementationLimits !== 0) {
   throw new Error(`Internal source limitations are exposed in the public viewer: ${publicImplementationLimits}`)
 }
+await page.screenshot({ path: '/tmp/fire-data-overview.png', fullPage: true })
+await page.getByRole('button', { name: 'How to read this' }).click()
+await page.screenshot({ path: '/tmp/fire-method-guide.png', fullPage: true })
 await page.getByRole('button', { name: 'Source directory' }).click()
 const synchronizedSourceLinks = {
   reports: await page.locator('a.directory-row').filter({ hasText: 'Governor and BRF reports' }).count(),
-  effis: await page.locator('a.directory-row').filter({ hasText: 'Copernicus EFFIS daily geometry' }).count(),
+  effis: await page.locator('a.directory-row').filter({ hasText: 'Copernicus EFFIS activity envelope' }).count(),
+  sentinel2: await page.locator('a.directory-row').filter({ hasText: 'Sentinel-2 imagery and observed change' }).count(),
 }
 if (Object.values(synchronizedSourceLinks).some((count) => count !== 1)) {
   throw new Error(`Database source registry entries are not exposed exactly once: ${JSON.stringify(synchronizedSourceLinks)}`)
 }
-await page.getByRole('button', { name: 'Close data workspace' }).click()
+const sourceDirectory = {
+  rowCount: await page.locator('.source-directory > .directory-row').count(),
+  contactInvitation: await page.getByText('Contact us if you have access to this information.', { exact: true }).count(),
+  awaitingAccess: await page.getByText('AWAITING ACCESS', { exact: true }).count(),
+}
+if (sourceDirectory.rowCount < 10 || sourceDirectory.contactInvitation !== 1 || sourceDirectory.awaitingAccess !== 0) {
+  throw new Error(`Public source directory is incomplete or exposes implementation state: ${JSON.stringify(sourceDirectory)}`)
+}
+await page.screenshot({ path: '/tmp/fire-source-directory.png', fullPage: true })
+await page.getByRole('button', { name: 'Close data and sources' }).click()
+await page.screenshot({ path: '/tmp/fire-hydrated-desktop.png', fullPage: true })
 
 const startMs = Date.parse('2026-08-14T13:00:00+02:00')
 const fiveMinutesMs = 5 * 60 * 1000
@@ -151,12 +166,12 @@ const edgeNoteBeforeRepeat = await page.locator('.layer-note').first().innerText
 await selectTime('2026-08-15T21:10:00+02:00')
 const edgeAfterRepeat = await page.locator('.outline-method-key').innerText()
 const edgeNoteAfterRepeat = await page.locator('.layer-note').first().innerText()
-if (edgeNoteBeforeRepeat.includes('additional 50 m aircraft cells')) {
+if (edgeNoteBeforeRepeat.includes('aircraft-supported cells')) {
   throw new Error(`Aircraft support appeared before repeat support: ${edgeNoteBeforeRepeat}`)
 }
 if (!edgeAfterRepeat.includes('Single combined outline')
   || edgeAfterRepeat.includes('Aircraft-supported edge')
-  || !edgeNoteAfterRepeat.includes('additional 50 m aircraft cells')
+  || !edgeNoteAfterRepeat.includes('aircraft-supported cells')
   || !edgeNoteAfterRepeat.includes('direction changes')) {
   throw new Error(`Aircraft support did not enter the one outline on the expected five-minute frame: ${edgeAfterRepeat} / ${edgeNoteAfterRepeat}`)
 }
@@ -211,6 +226,18 @@ const chartBounds = await page.locator('.mini-area-chart path[stroke="#ed754a"]'
 })
 if (chartBounds.y < 0 || chartBounds.y + chartBounds.height > 44.01) {
   throw new Error(`Reported-area chart escapes its 44 px viewBox: ${JSON.stringify(chartBounds)}`)
+}
+
+const windSummary = await page.locator('.wind-hero > div span').innerText()
+if (!/^from \d{1,3}° · blowing toward \d{1,3}°$/u.test(windSummary)
+  || /\d+\.\d{2,}/u.test(windSummary)) {
+  throw new Error(`Wind directions are not rounded for display: ${windSummary}`)
+}
+const excessivePrecisionValues = await page.evaluate(() => (
+  document.body.innerText.match(/-?\d+\.\d{6,}/gu) ?? []
+))
+if (excessivePrecisionValues.length) {
+  throw new Error(`Excessive numeric precision is visible: ${excessivePrecisionValues.join(', ')}`)
 }
 
 // A database report update must advance the timeline independently of any
@@ -279,6 +306,9 @@ console.log(JSON.stringify({
   unrelatedTrafficControls,
   publicImplementationLimits,
   synchronizedSourceLinks,
+  sourceDirectory,
+  windSummary,
+  excessivePrecisionValues,
   chartBounds,
   databaseReportUpdate,
 }, null, 2))

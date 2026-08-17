@@ -537,9 +537,6 @@ export function runtimeDataFromResponse(response) {
   const aircraft = optionalPayload(datasets, 'aircraft', { observations: [], sources: [] })
   const mediaReports = optionalPayload(datasets, 'media-reports', { articles: [], events: [] })
   const localAuthorityUpdates = optionalPayload(datasets, 'local-authority-updates', { notices: [], events: [] })
-  const publicOperations = optionalPayload(datasets, 'public-operations', { events: [] })
-  const roadEvents = optionalPayload(datasets, 'road-events', { events: [] })
-  const officialPerimeter = optionalPayload(datasets, 'official-perimeter', { current: null, snapshots: [] })
   const sentinel2 = optionalPayload(datasets, 'sentinel2', { scenes: [] })
   const ems = optionalPayload(datasets, 'ems', { activations: [], matches: [] })
   const sourceRegistry = optionalPayload(datasets, 'source-registry', { sources: [] })
@@ -571,24 +568,6 @@ export function runtimeDataFromResponse(response) {
       ...(reportsPayload.events ?? []),
       ...(mediaReports.events ?? []),
       ...(localAuthorityUpdates.events ?? []),
-      ...(publicOperations.events ?? []).map((event) => ({
-        ...event,
-        sourceName: 'Agency-approved public operations feed',
-      })),
-      ...(roadEvents.events ?? []).filter((event) => (
-        (event.distanceKmFromDrossart != null && event.distanceKmFromDrossart <= 40)
-        || /baelen|jalhay|waimes|malmedy|sourbrodt|butgenbach|eupen|fagnes/iu.test(
-          `${event.roadName || ''} ${event.description || ''}`,
-        )
-      )).map((event) => ({
-        id: `road:${event.id}`,
-        observedAt: event.observedAt,
-        title: [event.recordType, event.roadName].filter(Boolean).join(' · ') || 'Walloon road event',
-        detail: event.description || 'Official DATEX II road event',
-        type: 'closure',
-        sourceName: 'Walloon DATEX II road events',
-        sourceUrl: roadEvents.source?.registryUrl,
-      })),
     ],
     alerts: publicAlerts.alerts ?? [],
     aircraftObservations: aircraft.observations ?? [],
@@ -616,9 +595,6 @@ export function runtimeDataFromResponse(response) {
     reports: reportsPayload,
     mediaReports,
     localAuthorityUpdates,
-    publicOperations,
-    roadEvents,
-    officialPerimeter,
     sentinel2,
     ems,
     sourceRegistry,

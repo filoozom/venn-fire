@@ -2760,6 +2760,11 @@ button.connection-card--upload {
   line-height: 1.5;
 }
 
+.source-footnote a {
+  color: #2f6652;
+  font-weight: 750;
+}
+
 @media (max-width: 1240px) {
   .app-header,
   .workspace {
@@ -3082,11 +3087,6 @@ button.connection-card--upload {
   width: 20px;
   height: 0;
   border-top: 2px solid #ff2f26;
-}
-
-.outline-method-key i.is-touched {
-  border-color: #8f675b;
-  border-top-style: dashed;
 }
 
 .layer-note {

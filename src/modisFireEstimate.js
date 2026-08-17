@@ -83,9 +83,6 @@ function emptyExtent(gridCellM, timeBucketMs, maxSupportGapM) {
  * The caller folds these pixels into the same 50 m raster union as the VIIRS
  * core. Keeping selection here and geometry in one place prevents the map from
  * presenting MODIS as a second, competing estimate.
- *
- * retainAllSupportedPasses is reserved for the subdued cumulative Touched zone:
- * the solid Best estimate must continue to use only the newest pass.
  */
 export function deriveModisSupportedExtent({
   detections = [],
@@ -96,7 +93,6 @@ export function deriveModisSupportedExtent({
   gridCellM = MODIS_EXTENT_GRID_CELL_M,
   timeBucketMs = MODIS_EXTENT_TIME_BUCKET_MS,
   maxSupportGapM = MODIS_MAX_SUPPORT_GAP_M,
-  retainAllSupportedPasses = false,
 } = {}) {
   const projection = projectionFor(origin)
   const empty = emptyExtent(gridCellM, timeBucketMs, maxSupportGapM)
@@ -125,8 +121,7 @@ export function deriveModisSupportedExtent({
   if (!available.length) return empty
   const latestFrameAtMs = Math.max(...available.map((entry) => entry.frameAtMs))
   const latestPass = available.filter((entry) => entry.frameAtMs === latestFrameAtMs)
-  const selectedPasses = retainAllSupportedPasses ? available : latestPass
-  const highConfidencePass = selectedPasses.filter(({ detection }) => detection?.confidence?.label === 'high')
+  const highConfidencePass = latestPass.filter(({ detection }) => detection?.confidence?.label === 'high')
   const supported = highConfidencePass.filter(({ detection }) => {
     const coreDistanceM = Math.min(...validCore.map((core) => rectangleDistanceM(detection, core, projection)))
     const aircraftDistanceM = aircraftEdgeCandidates.length
@@ -140,11 +135,10 @@ export function deriveModisSupportedExtent({
   if (!supported.length) {
     return {
       ...empty,
-      passAcquiredAt: new Date(Math.max(...selectedPasses.map((entry) => entry.timestampMs))).toISOString(),
+      passAcquiredAt: new Date(Math.max(...latestPass.map((entry) => entry.timestampMs))).toISOString(),
       availableAt: new Date(latestFrameAtMs).toISOString(),
-      sourceDetectionCount: selectedPasses.length,
+      sourceDetectionCount: latestPass.length,
       highConfidenceDetectionCount: highConfidencePass.length,
-      retainsHistoricalPasses: retainAllSupportedPasses,
     }
   }
 
@@ -154,9 +148,8 @@ export function deriveModisSupportedExtent({
     satellites: [...new Set(supportedDetections.map((detection) => detection.satellite).filter(Boolean))].sort(),
     passAcquiredAt: new Date(Math.max(...supported.map((entry) => entry.timestampMs))).toISOString(),
     availableAt: new Date(latestFrameAtMs).toISOString(),
-    sourceDetectionCount: selectedPasses.length,
+    sourceDetectionCount: latestPass.length,
     highConfidenceDetectionCount: highConfidencePass.length,
-    retainsHistoricalPasses: retainAllSupportedPasses,
     gridCellM,
     timeBucketMs,
     maxSupportGapM,
