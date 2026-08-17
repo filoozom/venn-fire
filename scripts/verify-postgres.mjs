@@ -86,6 +86,13 @@ assert.equal(publicAircraft.observations[0].sourceData, undefined)
 assert.equal(publicAircraft.observations[0].callSign, 'GRZLY81')
 assert.equal(publicAircraft.observations[0].routeScope, 'full-route')
 
+const publicSourceRegistry = publicDatasetPayload('source-registry', {
+  sources: [{ key: 'reports' }],
+  coverageGaps: [{ key: 'internal-source-limit' }],
+})
+assert.deepEqual(publicSourceRegistry.sources, [{ key: 'reports' }])
+assert.equal(publicSourceRegistry.coverageGaps, undefined)
+
 const aircraftWithoutOovst = publicDatasetPayload('aircraft', {
   observations: [{
     icao24: '44da74',

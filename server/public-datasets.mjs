@@ -78,10 +78,16 @@ function compactFirms(payload) {
   }
 }
 
+function compactSourceRegistry(payload) {
+  const { coverageGaps: _internalCoverageGaps, ...publicPayload } = payload
+  return publicPayload
+}
+
 export function publicDatasetPayload(key, payload) {
   if (!PUBLIC_DATASET_KEY_SET.has(key)) return null
   if (!payload || typeof payload !== 'object') return payload
   if (key === 'aircraft') return compactAircraft(payload)
   if (key === 'firms') return compactFirms(payload)
+  if (key === 'source-registry') return compactSourceRegistry(payload)
   return payload
 }

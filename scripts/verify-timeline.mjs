@@ -78,6 +78,11 @@ if (unrelatedTrafficControls !== 0) {
 }
 
 await page.locator('.data-button').click()
+const publicImplementationLimits = await page.getByText('Known limits that are not synchronized', { exact: true }).count()
+  + await page.getByText(/No fire-service or crisis-centre GeoJSON perimeter feed\/export has been supplied/).count()
+if (publicImplementationLimits !== 0) {
+  throw new Error(`Internal source limitations are exposed in the public viewer: ${publicImplementationLimits}`)
+}
 await page.getByRole('button', { name: 'Source directory' }).click()
 const synchronizedSourceLinks = {
   reports: await page.locator('a.directory-row').filter({ hasText: 'Governor and BRF reports' }).count(),
@@ -268,6 +273,7 @@ console.log(JSON.stringify({
   effisOn14August,
   effisOn15August,
   unrelatedTrafficControls,
+  publicImplementationLimits,
   synchronizedSourceLinks,
   chartBounds,
   databaseReportUpdate,

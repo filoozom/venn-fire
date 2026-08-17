@@ -157,7 +157,7 @@ Optional controlled-source variables:
 
 The source registry exposes only whether each adapter is configured; URLs issued privately by agencies, usernames, passwords, authorization headers and the ingestion token are never returned to the browser. Road pushes accept DATEX II XML, perimeter pushes accept WGS84 GeoJSON Polygon/MultiPolygon features, and operations pushes accept a publishable JSON `events` array. Raw CAD/radio traffic and personal evacuation-compliance records must not be sent; only agency-approved sanitized events and aggregate counts are accepted.
 
-Known source limits are stored in `source-registry` and shown in the Data & Sources modal. The currently unconnected data is: the official Walloon DATEX II road feed, a field-confirmed fire-service/crisis-centre perimeter and an agency-approved sanitized operations feed; each already has a five-minute pull/push adapter but still needs access or an export. BE-Alert records that expired before collection cannot be reconstructed without an archive; analysis-ready Sentinel multispectral processing needs Copernicus OAuth credentials; raw CAD/radio is non-public and potentially sensitive; and personal-level evacuation compliance is intentionally excluded.
+Internal source and integration limitations are maintained in [`docs/known-source-limits.md`](docs/known-source-limits.md). They are deliberately excluded from the public viewer and its API payloads.
 
 Do not add a CDN cache in front of `/api/data`, `/api/live-reports`, `/api/live-situation`, `/api/firms-situation` or `/api/refresh`.
 
