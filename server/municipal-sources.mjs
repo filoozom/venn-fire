@@ -622,7 +622,13 @@ function butgenbachCandidate(item) {
     && /incend|feu|brand|feuer|rauch|evaku|fagnes|hohen venn|kuechelscheid|kuchelscheid|leykaul|wichtige information/iu.test(text)
 }
 
-async function refreshButgenbach(provider, retrievedAt, query, previousProvider = null) {
+async function refreshButgenbach(
+  provider,
+  retrievedAt,
+  query,
+  previousProvider = null,
+  previousNotices = [],
+) {
   const response = await fetchButgenbachBody(provider.endpoint, { accept: 'application/xml, text/xml' })
   await archiveBody({ providerId: provider.id, url: provider.endpoint, ...response, retrievedAt }, query)
   const items = parseButgenbachSitemap(response.body)
@@ -637,7 +643,16 @@ async function refreshButgenbach(provider, retrievedAt, query, previousProvider 
     if (!previousProvider || !previouslySeen.has(item.id)) candidatesById.set(item.id, item)
   }
   const candidates = [...candidatesById.values()].slice(0, 15)
+  const previousByUrl = new Map(previousNotices
+    .filter((notice) => notice.url)
+    .map((notice) => [notice.url, notice]))
   const details = await Promise.allSettled(candidates.map(async (item) => {
+    const previousNotice = previousByUrl.get(item.url)
+    if (previousNotice
+      && Number.isFinite(Date.parse(item.updatedAt))
+      && Date.parse(previousNotice.updatedAt) >= Date.parse(item.updatedAt)) {
+      return previousNotice
+    }
     const url = trustedArticleUrl(item?.url, provider)
     if (!url) throw new Error('Bütgenbach sitemap returned an untrusted article URL')
     const article = await fetchButgenbachBody(url, { accept: 'text/html' })
@@ -706,7 +721,7 @@ export async function refreshMunicipalUpdates({ requestedAtMs, query }) {
     if (provider.format === 'imio-json') return refreshWaimes(provider, retrievedAt, query)
     if (provider.format === 'wordpress-api') return refreshWordpressApi(provider, retrievedAt, query)
     if (provider.format === 'html-news-list') return refreshHlz(provider, retrievedAt, query)
-    return refreshButgenbach(provider, retrievedAt, query, previousProvider)
+    return refreshButgenbach(provider, retrievedAt, query, previousProvider, previous.notices)
   }))
   const succeeded = results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : [])
   if (!succeeded.length) throw new Error('No official local-authority source succeeded')

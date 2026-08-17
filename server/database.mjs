@@ -286,6 +286,24 @@ export async function loadDataset(key, query = databaseQuery()) {
   }
 }
 
+export async function loadDatasetVersionPayloads(
+  key,
+  { limit = 1_000 } = {},
+  query = databaseQuery(),
+) {
+  if (!key || typeof key !== 'string') throw new Error('Dataset key is required')
+  const boundedLimit = Math.max(1, Math.min(Number.parseInt(limit, 10) || 1_000, 5_000))
+  await ensureDatabaseSchema(query)
+  const rows = await query(`
+    SELECT payload
+    FROM app_dataset_versions
+    WHERE dataset_key = $1
+    ORDER BY captured_at ASC
+    LIMIT $2
+  `, [key, boundedLimit])
+  return rows.map((row) => row.payload).filter((payload) => payload && typeof payload === 'object')
+}
+
 function refreshBucketAt(requestedAtMs, intervalMinutes) {
   const intervalMs = intervalMinutes * 60_000
   return new Date(Math.floor(requestedAtMs / intervalMs) * intervalMs).toISOString()
@@ -406,6 +424,39 @@ export async function loadArtifact(artifactKey, query = databaseQuery()) {
     capturedAt: rows[0].captured_at == null ? null : new Date(rows[0].captured_at).toISOString(),
     contentBase64: rows[0].content_base64,
   }
+}
+
+export async function listArtifacts({
+  sourceKey,
+  capturedAfter = null,
+  capturedBefore = null,
+  limit = 5_000,
+} = {}, query = databaseQuery()) {
+  if (!sourceKey) throw new Error('Artifact source key is required')
+  const boundedLimit = Math.max(1, Math.min(Number.parseInt(limit, 10) || 5_000, 10_000))
+  await ensureDatabaseSchema(query)
+  const rows = await query(`
+    SELECT artifact_key, source_key, original_path, content_type,
+           content_encoding, original_size, sha256, captured_at,
+           encode(content, 'base64') AS content_base64
+    FROM source_artifacts
+    WHERE source_key = $1
+      AND ($2::timestamptz IS NULL OR captured_at >= $2::timestamptz)
+      AND ($3::timestamptz IS NULL OR captured_at <= $3::timestamptz)
+    ORDER BY captured_at ASC, artifact_key ASC
+    LIMIT $4
+  `, [sourceKey, capturedAfter, capturedBefore, boundedLimit])
+  return rows.map((row) => ({
+    artifactKey: row.artifact_key,
+    sourceKey: row.source_key,
+    originalPath: row.original_path,
+    contentType: row.content_type,
+    contentEncoding: row.content_encoding,
+    originalSize: Number(row.original_size),
+    sha256: row.sha256,
+    capturedAt: row.captured_at == null ? null : new Date(row.captured_at).toISOString(),
+    contentBase64: row.content_base64,
+  }))
 }
 
 export async function databaseOverview(query = databaseQuery()) {

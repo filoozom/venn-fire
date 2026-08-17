@@ -7,10 +7,15 @@ import { loadAreaReports } from '../api/live-reports.js'
 import { loadAircraft, loadWeather } from '../api/live-situation.js'
 import { FIRMS_SENSORS } from '../src/firmsDetections.js'
 import {
+  AIRCRAFT_ARTIFACT_BACKFILL_OVERLAP_MS,
+  AIRCRAFT_ARTIFACT_BACKFILL_WINDOW_MS,
+  AIRCRAFT_ARTIFACT_OVERLAP_MS,
+  AIRCRAFT_ARTIFACT_RECOVERY_KEY,
   backfillLegacyFlightHistory,
   CURRENT_AIRCRAFT_TRACE_PROVIDERS,
   HISTORICAL_AIRCRAFT_TRACE_PROVIDERS,
   loadAircraftTraces,
+  recoverAircraftArtifactObservations,
   trackedAircraftFromObservations,
 } from './aircraft-sources.mjs'
 import {
@@ -18,7 +23,9 @@ import {
   completeSourceRefresh,
   databaseQuery,
   failSourceRefresh,
+  listArtifacts,
   loadDataset,
+  loadDatasetVersionPayloads,
   saveArtifact,
   saveDataset,
 } from './database.mjs'
@@ -29,7 +36,11 @@ import {
   refreshRoadEvents,
   ROAD_SOURCE_URL,
 } from './controlled-sources.mjs'
-import { persistFlightObservations, persistFlightPoll } from './flight-history.mjs'
+import {
+  flightObservationKey,
+  persistFlightObservations,
+  persistFlightPoll,
+} from './flight-history.mjs'
 import { refreshVedia } from './media-sources.mjs'
 import { refreshMunicipalUpdates } from './municipal-sources.mjs'
 import { archiveProviderResponses } from './source-artifacts.mjs'
@@ -121,15 +132,158 @@ async function refreshAircraft({ requestedAtMs, query, bucketAt }) {
   }
 }
 
+async function refreshAircraftArtifacts({ requestedAtMs, query }) {
+  const generatedAt = new Date(requestedAtMs).toISOString()
+  const [previousAircraft, previousRecovery] = await Promise.all([
+    previousPayload('aircraft', query, { observations: [] }),
+    previousPayload(AIRCRAFT_ARTIFACT_RECOVERY_KEY, query, {}),
+  ])
+  const fullBackfill = !previousRecovery.fullBackfillCompletedAt
+  const recentAfterMs = requestedAtMs - AIRCRAFT_ARTIFACT_OVERLAP_MS
+  const recentAfter = new Date(recentAfterMs).toISOString()
+  const artifactLimit = 1_000
+  const windows = [{ capturedAfter: recentAfter, capturedBefore: generatedAt, kind: 'recent' }]
+  let nextBackfillCursorBefore = previousRecovery.fullBackfillCursorBefore || recentAfter
+  let fullBackfillCompletedAt = previousRecovery.fullBackfillCompletedAt || null
+
+  if (fullBackfill) {
+    const incidentStartMs = Date.parse(INCIDENT_START)
+    const backfillBeforeMs = Math.min(
+      Date.parse(nextBackfillCursorBefore) || recentAfterMs,
+      recentAfterMs,
+    )
+    const backfillAfterMs = Math.max(
+      incidentStartMs,
+      backfillBeforeMs - AIRCRAFT_ARTIFACT_BACKFILL_WINDOW_MS,
+    )
+    windows.push({
+      capturedAfter: new Date(backfillAfterMs).toISOString(),
+      capturedBefore: new Date(backfillBeforeMs).toISOString(),
+      kind: 'backfill',
+    })
+    if (backfillAfterMs <= incidentStartMs) {
+      nextBackfillCursorBefore = INCIDENT_START
+      fullBackfillCompletedAt = generatedAt
+    } else {
+      nextBackfillCursorBefore = new Date(
+        backfillAfterMs + AIRCRAFT_ARTIFACT_BACKFILL_OVERLAP_MS,
+      ).toISOString()
+    }
+  }
+
+  const artifactWindows = await Promise.all(windows.map(async (window) => {
+    const rows = await listArtifacts({
+      sourceKey: 'aircraft-live',
+      capturedAfter: window.capturedAfter,
+      capturedBefore: window.capturedBefore,
+      limit: artifactLimit,
+    }, query)
+    if (rows.length >= artifactLimit) {
+      throw new Error(`Aircraft ${window.kind} recovery window exceeded the ${artifactLimit} artifact safety limit`)
+    }
+    return { ...window, rows }
+  }))
+  const artifacts = [...new Map(artifactWindows
+    .flatMap((window) => window.rows)
+    .map((artifact) => [artifact.artifactKey, artifact])).values()]
+
+  const trackedAircraft = trackedAircraftFromObservations(previousAircraft.observations)
+  const recovered = recoverAircraftArtifactObservations(artifacts, trackedAircraft)
+  const recoverySignature = (observation) => JSON.stringify([
+    observation.callSign || null,
+    observation.registration || null,
+    observation.aircraftType || null,
+    observation.displayType || null,
+    observation.selectionBasis || null,
+    [...(observation.candidateEvidence || [])].sort(),
+  ])
+  const existingByKey = new Map((previousAircraft.observations || []).map((observation) => [
+    flightObservationKey(observation),
+    recoverySignature(observation),
+  ]))
+  const recoveredUpdates = recovered.observations.filter((observation) => (
+    existingByKey.get(flightObservationKey(observation)) !== recoverySignature(observation)
+  ))
+  let persistedObservationCount = 0
+  let storedAircraft = { changed: false }
+  if (recoveredUpdates.length) {
+    const persisted = await persistFlightObservations(
+      { observations: recoveredUpdates },
+      { databaseUrl: '', query },
+    )
+    persistedObservationCount = persisted.persistedObservations
+    storedAircraft = await saveDataset({
+      key: 'aircraft',
+      payload: {
+        ...previousAircraft,
+        schemaVersion: previousAircraft.schemaVersion || 1,
+        generatedAt,
+        observations: persisted.observations,
+        retentionPolicy: 'incident lifetime',
+      },
+    }, query)
+  }
+  const recoveryPayload = {
+    schemaVersion: 1,
+    generatedAt,
+    fullBackfillCompletedAt,
+    fullBackfillCursorBefore: nextBackfillCursorBefore,
+    artifactCount: artifacts.length,
+    provisionalObservationCount: recovered.provisionalObservationCount,
+    recoveredObservationCount: recovered.observations.length,
+    updateObservationCount: recoveredUpdates.length,
+    upsertedObservationCount: persistedObservationCount,
+    provisionalCandidateAircraftCount: recovered.provisionalCandidateAircraftCount,
+    promotedCandidateAircraftCount: recovered.promotedCandidateAircraftCount,
+    rejectedCandidateAircraftCount: recovered.rejectedCandidateAircraftCount,
+    failedArtifactCount: recovered.failedArtifacts.length,
+  }
+  const storedRecovery = await saveDataset({
+    key: AIRCRAFT_ARTIFACT_RECOVERY_KEY,
+    payload: recoveryPayload,
+    sourceUpdatedAt: generatedAt,
+  }, query)
+  return {
+    itemCount: recovered.observations.length,
+    metadata: {
+      changed: storedAircraft.changed || storedRecovery.changed,
+      fullBackfill,
+      fullBackfillCompleted: Boolean(fullBackfillCompletedAt),
+      fullBackfillCursorBefore: nextBackfillCursorBefore,
+      aircraftDatasetChanged: storedAircraft.changed,
+      artifactCount: artifacts.length,
+      windows: artifactWindows.map((window) => ({
+        kind: window.kind,
+        capturedAfter: window.capturedAfter,
+        capturedBefore: window.capturedBefore,
+        artifactCount: window.rows.length,
+      })),
+      failedArtifactCount: recovered.failedArtifacts.length,
+      provisionalObservationCount: recovered.provisionalObservationCount,
+      recoveredObservationCount: recovered.observations.length,
+      updateObservationCount: recoveredUpdates.length,
+      upsertedObservationCount: persistedObservationCount,
+      provisionalCandidateAircraftCount: recovered.provisionalCandidateAircraftCount,
+      promotedCandidateAircraftCount: recovered.promotedCandidateAircraftCount,
+      rejectedCandidateAircraftCount: recovered.rejectedCandidateAircraftCount,
+    },
+  }
+}
+
 async function refreshAircraftTraceSource({
   query,
   bucketAt,
   providers,
   date = null,
   sourceKey,
+  includeConfigured = true,
+  observedAfter = null,
 }) {
   const previous = await previousPayload('aircraft', query, { observations: [] })
-  const aircraft = trackedAircraftFromObservations(previous.observations)
+  const aircraft = trackedAircraftFromObservations(previous.observations, {
+    includeConfigured,
+    observedAfter,
+  })
   const result = await loadAircraftTraces({ providers, date, aircraft })
   const artifacts = await archiveProviderResponses({
     sourceKey,
@@ -158,6 +312,7 @@ async function refreshAircraftTraceSource({
       date,
       complete: failed.length === 0,
       responseCount: result.responses.length,
+      trackedAircraftCount: aircraft.length,
       healthyResponseCount: healthy.length,
       failedResponseCount: failed.length,
       failedResponses: failed.map((source) => ({
@@ -176,12 +331,14 @@ async function refreshAircraftTraceSource({
   }
 }
 
-async function refreshCurrentAircraftTraces({ query, bucketAt }) {
+async function refreshCurrentAircraftTraces({ requestedAtMs, query, bucketAt }) {
   return refreshAircraftTraceSource({
     query,
     bucketAt,
     providers: CURRENT_AIRCRAFT_TRACE_PROVIDERS,
     sourceKey: 'aircraft-traces',
+    includeConfigured: false,
+    observedAfter: new Date(requestedAtMs - 36 * 60 * 60 * 1_000).toISOString(),
   })
 }
 
@@ -277,13 +434,22 @@ function mergeReportEvents(previous, incoming) {
 
 async function refreshReports({ requestedAtMs, query }) {
   const generatedAt = new Date(requestedAtMs).toISOString()
-  const [incoming, previous] = await Promise.all([
+  const [incoming, previous, historicalVersions] = await Promise.all([
     loadAreaReports(),
     previousPayload('reports', query, { areaReports: [] }),
+    loadDatasetVersionPayloads('reports', { limit: 1_000 }, query),
   ])
   if (!incoming.ok) throw new Error('No live situation-report source succeeded')
-  const areaReports = mergeAreaReports(previous.areaReports, incoming.areaReports)
-  const events = mergeReportEvents(previous.events, incoming.events)
+  const historicalAreaReports = historicalVersions.flatMap((payload) => payload.areaReports || [])
+  const historicalEvents = historicalVersions.flatMap((payload) => payload.events || [])
+  const areaReports = mergeAreaReports(
+    [...historicalAreaReports, ...(previous.areaReports || [])],
+    incoming.areaReports,
+  )
+  const events = mergeReportEvents(
+    [...historicalEvents, ...(previous.events || [])],
+    incoming.events,
+  )
   const payload = { schemaVersion: 1, generatedAt, ...incoming, areaReports, events }
   const stored = await saveDataset({ key: 'reports', payload }, query)
   return {
@@ -293,6 +459,7 @@ async function refreshReports({ requestedAtMs, query }) {
       complete: incoming.complete,
       areaReportCount: areaReports.length,
       eventCount: events.length,
+      historicalVersionCount: historicalVersions.length,
     },
   }
 }
@@ -932,7 +1099,12 @@ export const REFRESH_SOURCES = [
   {
     key: 'aircraft', label: 'Live incident aircraft', intervalMinutes: 5, run: refreshAircraft,
     providerUrl: 'https://airplanes.live/api-guide/',
-    coverage: 'One incident-area point request to adsb.fi and ADSB.lol every five minutes, hourly Airplanes.live health checks, conservative verified-identity/GRZLY selection, exact accepted fixes and every raw response retained',
+    coverage: 'One incident-area point request to adsb.fi and ADSB.lol every five minutes, hourly Airplanes.live health checks, verified identities plus conservatively supported low-altitude response candidates, exact accepted fixes and every raw response retained',
+  },
+  {
+    key: 'aircraft-artifacts', label: 'Retained aircraft poll recovery', intervalMinutes: 5, run: refreshAircraftArtifacts,
+    providerUrl: null,
+    coverage: 'Reprocesses retained raw point responses without provider calls, promoting response-type, cross-provider or repeated low-altitude incident-area candidates and backfilling exact fixes',
   },
   {
     key: 'aircraft-traces', label: 'Current aircraft trace catch-up', intervalMinutes: 30, run: refreshCurrentAircraftTraces,
@@ -1038,6 +1210,11 @@ function registrySources(environment = process.env) {
 }
 
 const COVERAGE_GAPS = [
+  {
+    key: 'aircraft-receiver-visibility',
+    status: 'inherent-source-limit',
+    detail: 'ADS-B/MLAT can miss aircraft with no public transponder position, poor receiver coverage or an observation outside the ten-kilometre incident filter. Candidate status establishes proximity only, not an assigned firefighting role.',
+  },
   {
     key: 'walloon-live-road-events',
     status: 'access-not-supplied',

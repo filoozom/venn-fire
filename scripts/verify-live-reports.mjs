@@ -16,6 +16,11 @@ assert(typeof liveReportsHandler === 'function', 'Vercel /api/live-reports has n
 
 const governorFixture = `
   <main>
+    <h2>COMMUNIQUE DE PRESSE DU GOUVERNEUR - LUNDI 17/08/2026 9h</h2>
+    <h3>Des moyens aériens renforcés</h3>
+    <p>Au cours de la journée, d'importants moyens aériens viendront soutenir les équipes engagées au sol.</p>
+    <p>Sont notamment prévus 2 hélicoptères de la Police fédérale, 1 hélicoptère néerlandais, 2 hélicoptères allemands, 2 hélicoptères norvégiens ainsi que 2 avions suédois.</p>
+    <p>Leur engagement restera toutefois dépendant des conditions météorologiques.</p>
     <h2>INCENDIE DANS LES HAUTES FAGNES - COMMUNIQUE DE PRESSE DU GOUVERNEUR FF. - SAMEDI 15/08/2026 21H</h2>
     <p>À la suite du déclenchement de la phase provinciale, les autorités restent pleinement mobilisées.</p>
     <p>À 18h00 ce samedi 15 août, la superficie touchée par l'incendie est estimée à environ 2 700 hectares.</p>
@@ -76,8 +81,8 @@ assert(areaAt('2026-08-15T20:55:00+02:00')?.reportedHa === 2000, 'The official f
 assert(areaAt('2026-08-15T21:00:00+02:00')?.reportedHa === 2700, 'The latest frame did not switch to the official 2,700 ha figure')
 
 const governorEvents = parseGovernorSituationEvents(governorFixture)
-assert(governorEvents.length === 1, `Expected one strict Governor evacuation event, got ${governorEvents.length}`)
-const evacuation = governorEvents[0]
+assert(governorEvents.length === 2, `Expected strict evacuation and aerial-operation events, got ${governorEvents.length}`)
+const evacuation = governorEvents.find((event) => event.type === 'evacuation')
 assert(evacuation.timestampMs === Date.parse('2026-08-15T16:00:00+02:00'), 'Evacuation was not linked to 16:00 CEST')
 assert(evacuation.type === 'evacuation', 'The first actual evacuation order needs its own event type')
 assert(evacuation.scopeKind === 'named-streets', 'The evacuation must not be widened to a village or municipality')
@@ -85,9 +90,13 @@ assert(evacuation.affectedAreas[0].streets.length === 17, 'The Waimes street lis
 assert(evacuation.affectedAreas[1].streets.length === 7, 'The Bütgenbach street list is incomplete')
 assert(!evacuation.title.includes('Ovifat'), 'The source does not authorize a village-wide Ovifat label')
 assert(
-  parseGovernorSituationEvents(governorFixture.replace('Am Schwarzbach', '')).length === 0,
-  'An incomplete official street list must fail the strict evacuation parser',
+  !parseGovernorSituationEvents(governorFixture.replace('Am Schwarzbach', '')).some((event) => event.type === 'evacuation'),
+  'An incomplete official street list must fail the strict evacuation parser without dropping other bulletins',
 )
+const aerialOperations = governorEvents.find((event) => event.type === 'aircraft')
+assert(aerialOperations?.timestampMs === Date.parse('2026-08-17T09:00:00+02:00'), 'Aerial reinforcements lost the official 09:00 bulletin time')
+assert(aerialOperations?.plannedAircraftCount === 9, 'The official planned aircraft total was not retained')
+assert(aerialOperations?.operationalStatus === 'planned-weather-dependent', 'Planned aircraft were presented as confirmed flights')
 
 const timelineEvents = buildEvents({
   reportRows: governorReports,
@@ -179,7 +188,7 @@ const partial = await loadAreaReports([
 })
 assert(partial.ok && !partial.complete, 'One healthy report source should be explicitly partial')
 assert(partial.areaReports.length === 4, 'Healthy reports were lost when another source failed')
-assert(partial.events.length === 1, 'The strict Governor evacuation event was not returned by the poller')
+assert(partial.events.length === 2, 'Strict Governor safety and aerial-operation events were not returned by the poller')
 assert(partial.sources.filter((source) => source.ok).length === 1, 'Report source health is wrong')
 
 const alertFixtures = [

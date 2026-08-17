@@ -120,6 +120,7 @@ function storedObservation(row) {
     aircraftDescription: sourceData.aircraftDescription || null,
     displayType: sourceData.displayType || null,
     selectionBasis: sourceData.selectionBasis || null,
+    candidateEvidence: Array.isArray(sourceData.candidateEvidence) ? sourceData.candidateEvidence : [],
     observedAt: isoTimestamp(row.observed_at),
     latitude: Number(row.latitude),
     longitude: Number(row.longitude),

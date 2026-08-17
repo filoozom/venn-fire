@@ -10,11 +10,13 @@ import {
   INCIDENT_AIRCRAFT,
   LIVE_AIRCRAFT_PROVIDERS,
   normalizeAircraft,
+  promoteIncidentAircraftCandidates,
 } from '../api/live-situation.js'
 import {
   CURRENT_AIRCRAFT_TRACE_PROVIDERS,
   HISTORICAL_AIRCRAFT_TRACE_PROVIDERS,
   normalizeAircraftTrace,
+  recoverAircraftArtifactObservations,
   trackedAircraftFromObservations,
 } from '../server/aircraft-sources.mjs'
 import { buildProviderArtifact } from '../server/source-artifacts.mjs'
@@ -38,7 +40,7 @@ import {
   parseHlzNewsList,
 } from '../server/municipal-sources.mjs'
 import { firmsDetectionKey, REFRESH_SOURCES } from '../server/refresh-sources.mjs'
-import { buildEvents, mergeIncidentFlights } from '../src/data.js'
+import { aircraftObservationEvents, buildEvents, mergeIncidentFlights } from '../src/data.js'
 import {
   nextRefreshWakeAt,
   REFRESH_INTERVAL_MS,
@@ -50,6 +52,7 @@ import {
 
 const expectedSources = [
   'aircraft',
+  'aircraft-artifacts',
   'aircraft-traces',
   'aircraft-history',
   'open-meteo',
@@ -134,6 +137,75 @@ assert.equal(normalized[1].selectionBasis, 'incident-callsign')
 assert.equal(normalized[1].registration, 'D-999')
 assert.equal(normalized[2].registration, 'D-472')
 
+const responseCandidate = normalizeAircraft({
+  now: 1_786_781_100,
+  ac: [{
+    hex: '4bffff',
+    flight: 'SWED01 ',
+    r: 'SE-MAA',
+    t: 'AT8T',
+    category: 'A1',
+    lat: 50.55,
+    lon: 6.06,
+    seen_pos: 2,
+    alt_baro: 3_200,
+    gs: 145,
+  }],
+}, provider, Date.parse('2026-08-15T12:05:01Z'), INCIDENT_AIRCRAFT, { includeCandidates: true })
+assert.equal(responseCandidate.length, 1, 'a low-altitude fire-response aircraft type must enter candidate evaluation')
+const promotedResponseCandidate = promoteIncidentAircraftCandidates(responseCandidate)
+assert.equal(promotedResponseCandidate.length, 1)
+assert.equal(promotedResponseCandidate[0].selectionBasis, 'incident-response-type')
+assert.equal(promotedResponseCandidate[0].displayType, 'plane')
+
+const genericCandidatePayload = {
+  now: 1_786_781_100,
+  ac: [{
+    hex: '4bfffe',
+    flight: 'UNKNOWN ',
+    t: 'C172',
+    category: 'A1',
+    lat: 50.551,
+    lon: 6.061,
+    seen_pos: 3,
+    alt_baro: 3_500,
+    gs: 90,
+  }],
+}
+const genericFromFi = normalizeAircraft(
+  genericCandidatePayload,
+  LIVE_AIRCRAFT_PROVIDERS[0],
+  Date.parse('2026-08-15T12:05:01Z'),
+  INCIDENT_AIRCRAFT,
+  { includeCandidates: true },
+)
+assert.equal(promoteIncidentAircraftCandidates(genericFromFi).length, 0, 'one generic low-altitude row must not be promoted alone')
+const genericFromLol = normalizeAircraft(
+  genericCandidatePayload,
+  LIVE_AIRCRAFT_PROVIDERS[1],
+  Date.parse('2026-08-15T12:05:01Z'),
+  INCIDENT_AIRCRAFT,
+  { includeCandidates: true },
+)
+const corroboratedGeneric = promoteIncidentAircraftCandidates([...genericFromFi, ...genericFromLol])
+assert.equal(corroboratedGeneric.length, 2, 'two providers must retain a plausible incident-area candidate')
+assert.ok(corroboratedGeneric.every((row) => row.selectionBasis === 'incident-area-corroborated'))
+const unrelatedSeparatedRows = promoteIncidentAircraftCandidates([
+  genericFromFi[0],
+  { ...genericFromFi[0], observedAt: '2026-08-15T13:05:00.000Z' },
+])
+assert.equal(
+  unrelatedSeparatedRows.length,
+  0,
+  'isolated generic rows separated by more than one operational session must not promote each other',
+)
+
+const highAircraft = normalizeAircraft({
+  now: 1_786_781_100,
+  ac: [{ hex: '4bfffd', flight: 'TRANSIT', lat: 50.55, lon: 6.06, alt_baro: 18_000, gs: 320 }],
+}, provider, Date.parse('2026-08-15T12:05:01Z'), INCIDENT_AIRCRAFT, { includeCandidates: true })
+assert.equal(highAircraft.length, 0, 'high/fast transit traffic must be rejected before candidate promotion')
+
 const traceProvider = CURRENT_AIRCRAFT_TRACE_PROVIDERS[0]
 const trace = normalizeAircraftTrace({
   timestamp: Date.parse('2026-08-15T08:00:00.000Z') / 1_000,
@@ -185,6 +257,11 @@ assert.equal(traceTargets.find((aircraft) => aircraft.icao24 === '480999').callS
 const promotedD479 = trackedAircraftFromObservations(d479Trace)
   .find((aircraft) => aircraft.icao24 === '480440')
 assert.equal(promotedD479.selectionBasis, 'verified-icao24')
+const activeTraceTargets = trackedAircraftFromObservations([...discoveredTrace, ...d479Trace], {
+  includeConfigured: false,
+  observedAfter: '2026-08-16T00:00:00.000Z',
+})
+assert.deepEqual(activeTraceTargets.map((aircraft) => aircraft.icao24), ['480440'], 'current trace calls must be limited to recently observed identities')
 
 const displayFlights = mergeIncidentFlights([{ id: 'g10', icao24: '44c1e5', callSign: 'G10', observations: [] }], [
   normalized[0],
@@ -194,6 +271,13 @@ const displayFlights = mergeIncidentFlights([{ id: 'g10', icao24: '44c1e5', call
 assert.equal(displayFlights.length, 3)
 assert.equal(displayFlights.find((flight) => flight.icao24 === '480999').type, 'helicopter')
 assert.equal(displayFlights.find((flight) => flight.icao24 === '480849').callSign, 'GRZLY81')
+const observationEvents = aircraftObservationEvents([
+  { ...normalized[0], observedAt: '2026-08-17T08:01:00.000Z' },
+  { ...normalized[0], observedAt: '2026-08-17T08:11:00.000Z' },
+], Date.parse('2026-08-14T11:00:00.000Z'), 1_000)
+assert.equal(observationEvents.length, 1, 'aircraft fixes on one local day must produce one lightweight timeline event')
+assert.equal(observationEvents[0].time, '10:01')
+assert.match(observationEvents[0].detail, /10:01 to 10:11 CEST/)
 
 const rawArtifact = buildProviderArtifact({
   sourceKey: 'aircraft-live',
@@ -211,6 +295,24 @@ assert.equal(
   '{"now":1786819500,"ac":[]}',
   'archived aircraft artifacts must round-trip to the exact provider body',
 )
+
+const responseArtifact = buildProviderArtifact({
+  sourceKey: 'aircraft-live',
+  bucketAt: '2026-08-15T12:05:00.000Z',
+  response: {
+    provider,
+    statusCode: 200,
+    contentType: 'application/json',
+    rawBody: JSON.stringify({
+      now: 1_786_781_100,
+      ac: [{ hex: '4bffff', flight: 'SWED01 ', r: 'SE-MAA', t: 'AT8T', lat: 50.55, lon: 6.06, seen_pos: 2, alt_baro: 3_200, gs: 145 }],
+    }),
+  },
+})
+const recoveredArtifact = recoverAircraftArtifactObservations([responseArtifact])
+assert.equal(recoveredArtifact.observations.length, 1, 'retained raw polls must recover supported response aircraft without a provider call')
+assert.equal(recoveredArtifact.observations[0].registration, 'SE-MAA')
+assert.equal(recoveredArtifact.promotedCandidateAircraftCount, 1)
 
 const firmsCsv = [
   'latitude,longitude,bright_ti4,scan,track,acq_date,acq_time,satellite,confidence,frp,daynight',

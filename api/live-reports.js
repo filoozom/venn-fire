@@ -118,7 +118,7 @@ const PREVENTIVE_EVACUATION_AREAS = [
 
 function governorSections(html) {
   const text = htmlToSourceText(html)
-  const headingPattern = /(?:POINT DE SITUATION|D[ÉE]CLENCHEMENT PHASE PROVINCIALE|INCENDIE DANS LES HAUTES FAGNES[^\n]*?COMMUNIQU[ÉE] DE PRESSE)[^\n]*?(\d{1,2})\/(\d{1,2})\/(\d{4})\s*(?:-\s*)?(\d{1,2})\s*[hH:]\s*(\d{2})?/giu
+  const headingPattern = /(?:POINT DE SITUATION|D[ÉE]CLENCHEMENT PHASE PROVINCIALE|INCENDIE DANS LES HAUTES FAGNES[^\n]*?COMMUNIQU[ÉE] DE PRESSE|COMMUNIQU[ÉE] DE PRESSE DU GOUVERNEUR)[^\n]*?(\d{1,2})\/(\d{1,2})\/(\d{4})\s*(?:-\s*)?(\d{1,2})\s*[hH:]\s*(\d{2})?/giu
   const headings = [...text.matchAll(headingPattern)]
   return headings.flatMap((heading, index) => {
     const timestampMs = brusselsTimestamp(heading[1], heading[2], heading[3], heading[4], heading[5])
@@ -215,40 +215,78 @@ export function parseGovernorAreaReports(html) {
 }
 
 export function parseGovernorSituationEvents(html) {
-  const expectedTimestampMs = Date.parse('2026-08-15T16:00:00+02:00')
+  const evacuationTimestampMs = Date.parse('2026-08-15T16:00:00+02:00')
+  const aerialOperationsTimestampMs = Date.parse('2026-08-17T09:00:00+02:00')
   return governorSections(html).flatMap(({ timestampMs, text }) => {
-    if (timestampMs !== expectedTimestampMs) return []
     const comparable = comparableSourceText(text)
-    const requiredPhrases = [
-      'ordre d evacuation preventif',
-      'vents changeants',
-      'importante fumee',
-      'centre sportif de malmedy',
-      'avenue du pont de la warche 1',
-    ]
-    const requiredStreets = PREVENTIVE_EVACUATION_AREAS
-      .flatMap((area) => area.streets)
-      .map(comparableSourceText)
-    if (![...requiredPhrases, ...requiredStreets].every((phrase) => comparable.includes(phrase))) return []
+    if (timestampMs === evacuationTimestampMs) {
+      const requiredPhrases = [
+        'ordre d evacuation preventif',
+        'vents changeants',
+        'importante fumee',
+        'centre sportif de malmedy',
+        'avenue du pont de la warche 1',
+      ]
+      const requiredStreets = PREVENTIVE_EVACUATION_AREAS
+        .flatMap((area) => area.streets)
+        .map(comparableSourceText)
+      if (![...requiredPhrases, ...requiredStreets].every((phrase) => comparable.includes(phrase))) return []
 
-    return [{
-      id: 'governor-liege-2026-08-15-1600-preventive-evacuation',
-      timestampMs,
-      observedAt: new Date(timestampMs).toISOString(),
-      type: 'evacuation',
-      title: 'Preventive evacuation ordered for named streets in Waimes and Bütgenbach',
-      detail: 'Changing winds and heavy smoke. Residents of the listed streets are asked to leave their homes as a precaution and to go to the Centre sportif de Malmedy, Avenue du Pont de la Warche 1, 4960 Malmedy. Residents of other streets should stay indoors with doors and windows closed. Tourists staying in the area are asked to go home.',
-      affectedAreas: PREVENTIVE_EVACUATION_AREAS,
-      scopeKind: 'named-streets',
-      receptionCentre: {
-        name: 'Centre sportif de Malmedy',
-        address: 'Avenue du Pont de la Warche 1, 4960 Malmedy',
-      },
-      sourceUrl: GOVERNOR_SOURCE_URL,
-      sourceName: 'Governor of Liège, situation update 15 Aug 16:00 CEST',
-      sourceKind: 'official',
-      timestampBasis: 'dated situation-heading on source page',
-    }]
+      return [{
+        id: 'governor-liege-2026-08-15-1600-preventive-evacuation',
+        timestampMs,
+        observedAt: new Date(timestampMs).toISOString(),
+        type: 'evacuation',
+        title: 'Preventive evacuation ordered for named streets in Waimes and Bütgenbach',
+        detail: 'Changing winds and heavy smoke. Residents of the listed streets are asked to leave their homes as a precaution and to go to the Centre sportif de Malmedy, Avenue du Pont de la Warche 1, 4960 Malmedy. Residents of other streets should stay indoors with doors and windows closed. Tourists staying in the area are asked to go home.',
+        affectedAreas: PREVENTIVE_EVACUATION_AREAS,
+        scopeKind: 'named-streets',
+        receptionCentre: {
+          name: 'Centre sportif de Malmedy',
+          address: 'Avenue du Pont de la Warche 1, 4960 Malmedy',
+        },
+        sourceUrl: GOVERNOR_SOURCE_URL,
+        sourceName: 'Governor of Liège, situation update 15 Aug 16:00 CEST',
+        sourceKind: 'official',
+        timestampBasis: 'dated situation-heading on source page',
+      }]
+    }
+
+    if (timestampMs === aerialOperationsTimestampMs) {
+      const requiredPhrases = [
+        'moyens aeriens renforces',
+        '2 helicopteres de la police federale',
+        '1 helicoptere neerlandais',
+        '2 helicopteres allemands',
+        '2 helicopteres norvegiens',
+        '2 avions suedois',
+        'dependant des conditions meteorologiques',
+      ]
+      if (!requiredPhrases.every((phrase) => comparable.includes(phrase))) return []
+      return [{
+        id: 'governor-liege-2026-08-17-0900-aerial-reinforcements',
+        timestampMs,
+        observedAt: new Date(timestampMs).toISOString(),
+        type: 'aircraft',
+        title: 'Nine aerial-response aircraft announced for the day',
+        detail: 'Planned support: two Federal Police helicopters, one Dutch helicopter, two German helicopters, two Norwegian helicopters and two Swedish aircraft. Their actual deployment remains weather-dependent.',
+        plannedAircraftCount: 9,
+        plannedAssets: [
+          { operator: 'Belgian Federal Police', kind: 'helicopter', count: 2 },
+          { operator: 'Netherlands', kind: 'helicopter', count: 1 },
+          { operator: 'Germany', kind: 'helicopter', count: 2 },
+          { operator: 'Norway', kind: 'helicopter', count: 2 },
+          { operator: 'Sweden', kind: 'plane', count: 2 },
+        ],
+        operationalStatus: 'planned-weather-dependent',
+        sourceUrl: GOVERNOR_SOURCE_URL,
+        sourceName: 'Governor of Liège, situation update 17 Aug 09:00 CEST',
+        sourceKind: 'official',
+        timestampBasis: 'dated official press-release heading on source page',
+      }]
+    }
+
+    return []
   })
 }
 

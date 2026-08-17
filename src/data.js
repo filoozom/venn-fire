@@ -142,7 +142,10 @@ export function mergeIncidentFlights(configuredFlights = [], aircraftObservation
         sourceUrl: `https://adsb.lol/?icao=${icao24}`,
         status: latest.selectionBasis === 'incident-callsign'
           ? 'Selected by an incident GRZLY callsign and exact receiver fixes inside 10 km; operational purpose is not inferred'
-          : 'Verified incident aircraft with exact receiver fixes retained inside 10 km',
+          : String(latest.selectionBasis || '').startsWith('incident-area-')
+              || latest.selectionBasis === 'incident-response-type'
+            ? 'Plausible low-altitude incident-area response candidate supported by aircraft type, repeated fixes or multiple providers; operational role is not independently verified'
+            : 'Verified incident aircraft with exact receiver fixes retained inside 10 km',
         pathMethod: 'Dashed straight connectors: ≤2 min gap and ≤160 kt implied speed',
         observations,
         coverageWindows: receiverCoverageWindows(observations),
@@ -416,7 +419,57 @@ function normalizeTimelineEvent(event, timelineStartMs, frameCount) {
     : null
 }
 
-export function buildEvents({ reportRows, baseEvents, alerts, timelineStartMs, frameCount }) {
+export function aircraftObservationEvents(observations, timelineStartMs, frameCount) {
+  const groups = new Map()
+  for (const observation of observations || []) {
+    const timestampMs = Date.parse(observation?.observedAt)
+    const icao24 = String(observation?.icao24 || '').trim().toLowerCase()
+    if (!Number.isFinite(timestampMs) || !/^[0-9a-f]{6}$/u.test(icao24)) continue
+    const day = localDateOf(timestampMs)
+    const key = `${icao24}:${day}`
+    const rows = groups.get(key) || []
+    rows.push({ ...observation, timestampMs })
+    groups.set(key, rows)
+  }
+
+  return [...groups.entries()].map(([key, rows]) => {
+    rows.sort((left, right) => left.timestampMs - right.timestampMs)
+    const first = rows[0]
+    const latest = rows.at(-1)
+    const callSign = latest.callSign || first.callSign || latest.registration || latest.icao24.toUpperCase()
+    const firstTime = localClockFormatter.format(new Date(first.timestampMs))
+    const latestTime = localClockFormatter.format(new Date(latest.timestampMs))
+    const candidate = String(latest.selectionBasis || '').startsWith('incident-area-')
+      || latest.selectionBasis === 'incident-response-type'
+    return {
+      id: `aircraft-observed:${key}`,
+      timestampMs: first.timestampMs,
+      observedAt: new Date(first.timestampMs).toISOString(),
+      frame: frameAt(first.timestampMs, timelineStartMs, frameCount),
+      time: firstTime,
+      type: 'aircraft',
+      title: `${callSign} observed in the incident area`,
+      detail: `${rows.length.toLocaleString('en-GB')} exact receiver fix${rows.length === 1 ? '' : 'es'} from ${firstTime} to ${latestTime} CEST.${candidate ? ' Plausible response aircraft; operational role is not independently verified.' : ''}`,
+      sourceUrl: latest.providerUrl || first.providerUrl,
+      sourceName: 'Database-retained ADS-B/MLAT receiver observations',
+      aircraftIcao24: latest.icao24,
+      callSign,
+      firstObservedAt: first.observedAt,
+      lastObservedAt: latest.observedAt,
+      observationCount: rows.length,
+      selectionBasis: latest.selectionBasis || null,
+    }
+  }).sort((left, right) => left.timestampMs - right.timestampMs)
+}
+
+export function buildEvents({
+  reportRows,
+  baseEvents,
+  alerts,
+  aircraftObservations = [],
+  timelineStartMs,
+  frameCount,
+}) {
   const areaEvents = mergeAreaReports(reportRows).map((report) => ({
     frame: frameAt(report.publishedAtMs, timelineStartMs, frameCount),
     time: localClockFormatter.format(new Date(report.publishedAtMs)),
@@ -432,6 +485,7 @@ export function buildEvents({ reportRows, baseEvents, alerts, timelineStartMs, f
       .filter((event) => event.type !== 'area')
       .map((event) => normalizeTimelineEvent(event, timelineStartMs, frameCount))
       .filter(Boolean),
+    ...aircraftObservationEvents(aircraftObservations, timelineStartMs, frameCount),
     ...alertEvents(alerts ?? [], timelineStartMs, frameCount),
   ]
   const unique = new Map()
@@ -532,6 +586,7 @@ export function runtimeDataFromResponse(response) {
       })),
     ],
     alerts: publicAlerts.alerts ?? [],
+    aircraftObservations: aircraft.observations ?? [],
     timelineStartMs,
     frameCount: frames.length,
   })

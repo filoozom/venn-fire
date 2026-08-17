@@ -157,6 +157,50 @@ function layerOptionsFor(effisArea, isCarriedForward, firmsSummaries = [], frame
 }
 
 const OBSERVATION_RECENCY_MS = 5 * 60 * 1000
+const brusselsClockFormatter = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/Brussels',
+  hour: '2-digit',
+  minute: '2-digit',
+})
+const brusselsShortDateFormatter = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/Brussels',
+  day: '2-digit',
+  month: 'short',
+})
+const brusselsDateKeyFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Europe/Brussels',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+
+function brusselsDateKey(timestampMs) {
+  return brusselsDateKeyFormatter.format(new Date(timestampMs))
+}
+
+function observationTimeLabel(timestampMs, referenceTimestampMs = timestampMs) {
+  if (!Number.isFinite(timestampMs)) return 'unknown time'
+  const clock = brusselsClockFormatter.format(new Date(timestampMs))
+  return brusselsDateKey(timestampMs) === brusselsDateKey(referenceTimestampMs)
+    ? `${clock} CEST`
+    : `${brusselsShortDateFormatter.format(new Date(timestampMs))} · ${clock} CEST`
+}
+
+function absoluteObservationTimeLabel(timestampMs) {
+  if (!Number.isFinite(timestampMs)) return 'unknown time'
+  return `${brusselsShortDateFormatter.format(new Date(timestampMs))} · ${brusselsClockFormatter.format(new Date(timestampMs))} CEST`
+}
+
+function sourceRunIsPartial(source) {
+  return Boolean(
+    source?.metadata?.failedProviders?.length
+    || source?.metadata?.degradedProviders?.length
+    || source?.metadata?.failedResponses?.length
+    || source?.metadata?.complete === false
+    || source?.metadata?.awaitingAccess === true
+    || source?.metadata?.configured === false,
+  )
+}
 
 function windCardinal(deg) {
   const names = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
@@ -350,7 +394,7 @@ function Timeline({ frames, timelineEvents, frameIndex, setFrameIndex, playing, 
 
       <div className="timeline-foot">
         <span><Radio size={12} /> Five-minute timeline · {visibleEvents.length} sourced updates visible</span>
-        <span className="reconstruction-note"><Info size={12} /> Paths join only adjacent, plausible source fixes; gaps stay open. Unrelated aircraft traffic is excluded.</span>
+        <span className="reconstruction-note"><Info size={12} /> Paths join only adjacent, plausible source fixes; gaps stay open. Unverified low-altitude response candidates are labelled, not presented as confirmed missions.</span>
         <a className="apyos-credit" href="https://apyos.com" target="_blank" rel="noreferrer">
           Developed by <strong>Apyos</strong><ExternalLink size={11} />
         </a>
@@ -471,7 +515,7 @@ function DataModal({
                 <div className="connection-copy">
                   <div className="connection-title"><strong>NASA FIRMS</strong><span className="status-pill status-pill--connected"><Check size={11} /> DATABASE REFRESH</span></div>
                   <p>{firmsDetectionCount} exact thermal-anomaly detections from Suomi-NPP, NOAA-20, NOAA-21, MODIS and Meteosat are retained in Postgres. The Vercel refresh function merges polar overpasses and geostationary scans into that history.</p>
-                  <span className="connection-meta">Checked every 5 min · provider lease 15 min · no browser-stored API key</span>
+                  <span className="connection-meta">Scheduler evaluated every 5 min · provider fetched every 15 min · newest source acquisition {firmsState.latestAcquiredAt ? absoluteObservationTimeLabel(Date.parse(firmsState.latestAcquiredAt)) : 'unavailable'} · no browser-stored API key</span>
                 </div>
               </div>
 
@@ -530,7 +574,7 @@ function DataModal({
                 <article><span>01</span><div><strong>Thermal anomaly</strong><p>FIRMS detections appear at their exact acquisition time. Raw sensor layers stay separate. The Best estimate merges its corroborated VIIRS core with nearby high-confidence pixels from the newest MODIS pass and, only after local repeat support, compact aircraft-bounded lobes on the same 50 m raster; Meteosat remains detections-only.</p></div></article>
                 <article><span>02</span><div><strong>Reported area</strong><p>The line is a timestamped step series. A figure becomes visible when published; when its stated effective time differs, both times are retained and shown. Between reports it means “last reported,” not measured growth.</p></div></article>
                 <article><span>03</span><div><strong>EFFIS daily geometry</strong><p>The 14 and 15 August VIIRS-derived polygons are separate calendar-day products. Their locally calculated geometry area is not the official affected area; EFFIS provides no within-day acquisition time for five-minute animation.</p></div></article>
-                <article><span>04</span><div><strong>Aircraft observations</strong><p>Identified incident aircraft are shown from exact receiver fixes returned by the independently health-checked aircraft providers. Gaps stay empty, fixes fade over 24 hours, and only repeated near-core GRZLY direction changes can extend the single Best estimate outline.</p></div></article>
+                <article><span>04</span><div><strong>Aircraft observations</strong><p>Verified identities and conservatively supported low-altitude incident-area candidates are shown from exact receiver fixes returned by independently health-checked providers. Candidate status never asserts an operational role. Gaps stay empty, fixes fade over 24 hours, and only repeated near-core GRZLY direction changes can extend the single Best estimate outline.</p></div></article>
                 <article><span>05</span><div><strong>Situation reports</strong><p>The Governor of Liège page is polled every five minutes for official estimates and safety events. BRF figures remain distinctly labelled local reporting; every step links to its source.</p></div></article>
               </div>
               <div className="safety-note"><ShieldAlert size={17} /><span>This viewer is informational and must not be used for evacuation or preservation-of-life decisions. Follow BE-Alert and emergency services.</span></div>
@@ -549,7 +593,7 @@ function DataModal({
                   ? 'AWAITING ACCESS'
                   : run?.status === 'failed' ? 'FAILED'
                     : run?.status === 'running' ? 'SYNCING'
-                      : run?.metadata?.failedProviders?.length ? 'PARTIAL'
+                      : sourceRunIsPartial(run) ? 'PARTIAL'
                         : `${source.intervalMinutes} MIN`
                 const content = (
                   <>
@@ -619,18 +663,21 @@ function FireViewer({ runtime, databaseError }) {
     status: databaseError ? 'stale' : 'live',
     configured: true,
     generatedAt: firmsData.generatedAt,
+    latestAcquiredAt: firmsData.latestAcquiredAt,
   }
   const liveAircraftObservations = runtime.aircraft.observations ?? []
+  const aircraftLoadStatus = runtime.aircraftLoadState?.status || 'ready'
+  const aircraftHistoryUnavailable = aircraftLoadStatus === 'error'
+  const aircraftHistoryLoading = aircraftLoadStatus === 'loading'
   const sourceRuns = runtime.database?.sources ?? []
   const hasFailedSource = sourceRuns.some((source) => source.status === 'failed')
-  const hasPartialSource = sourceRuns.some((source) => (
-    source.metadata?.failedProviders?.length || source.metadata?.degradedProviders?.length
-  ))
+  const hasPartialSource = sourceRuns.some(sourceRunIsPartial)
   const syncState = {
-    status: databaseError ? 'stale' : hasFailedSource || hasPartialSource ? 'partial' : 'live',
+    status: databaseError ? 'stale' : hasFailedSource || hasPartialSource || aircraftHistoryUnavailable ? 'partial' : 'live',
     generatedAt: runtime.generatedAt,
     weatherOk: true,
-    aircraftOk: sourceRuns.find((source) => source.sourceKey === 'aircraft')?.status === 'ok',
+    aircraftOk: sourceRuns.find((source) => source.sourceKey === 'aircraft')?.status === 'ok'
+      && !aircraftHistoryUnavailable,
     reportsOk: Boolean(runtime.reports.ok),
     reportsComplete: Boolean(runtime.reports.complete),
   }
@@ -662,6 +709,20 @@ function FireViewer({ runtime, databaseError }) {
     visibleAircraftObservations(flight.observations, frame.timestampMs).length
   ))
   const receiverObservedCallSigns = receiverObservedFlights.map((flight) => flight.callSign).join(', ')
+  const selectedDayKey = brusselsDateKey(frame.timestampMs)
+  const selectedDayStartMs = Date.parse(`${selectedDayKey}T00:00:00+02:00`)
+  const selectedDayEndMs = selectedDayStartMs + 24 * 60 * 60 * 1_000
+  const flightsSeenOnSelectedDay = receiverObservedFlights.flatMap((flight) => {
+    const observations = visibleAircraftObservations(flight.observations, frame.timestampMs)
+      .filter((observation) => (
+        observation.timestampMs >= selectedDayStartMs
+        && observation.timestampMs < selectedDayEndMs
+      ))
+    return observations.length ? [{ flight, observations, latest: observations.at(-1) }] : []
+  })
+  const latestSelectedDayFlight = flightsSeenOnSelectedDay
+    .slice()
+    .sort((left, right) => right.latest.timestampMs - left.latest.timestampMs)[0] ?? null
 
   useEffect(() => {
     const previousLength = framesLengthRef.current
@@ -740,11 +801,6 @@ function FireViewer({ runtime, databaseError }) {
       color: '#b9a0e8',
     })),
   ], [frame])
-
-  const activeFlights = useMemo(
-    () => visibleDisplayFlights.filter((flight) => observationState(flight, frame).key === 'recent'),
-    [visibleDisplayFlights, frame],
-  )
 
   // Database-retained FIRMS detections, placed on the five-minute timeline by
   // exact acquisition time. Polar detections remain as historical evidence;
@@ -969,7 +1025,7 @@ function FireViewer({ runtime, databaseError }) {
         </div>
 
         <div className="header-actions">
-          <div className="updated-state"><span className={`live-pulse ${syncState.status === 'live' ? '' : 'is-bundled'}`} /><div><small>{syncState.status === 'live' ? 'DATABASE SOURCES REFRESHED' : syncState.status === 'partial' ? 'PARTIAL SOURCE REFRESH' : 'DATABASE VIEW STALE'}</small><strong>{frames.at(-1).dayLabel} · {frames.at(-1).shortTime} CEST</strong></div></div>
+          <div className="updated-state"><span className={`live-pulse ${syncState.status === 'live' ? '' : 'is-bundled'}`} /><div><small>{syncState.status === 'live' ? 'SOURCE POLLS CURRENT' : syncState.status === 'partial' ? 'CURRENT POLLS · COVERAGE GAPS' : 'DATABASE VIEW STALE'}</small><strong>{frames.at(-1).dayLabel} · {frames.at(-1).shortTime} CEST</strong></div></div>
           <button className="data-button" type="button" onClick={() => setDataOpen(true)}><Database size={15} /><span>Data & sources</span></button>
         </div>
       </header>
@@ -1059,7 +1115,7 @@ function FireViewer({ runtime, databaseError }) {
           <div className="sidebar-section source-summary">
             <div className="section-heading"><span>SOURCE HEALTH</span><button type="button" onClick={() => setDataOpen(true)}>Manage</button></div>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
-              <SourceMark tone="nasa" /><span><strong>FIRMS</strong><small>{`${firmsData.detections.length} exact detections · ${visibleFirmsDetections.length} shown · ${firmsState.status === 'live' ? 'database refreshed' : 'database view stale'}`}</small></span><em className={`health-dot ${firmsState.status === 'live' ? '' : 'health-dot--amber'}`} />
+              <SourceMark tone="nasa" /><span><strong>FIRMS</strong><small>{`${firmsData.detections.length} exact detections · ${visibleFirmsDetections.length} shown · newest acquisition ${firmsData.latestAcquiredAt ? observationTimeLabel(Date.parse(firmsData.latestAcquiredAt), frame.timestampMs) : 'unavailable'}`}</small></span><em className={`health-dot ${firmsState.status === 'live' ? '' : 'health-dot--amber'}`} />
             </button>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
               <SourceMark tone="effis" /><span><strong>EFFIS daily geometry</strong><small>{currentEffisArea ? `${currentEffisArea.productDate}${effisCarriedForward ? ' carried forward' : ''} · envelope containing fire activity, not burned area` : 'not yet available at selected time'}</small></span><em className="health-dot health-dot--amber" />
@@ -1071,7 +1127,11 @@ function FireViewer({ runtime, databaseError }) {
               <SourceMark tone={frame.weatherSourceKind === 'station-observation' ? 'rmi' : 'weather'} /><span><strong>{frame.weatherSourceKind === 'station-observation' ? 'Mont Rigi station' : 'Wind model fallback'}</strong><small>{frame.weatherSourceKind === 'station-observation' ? `10 min observation · ${frame.weatherAgeMinutes} min old · awaiting RMI validation` : 'Open-Meteo hourly grid value'}</small></span><em className={`health-dot ${frame.weatherSourceKind === 'station-observation' ? 'health-dot--amber' : ''}`} />
             </button>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
-              <SourceMark tone="adsb" /><span><strong>Aircraft</strong><small>{visibleDisplayFlights.length} visible set{visibleImportedTracks.length ? ` · ${visibleImportedTracks.length} static import` : ''}</small></span><em className="health-dot" /></button>
+              <SourceMark tone="adsb" /><span><strong>Aircraft</strong><small>{aircraftHistoryLoading
+                ? 'Loading retained aircraft history asynchronously…'
+                : aircraftHistoryUnavailable
+                  ? 'Retained aircraft history is temporarily unavailable'
+                  : `${flightsSeenOnSelectedDay.length} seen on selected day · ${visibleDisplayFlights.length} retained within 24 h${latestSelectedDayFlight ? ` · latest ${latestSelectedDayFlight.flight.callSign} ${observationTimeLabel(latestSelectedDayFlight.latest.timestampMs, frame.timestampMs)}` : ''}`}</small></span><em className={`health-dot ${syncState.aircraftOk && !aircraftHistoryLoading ? '' : 'health-dot--amber'}`} /></button>
           </div>
 
           <div className="emergency-note">
@@ -1156,7 +1216,13 @@ function FireViewer({ runtime, databaseError }) {
                 <article className="snapshot-card snapshot-card--estimate"><span><Flame size={15} /> BEST ESTIMATE</span><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}<small>{bestEstimateDetections.length ? 'ha' : ''}</small></strong><p>{bestEstimateDetections.length ? `${bestEstimateDetections.length} selected thermal detections · ${bestEstimateCoreDetections.length} VIIRS${modisSupportedExtent.detections.length ? ` + ${modisSupportedExtent.detections.length} ${modisSupportedExtent.satellites.join('/')} MODIS` : ''}${aircraftSupportIncluded ? ` · ${bestEstimateArea.supportCellCount} aircraft-supported cells` : ''}` : 'no qualifying detections yet'}</p></article>
                 <article className="snapshot-card snapshot-card--effis"><span><Layers3 size={15} /> EFFIS DAILY GEOMETRY</span><strong>{currentEffisArea ? Math.round(currentEffisArea.areaHa).toLocaleString('en-GB') : '—'}<small>{currentEffisArea ? 'ha' : ''}</small></strong><p>{currentEffisArea ? `${currentEffisArea.productDate}${effisCarriedForward ? ' carried forward until replacement' : ''} · envelope containing fire activity, not burned area` : 'no EFFIS product available at selected time'}</p></article>
                 <article className="snapshot-card"><span><Satellite size={15} /> HOTSPOTS</span><strong>{visibleFirmsDetections.length}<small>px</small></strong><p>shaded by confidence · exact NASA FIRMS detections</p></article>
-                <article className="snapshot-card"><span><Helicopter size={15} /> AIR OPS</span><strong>{activeFlights.length}<small>recent</small></strong><p>{activeFlights.length ? 'fix within previous 5 min' : 'no recent observation'}</p></article>
+                <article className="snapshot-card"><span><Helicopter size={15} /> AIR OPS</span><strong>{aircraftHistoryLoading ? '—' : flightsSeenOnSelectedDay.length}<small>{aircraftHistoryLoading ? 'loading' : 'seen today'}</small></strong><p>{aircraftHistoryLoading
+                  ? 'retained flight data is loading separately'
+                  : aircraftHistoryUnavailable
+                    ? 'retained flight data is temporarily unavailable'
+                    : latestSelectedDayFlight
+                      ? `latest ${latestSelectedDayFlight.flight.callSign} · ${observationTimeLabel(latestSelectedDayFlight.latest.timestampMs, frame.timestampMs)}`
+                      : 'no exact receiver fix on selected day'}</p></article>
                 <article className="snapshot-card snapshot-card--wind"><span><Wind size={15} /> WIND FROM</span><strong>{windCardinal(frame.windDirection)}<small>{frame.windDirection.toFixed(0)}°</small></strong><p>{frame.windSpeed.toFixed(1)} km/h · gust {frame.gust.toFixed(0)} · {frame.weatherSourceKind === 'station-observation' ? 'station obs.' : 'model'}</p></article>
               </div>
 
@@ -1233,7 +1299,11 @@ function FireViewer({ runtime, databaseError }) {
               <div className="air-ops-summary">
                 <span className="kicker">TRACK COVERAGE</span>
                 <h2>Aerial operations</h2>
-                <p>{receiverObservedFlights.length} identified aircraft have exact incident-area receiver fixes{receiverObservedCallSigns ? `: ${receiverObservedCallSigns}` : ''}. G12 remains photo-confirmed only. Receiver positions establish proximity, not water pickups or drops.</p>
+                <p>{aircraftHistoryLoading
+                  ? 'Retained aircraft fixes are loading asynchronously; the incident map and other live sources are already usable.'
+                  : aircraftHistoryUnavailable
+                    ? 'Retained aircraft fixes are temporarily unavailable. Provider polling continues in the database and this view will retry.'
+                    : `${flightsSeenOnSelectedDay.length} aircraft were seen on the selected day; ${receiverObservedFlights.length} remain visible inside the 24-hour window${receiverObservedCallSigns ? `: ${receiverObservedCallSigns}` : ''}. Plausible candidates are labelled separately. G12 remains photo-confirmed only. Receiver positions establish proximity, not water pickups or drops.`}</p>
                 <button type="button" onClick={() => setDataOpen(true)}><FileUp size={14} /> Import tracks</button>
               </div>
 
@@ -1246,6 +1316,10 @@ function FireViewer({ runtime, databaseError }) {
                     ? visibleAircraftObservations(flight.observations, frame.timestampMs)
                     : null
                   const observationCount = visibleObservations?.length ?? null
+                  const selectedDayObservationCount = visibleObservations?.filter((observation) => (
+                    observation.timestampMs >= selectedDayStartMs
+                    && observation.timestampMs < selectedDayEndMs
+                  )).length ?? null
                   const coverageCount = visibleObservations
                     ? aircraftCoverageWindows(visibleObservations).length
                     : null
@@ -1259,9 +1333,9 @@ function FireViewer({ runtime, databaseError }) {
                       <div className="flight-head">
                         <span className="flight-icon" style={{ '--flight-color': flight.color }}>{flight.type === 'plane' ? <Plane size={17} /> : <Helicopter size={17} />}</span>
                         <div><strong>{flight.callSign}</strong><small>{flight.label}</small></div>
-                        <span className={`flight-state ${isActive ? 'is-live' : ''}`}>{state.label}</span>
+                        <span className={`flight-state ${isActive ? 'is-live' : ''}`}>{state.latest ? observationTimeLabel(state.latest.timestampMs, frame.timestampMs) : state.label}</span>
                       </div>
-                      <div className="flight-stats"><span><small>FIXES</small><strong>{observationCount ?? '—'}</strong></span><span><small>CLUSTERS</small><strong>{coverageCount ?? '—'}</strong></span><span><small>PHOTOS</small><strong>{photoCount || '—'}</strong></span></div>
+                      <div className="flight-stats"><span><small>24 H FIXES</small><strong>{observationCount ?? '—'}</strong></span><span><small>SELECTED DAY</small><strong>{selectedDayObservationCount ?? '—'}</strong></span><span><small>CLUSTERS</small><strong>{coverageCount ?? '—'}</strong></span><span><small>PHOTOS</small><strong>{photoCount || '—'}</strong></span></div>
                       <div className="flight-provenance"><Info size={12} /> {flight.status}{flight.pathMethod ? ` · ${flight.pathMethod}` : ''}</div>
                     </article>
                   )
@@ -1293,19 +1367,31 @@ function FireViewer({ runtime, databaseError }) {
   )
 }
 
-async function fetchDatabaseRuntime() {
-  const response = await fetch('/api/data', {
+async function fetchDatabaseResponse(scope) {
+  const response = await fetch(`/api/data?scope=${encodeURIComponent(scope)}`, {
     cache: 'no-store',
     headers: { Accept: 'application/json' },
   })
   if (!response.ok) throw new Error(`Database endpoint returned ${response.status}`)
-  return runtimeDataFromResponse(await response.json())
+  return response.json()
+}
+
+async function fetchCoreRuntime() {
+  const response = await fetchDatabaseResponse('core')
+  return { response, runtime: runtimeDataFromResponse(response) }
+}
+
+function runtimeWithAircraft(coreResponse, aircraftDataset, aircraftLoadState) {
+  const response = aircraftDataset
+    ? { ...coreResponse, datasets: { ...coreResponse.datasets, aircraft: aircraftDataset } }
+    : coreResponse
+  return { ...runtimeDataFromResponse(response), aircraftLoadState }
 }
 
 // Start the first database read as soon as the application bundle executes.
-// React can paint the shell while this request is in flight, and no incident
-// payload is kept in the browser or bundled into the application.
-let eagerRuntimeRequest = typeof window === 'undefined' ? null : fetchDatabaseRuntime()
+// Core incident data renders first; the much larger retained aircraft history
+// follows asynchronously. No incident payload is bundled into the application.
+let eagerRuntimeRequest = typeof window === 'undefined' ? null : fetchCoreRuntime()
 
 function AsyncViewerShell({ databaseError, onRetry }) {
   const hasError = Boolean(databaseError)
@@ -1401,6 +1487,7 @@ function App() {
   const [runtime, setRuntime] = useState(null)
   const [databaseError, setDatabaseError] = useState(null)
   const [retryCount, setRetryCount] = useState(0)
+  const aircraftDatasetRef = useRef(null)
 
   useEffect(() => {
     let cancelled = false
@@ -1412,12 +1499,30 @@ function App() {
       if (pending) return
       pending = true
       try {
-        const request = initialRequest ?? fetchDatabaseRuntime()
+        const request = initialRequest ?? fetchCoreRuntime()
         initialRequest = null
-        const nextRuntime = await request
+        const { response: coreResponse, runtime: coreRuntime } = await request
         if (!cancelled) {
-          setRuntime(nextRuntime)
+          setRuntime(aircraftDatasetRef.current
+            ? runtimeWithAircraft(coreResponse, aircraftDatasetRef.current, { status: 'refreshing' })
+            : { ...coreRuntime, aircraftLoadState: { status: 'loading' } })
           setDatabaseError(null)
+        }
+
+        try {
+          const aircraftResponse = await fetchDatabaseResponse('aircraft')
+          const aircraftDataset = aircraftResponse.datasets?.aircraft
+          if (!aircraftDataset) throw new Error('Aircraft database dataset is unavailable')
+          aircraftDatasetRef.current = aircraftDataset
+          if (!cancelled) {
+            setRuntime(runtimeWithAircraft(coreResponse, aircraftDataset, { status: 'ready' }))
+          }
+        } catch (error) {
+          if (!cancelled) {
+            setRuntime((current) => current
+              ? { ...current, aircraftLoadState: { status: 'error', message: error.message } }
+              : current)
+          }
         }
       } catch (error) {
         if (!cancelled) setDatabaseError(error)

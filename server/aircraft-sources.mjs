@@ -1,7 +1,13 @@
+import { gunzipSync } from 'node:zlib'
+
 import {
   INCIDENT_AIRCRAFT,
   INCIDENT_RADIUS_KM,
+  LIVE_AIRCRAFT_PROVIDERS,
   incidentDistanceKm,
+  normalizeAircraft,
+  promoteIncidentAircraftCandidates,
+  trackedAircraftIdentityMap,
 } from '../api/live-situation.js'
 import { loadDataset, saveDataset } from './database.mjs'
 import { FLIGHT_HISTORY_START, persistFlightObservations } from './flight-history.mjs'
@@ -9,6 +15,10 @@ import { archiveProviderResponses } from './source-artifacts.mjs'
 
 export const LEGACY_FLIGHT_MIGRATION_KEY = 'migration-aircraft-history-a80aa9a'
 export const LEGACY_FLIGHT_SNAPSHOT_URL = 'https://raw.githubusercontent.com/filoozom/venn-fire/a80aa9a0aa60f6b98d5c559805a1b626bc7ae004/src/incidentAircraftSnapshot.json'
+export const AIRCRAFT_ARTIFACT_RECOVERY_KEY = 'aircraft-artifact-recovery'
+export const AIRCRAFT_ARTIFACT_OVERLAP_MS = 2 * 60 * 60 * 1_000
+export const AIRCRAFT_ARTIFACT_BACKFILL_WINDOW_MS = 6 * 60 * 60 * 1_000
+export const AIRCRAFT_ARTIFACT_BACKFILL_OVERLAP_MS = 15 * 60 * 1_000
 
 export const CURRENT_AIRCRAFT_TRACE_PROVIDERS = [
   {
@@ -40,15 +50,86 @@ function finiteNumber(value) {
   return Number.isFinite(number) ? number : null
 }
 
-export function trackedAircraftFromObservations(observations = []) {
+function liveProviderForArtifact(artifact) {
+  return LIVE_AIRCRAFT_PROVIDERS.find((provider) => (
+    artifact.artifactKey?.endsWith(`:${provider.id}`)
+    || artifact.originalPath === provider.endpoint
+  )) ?? null
+}
+
+function artifactText(artifact) {
+  const bytes = Buffer.from(artifact.contentBase64 || '', 'base64')
+  if (artifact.contentEncoding === 'gzip') return gunzipSync(bytes).toString('utf8')
+  if (artifact.contentEncoding === 'identity') return bytes.toString('utf8')
+  throw new Error(`Unsupported aircraft artifact encoding: ${artifact.contentEncoding}`)
+}
+
+export function recoverAircraftArtifactObservations(artifacts = [], trackedAircraft = []) {
+  const identities = trackedAircraftIdentityMap(trackedAircraft)
+  const provisional = []
+  const failedArtifacts = []
+
+  for (const artifact of artifacts) {
+    const provider = liveProviderForArtifact(artifact)
+    if (!provider || !Number.isFinite(Date.parse(artifact.capturedAt))) {
+      failedArtifacts.push({ artifactKey: artifact.artifactKey, error: 'Unknown provider or capture time' })
+      continue
+    }
+    try {
+      const payload = JSON.parse(artifactText(artifact))
+      provisional.push(...normalizeAircraft(
+        payload,
+        provider,
+        Date.parse(artifact.capturedAt),
+        identities,
+        { includeCandidates: true },
+      ))
+    } catch (error) {
+      failedArtifacts.push({
+        artifactKey: artifact.artifactKey,
+        error: String(error?.message || error).slice(0, 300),
+      })
+    }
+  }
+
+  const observations = promoteIncidentAircraftCandidates(provisional)
+    .filter((observation) => observation.observedAt >= FLIGHT_HISTORY_START)
+  const provisionalCandidates = provisional.filter((observation) => (
+    observation.selectionBasis === 'incident-area-candidate'
+  ))
+  const promotedIcao24s = new Set(observations
+    .filter((observation) => observation.selectionBasis.startsWith('incident-'))
+    .map((observation) => observation.icao24))
+  const provisionalIcao24s = new Set(provisionalCandidates.map((observation) => observation.icao24))
+
+  return {
+    observations,
+    provisionalObservationCount: provisional.length,
+    provisionalCandidateCount: provisionalCandidates.length,
+    provisionalCandidateAircraftCount: provisionalIcao24s.size,
+    promotedCandidateAircraftCount: [...promotedIcao24s]
+      .filter((icao24) => provisionalIcao24s.has(icao24)).length,
+    rejectedCandidateAircraftCount: [...provisionalIcao24s]
+      .filter((icao24) => !promotedIcao24s.has(icao24)).length,
+    failedArtifacts,
+  }
+}
+
+export function trackedAircraftFromObservations(observations = [], {
+  includeConfigured = true,
+  observedAfter = null,
+} = {}) {
+  const observedAfterMs = observedAfter == null ? null : Date.parse(observedAfter)
   const tracked = new Map(
-    [...INCIDENT_AIRCRAFT].map(([icao24, identity]) => [icao24, {
+    (includeConfigured ? [...INCIDENT_AIRCRAFT] : []).map(([icao24, identity]) => [icao24, {
       icao24,
       ...identity,
       selectionBasis: 'verified-icao24',
     }]),
   )
   for (const observation of observations || []) {
+    if (Number.isFinite(observedAfterMs)
+      && Date.parse(observation?.observedAt) < observedAfterMs) continue
     const icao24 = String(observation?.icao24 || '').trim().toLowerCase()
     if (!/^[0-9a-f]{6}$/.test(icao24)) continue
     const existing = tracked.get(icao24) || { icao24 }

@@ -39,7 +39,15 @@ export const INCIDENT_CALLSIGN_PATTERNS = [/^GRZLY\d{1,3}$/i]
 export const INCIDENT_RADIUS_KM = 10
 export const AIRCRAFT_DISCOVERY_RADIUS_NM = 10
 export const LIVE_REFRESH_SECONDS = 5 * 60
+export const INCIDENT_CANDIDATE_MAX_ALTITUDE_FT = 8_500
+export const INCIDENT_CANDIDATE_MAX_SPEED_KT = 250
+export const INCIDENT_CANDIDATE_MAX_POSITION_AGE_SECONDS = 120
+export const INCIDENT_CANDIDATE_SESSION_GAP_MS = 30 * 60 * 1_000
 const INCIDENT_POINT_PATH = `point/${INCIDENT.latitude}/${INCIDENT.longitude}/${AIRCRAFT_DISCOVERY_RADIUS_NM}`
+
+const FIRE_RESPONSE_AIRCRAFT_TYPE_PATTERN = /^(?:AT8T|AT8|CL2T|CL21|CL215|CL41|CL415|H47|CH47)$/iu
+const FIRE_RESPONSE_DESCRIPTION_PATTERN = /air\s*tractor|fire\s*boss|water\s*bomb|firefight|helicopter|helicopt[eè]re|hubschrauber|chinook|super\s*puma|cougar/iu
+const ROTORCRAFT_TYPE_PATTERN = /^(?:H47|CH47|EC\d{2}|H\d{3}|AS\d{2}|S\d{2}|UH\d{2}|NH90|BK17)$/iu
 
 export const LIVE_AIRCRAFT_PROVIDERS = [
   {
@@ -156,6 +164,7 @@ async function fetchAircraftProvider(provider) {
 }
 
 function finiteNumber(value) {
+  if (value == null || value === '') return null
   const number = Number(value)
   return Number.isFinite(number) ? number : null
 }
@@ -192,7 +201,48 @@ export function trackedAircraftIdentityMap(trackedAircraft = []) {
   return identities
 }
 
-export function resolveIncidentAircraft(aircraft, identities = INCIDENT_AIRCRAFT) {
+function aircraftDisplayType(aircraft) {
+  const category = cleanText(aircraft?.category)?.toUpperCase()
+  const aircraftType = cleanText(aircraft?.t || aircraft?.aircraftType)
+  const description = cleanText(aircraft?.desc || aircraft?.aircraftDescription)
+  return category === 'A7'
+    || ROTORCRAFT_TYPE_PATTERN.test(aircraftType || '')
+    || /helicopter|helicopt[eè]re|hubschrauber|rotorcraft|chinook|super\s*puma|cougar/iu.test(description || '')
+    ? 'helicopter'
+    : 'plane'
+}
+
+function candidateEvidence(aircraft) {
+  const category = cleanText(aircraft?.category)?.toUpperCase()
+  const aircraftType = cleanText(aircraft?.t || aircraft?.aircraftType)
+  const description = cleanText(aircraft?.desc || aircraft?.aircraftDescription)
+  const dbFlags = finiteNumber(aircraft?.dbFlags)
+  return [
+    category === 'A7' ? 'rotorcraft-category' : null,
+    FIRE_RESPONSE_AIRCRAFT_TYPE_PATTERN.test(aircraftType || '') ? 'fire-response-type' : null,
+    FIRE_RESPONSE_DESCRIPTION_PATTERN.test(description || '') ? 'response-description' : null,
+    dbFlags != null && (dbFlags & 1) === 1 ? 'military-database-flag' : null,
+  ].filter(Boolean)
+}
+
+function plausibleIncidentCandidate(aircraft, distanceDrossartKm) {
+  if (!Number.isFinite(distanceDrossartKm) || distanceDrossartKm > INCIDENT_RADIUS_KM) return false
+  const seenPositionSeconds = Math.max(0, finiteNumber(aircraft?.seen_pos) ?? finiteNumber(aircraft?.seen) ?? 0)
+  if (seenPositionSeconds > INCIDENT_CANDIDATE_MAX_POSITION_AGE_SECONDS) return false
+  const altitudeFt = aircraft?.alt_baro === 'ground'
+    ? 0
+    : finiteNumber(aircraft?.alt_baro) ?? finiteNumber(aircraft?.alt_geom)
+  if (altitudeFt != null && altitudeFt > INCIDENT_CANDIDATE_MAX_ALTITUDE_FT) return false
+  const groundSpeedKt = finiteNumber(aircraft?.gs)
+  if (groundSpeedKt != null && groundSpeedKt > INCIDENT_CANDIDATE_MAX_SPEED_KT) return false
+  return true
+}
+
+export function resolveIncidentAircraft(
+  aircraft,
+  identities = INCIDENT_AIRCRAFT,
+  { allowCandidate = false } = {},
+) {
   const icao24 = cleanText(aircraft?.hex || aircraft?.icao24)?.toLowerCase()
   if (!icao24 || !/^[0-9a-f]{6}$/.test(icao24)) return null
   const callSign = cleanText(aircraft.flight || aircraft.callsign || aircraft.callSign)
@@ -210,7 +260,20 @@ export function resolveIncidentAircraft(aircraft, identities = INCIDENT_AIRCRAFT
       selectionBasis: known.selectionBasis || 'verified-icao24',
     }
   }
-  if (!callSign || !INCIDENT_CALLSIGN_PATTERNS.some((pattern) => pattern.test(callSign))) return null
+  if (!callSign || !INCIDENT_CALLSIGN_PATTERNS.some((pattern) => pattern.test(callSign))) {
+    if (!allowCandidate) return null
+    const aircraftType = cleanText(aircraft.t || aircraft.aircraftType)
+    return {
+      icao24,
+      callSign: callSign || cleanText(aircraft.r || aircraft.registration) || icao24.toUpperCase(),
+      registration: cleanText(aircraft.r || aircraft.registration),
+      aircraftType,
+      aircraftDescription: cleanText(aircraft.desc || aircraft.aircraftDescription),
+      displayType: aircraftDisplayType(aircraft),
+      selectionBasis: 'incident-area-candidate',
+      candidateEvidence: candidateEvidence(aircraft),
+    }
+  }
   const aircraftType = cleanText(aircraft.t || aircraft.aircraftType)
   return {
     icao24,
@@ -223,7 +286,13 @@ export function resolveIncidentAircraft(aircraft, identities = INCIDENT_AIRCRAFT
   }
 }
 
-export function normalizeAircraft(payload, provider, requestedAtMs, identities = INCIDENT_AIRCRAFT) {
+export function normalizeAircraft(
+  payload,
+  provider,
+  requestedAtMs,
+  identities = INCIDENT_AIRCRAFT,
+  { includeCandidates = false } = {},
+) {
   // These providers publish the epoch represented by `seen_pos`. Using it keeps
   // an observation's timestamp stable when two consecutive imports receive the
   // same fix; falling back to our request time preserves compatibility with
@@ -234,7 +303,7 @@ export function normalizeAircraft(payload, provider, requestedAtMs, identities =
     : (payloadTimestampMs > 10_000_000_000 ? payloadTimestampMs : payloadTimestampMs * 1_000)
 
   return (payload?.ac || payload?.aircraft || []).flatMap((aircraft) => {
-    const identity = resolveIncidentAircraft(aircraft, identities)
+    const identity = resolveIncidentAircraft(aircraft, identities, { allowCandidate: includeCandidates })
     if (!identity) return []
     const { icao24 } = identity
 
@@ -244,6 +313,8 @@ export function normalizeAircraft(payload, provider, requestedAtMs, identities =
     const distanceDrossartKm = haversineKm(latitude, longitude)
     // This also rejects the known false MLAT cluster near Aachen/Walheim.
     if (distanceDrossartKm > INCIDENT_RADIUS_KM) return []
+    if (identity.selectionBasis === 'incident-area-candidate'
+      && !plausibleIncidentCandidate(aircraft, distanceDrossartKm)) return []
 
     const seenPositionSeconds = Math.max(0, finiteNumber(aircraft.seen_pos) ?? finiteNumber(aircraft.seen) ?? 0)
     const altitudeValue = aircraft.alt_baro === 'ground'
@@ -258,6 +329,7 @@ export function normalizeAircraft(payload, provider, requestedAtMs, identities =
       aircraftDescription: identity.aircraftDescription,
       displayType: identity.displayType,
       selectionBasis: identity.selectionBasis,
+      candidateEvidence: identity.candidateEvidence || [],
       observedAt: new Date(referenceTimestampMs - seenPositionSeconds * 1_000).toISOString(),
       latitude,
       longitude,
@@ -271,6 +343,66 @@ export function normalizeAircraft(payload, provider, requestedAtMs, identities =
       providerName: provider.name,
       providerUrl: provider.website,
     }]
+  })
+}
+
+function candidateSupportBasis(observations) {
+  const evidence = new Set(observations.flatMap((observation) => observation.candidateEvidence || []))
+  if (evidence.size) return 'incident-response-type'
+
+  const providers = new Set(observations.map((observation) => observation.providerId).filter(Boolean))
+  if (providers.size >= 2) return 'incident-area-corroborated'
+
+  const buckets = new Set(observations.map((observation) => (
+    Math.floor(Date.parse(observation.observedAt) / (5 * 60 * 1_000))
+  )))
+  if (buckets.size >= 2) return 'incident-area-repeated'
+  return null
+}
+
+export function promoteIncidentAircraftCandidates(observations = []) {
+  const byAircraft = new Map()
+  for (const observation of observations) {
+    const rows = byAircraft.get(observation.icao24) || []
+    rows.push(observation)
+    byAircraft.set(observation.icao24, rows)
+  }
+
+  return [...byAircraft.values()].flatMap((rows) => {
+    const identified = rows.find((row) => row.selectionBasis !== 'incident-area-candidate')
+    if (identified) {
+      return rows.map((row) => row.selectionBasis !== 'incident-area-candidate' ? row : ({
+        ...row,
+        callSign: identified.callSign || row.callSign,
+        registration: identified.registration || row.registration,
+        aircraftType: identified.aircraftType || row.aircraftType,
+        aircraftDescription: identified.aircraftDescription || row.aircraftDescription,
+        displayType: identified.displayType || row.displayType,
+        selectionBasis: identified.selectionBasis,
+      }))
+    }
+
+    const sessions = []
+    rows.slice()
+      .sort((left, right) => Date.parse(left.observedAt) - Date.parse(right.observedAt))
+      .forEach((row) => {
+        const current = sessions.at(-1)
+        const currentLastMs = Date.parse(current?.at(-1)?.observedAt)
+        const rowMs = Date.parse(row.observedAt)
+        if (!current || !Number.isFinite(rowMs) || !Number.isFinite(currentLastMs)
+          || rowMs - currentLastMs > INCIDENT_CANDIDATE_SESSION_GAP_MS) {
+          sessions.push([row])
+        } else {
+          current.push(row)
+        }
+      })
+
+    return sessions.flatMap((session) => {
+      const selectionBasis = candidateSupportBasis(session)
+      if (!selectionBasis) return []
+      const evidence = [...new Set(session.flatMap((item) => item.candidateEvidence || []))]
+      return session.map((row) => ({ ...row, selectionBasis, candidateEvidence: evidence }))
+    })
   })
 }
 
@@ -314,7 +446,13 @@ export async function loadAircraft(
     }
     const rows = result.payload?.ac || result.payload?.aircraft || []
     const targetRows = rows.filter((aircraft) => resolveIncidentAircraft(aircraft, identities))
-    const normalized = normalizeAircraft(result.payload, provider, requestedAtMs, identities)
+    const normalized = normalizeAircraft(
+      result.payload,
+      provider,
+      requestedAtMs,
+      identities,
+      { includeCandidates: true },
+    )
     sourceStatus.push({
       id: provider.id,
       name: provider.name,
@@ -324,10 +462,12 @@ export async function loadAircraft(
       statusCode: result.statusCode,
       aircraftCount: rows.length,
       targetCount: targetRows.length,
+      candidateCount: normalized.filter((aircraft) => aircraft.selectionBasis === 'incident-area-candidate').length,
       targetWithPositionCount: targetRows.filter((aircraft) => (
         finiteNumber(aircraft.lat) != null && finiteNumber(aircraft.lon) != null
       )).length,
-      acceptedObservationCount: normalized.length,
+      acceptedObservationCount: 0,
+      candidateIcao24s: normalized.map((aircraft) => aircraft.icao24),
     })
     normalized.forEach((aircraft) => {
       const candidates = candidatesByHex.get(aircraft.icao24) || []
@@ -340,9 +480,17 @@ export async function loadAircraft(
     throw new Error('All live ADS-B providers failed')
   }
 
+  const promotedCandidates = promoteIncidentAircraftCandidates([...candidatesByHex.values()].flat())
+  const promotedByHex = new Map()
+  promotedCandidates.forEach((candidate) => {
+    const rows = promotedByHex.get(candidate.icao24) || []
+    rows.push(candidate)
+    promotedByHex.set(candidate.icao24, rows)
+  })
+
   const observations = []
   const conflicts = []
-  candidatesByHex.forEach((candidates, icao24) => {
+  promotedByHex.forEach((candidates, icao24) => {
     candidates.sort((left, right) => left.seenPositionSeconds - right.seenPositionSeconds)
     const selected = candidates[0]
     const corroborating = candidates.slice(1)
@@ -366,10 +514,16 @@ export async function loadAircraft(
     })
   })
 
+  const acceptedHexes = new Set(observations.map((observation) => observation.icao24))
+  const publicSources = sourceStatus.map(({ candidateIcao24s = [], ...source }) => ({
+    ...source,
+    acceptedObservationCount: new Set(candidateIcao24s.filter((icao24) => acceptedHexes.has(icao24))).size,
+  }))
+
   return {
     observations,
     conflicts,
-    sources: sourceStatus,
+    sources: publicSources,
     ...(includeRaw
       ? {
           rawResponses: results.filter((result) => result.polled).map((result) => ({

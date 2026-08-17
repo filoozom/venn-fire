@@ -41,6 +41,7 @@ function compactAircraft(payload) {
     'aircraftDescription',
     'displayType',
     'selectionBasis',
+    'candidateEvidence',
   ])
   return {
     ...payload,
