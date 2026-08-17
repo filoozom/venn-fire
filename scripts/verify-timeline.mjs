@@ -19,6 +19,9 @@ await shellPage.route('**/api/data**', async (route) => {
   await new Promise((resolve) => setTimeout(resolve, 1_500))
   await route.fulfill({ response: upstream })
 })
+const shellAircraftHydrated = shellPage.waitForResponse((response) => (
+  new URL(response.url()).searchParams.get('scope') === 'aircraft' && response.ok()
+))
 await shellPage.goto(testUrl, { waitUntil: 'domcontentloaded' })
 await shellPage.waitForSelector('.app-shell--hydrating')
 const asyncShell = await shellPage.evaluate(() => ({
@@ -48,6 +51,7 @@ if (mobileAsyncShell.bodyWidth !== mobileAsyncShell.viewportWidth
 }
 await shellPage.screenshot({ path: '/tmp/fire-async-shell-mobile.png', fullPage: true })
 await shellPage.waitForSelector('.timeline-range')
+await shellAircraftHydrated
 await shellPage.close()
 
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
@@ -225,6 +229,9 @@ await livePage.route('**/api/data**', async (route) => {
   }
   await route.fulfill({ response: upstream, json: payload })
 })
+const liveAircraftHydrated = livePage.waitForResponse((response) => (
+  new URL(response.url()).searchParams.get('scope') === 'aircraft' && response.ok()
+))
 await livePage.goto(testUrl, { waitUntil: 'domcontentloaded' })
 await livePage.waitForFunction(() => (
   document.querySelector('.snapshot-card--fire strong')?.textContent.replace(/\s+/gu, '') === '>1,600ha'
@@ -241,8 +248,22 @@ if (!databaseReportUpdate.latestFrame.includes('15:10')) {
 if (databaseReportUpdate.logEntries !== 1) {
   throw new Error(`Database report reached the card but not exactly one log entry: ${JSON.stringify(databaseReportUpdate)}`)
 }
+await liveAircraftHydrated
 if (liveErrors.length) throw new Error(`Live-report browser errors: ${liveErrors.join(' | ')}`)
 if (errors.length) throw new Error(`Browser errors: ${errors.join(' | ')}`)
 
-console.log(JSON.stringify({ asyncShell, mobileAsyncShell, states, aircraftEdgeTimeline: { edgeBeforeRepeat, edgeAfterRepeat, edgeNoteAfterRepeat }, modisExtentTimeline: { modisBeforeTerra, modisAfterTerra, areaBeforeTerra, areaAfterTerra, estimateMethodKey }, bundledLatestAreaLogEntries, effisOn14August, effisOn15August, unrelatedTrafficControls, officialSourceLinks, chartBounds, databaseReportUpdate }, null, 2))
+console.log(JSON.stringify({
+  asyncShell,
+  mobileAsyncShell,
+  states,
+  aircraftEdgeTimeline: { edgeNoteBeforeRepeat, edgeAfterRepeat, edgeNoteAfterRepeat },
+  modisExtentTimeline: { modisBeforeTerra, modisAfterTerra, areaBeforeTerra, areaAfterTerra, estimateMethodKey },
+  bundledLatestAreaLogEntries,
+  effisOn14August,
+  effisOn15August,
+  unrelatedTrafficControls,
+  synchronizedSourceLinks,
+  chartBounds,
+  databaseReportUpdate,
+}, null, 2))
 await browser.close()
