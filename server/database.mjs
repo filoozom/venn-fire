@@ -361,6 +361,27 @@ export async function failSourceRefresh({ sourceKey, bucketAt, error }, query = 
   `, [sourceKey, bucketAt, message])
 }
 
+// One-time production migration. Remove after it has run on the active
+// deployment; these keys never contained incident observations.
+export async function removeRetiredPlaceholderState(query = databaseQuery()) {
+  const keys = ['road-events', 'official-perimeter', 'public-operations']
+  await ensureDatabaseSchema(query)
+  const [datasets, versions, publicDatasets, runs, artifacts] = await Promise.all([
+    query('DELETE FROM app_datasets WHERE dataset_key = ANY($1::text[]) RETURNING dataset_key', [keys]),
+    query('DELETE FROM app_dataset_versions WHERE dataset_key = ANY($1::text[]) RETURNING dataset_key', [keys]),
+    query('DELETE FROM app_public_datasets WHERE dataset_key = ANY($1::text[]) RETURNING dataset_key', [keys]),
+    query('DELETE FROM source_refresh_runs WHERE source_key = ANY($1::text[]) RETURNING source_key', [keys]),
+    query('DELETE FROM source_artifacts WHERE source_key = ANY($1::text[]) RETURNING source_key', [keys]),
+  ])
+  return {
+    datasets: datasets.length,
+    versions: versions.length,
+    publicDatasets: publicDatasets.length,
+    runs: runs.length,
+    artifacts: artifacts.length,
+  }
+}
+
 export async function saveArtifact({
   artifactKey,
   sourceKey,
