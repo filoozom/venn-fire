@@ -11,6 +11,7 @@ import {
 } from '../api/live-situation.js'
 import { loadDataset, saveDataset } from './database.mjs'
 import { FLIGHT_HISTORY_START, persistFlightObservations } from './flight-history.mjs'
+import { isExcludedIncidentAircraft } from './aircraft-policy.mjs'
 import { archiveProviderResponses } from './source-artifacts.mjs'
 
 export const LEGACY_FLIGHT_MIGRATION_KEY = 'migration-aircraft-history-a80aa9a'
@@ -19,6 +20,7 @@ export const AIRCRAFT_ARTIFACT_RECOVERY_KEY = 'aircraft-artifact-recovery'
 export const AIRCRAFT_ARTIFACT_OVERLAP_MS = 2 * 60 * 60 * 1_000
 export const AIRCRAFT_ARTIFACT_BACKFILL_WINDOW_MS = 6 * 60 * 60 * 1_000
 export const AIRCRAFT_ARTIFACT_BACKFILL_OVERLAP_MS = 15 * 60 * 1_000
+export const AIRCRAFT_ROUTE_SESSION_GAP_MS = 60 * 60 * 1_000
 
 export const CURRENT_AIRCRAFT_TRACE_PROVIDERS = [
   {
@@ -121,17 +123,20 @@ export function trackedAircraftFromObservations(observations = [], {
 } = {}) {
   const observedAfterMs = observedAfter == null ? null : Date.parse(observedAfter)
   const tracked = new Map(
-    (includeConfigured ? [...INCIDENT_AIRCRAFT] : []).map(([icao24, identity]) => [icao24, {
+    (includeConfigured ? [...INCIDENT_AIRCRAFT] : [])
+      .filter(([icao24]) => !isExcludedIncidentAircraft(icao24))
+      .map(([icao24, identity]) => [icao24, {
       icao24,
       ...identity,
       selectionBasis: 'verified-icao24',
-    }]),
+      }]),
   )
   for (const observation of observations || []) {
     if (Number.isFinite(observedAfterMs)
       && Date.parse(observation?.observedAt) < observedAfterMs) continue
     const icao24 = String(observation?.icao24 || '').trim().toLowerCase()
     if (!/^[0-9a-f]{6}$/.test(icao24)) continue
+    if (isExcludedIncidentAircraft(icao24)) continue
     const existing = tracked.get(icao24) || { icao24 }
     tracked.set(icao24, {
       ...existing,
@@ -150,6 +155,7 @@ export function trackedAircraftFromObservations(observations = [], {
 
 export function normalizeAircraftTrace(payload, aircraft, provider) {
   const icao24 = String(aircraft?.icao24 || '').toLowerCase()
+  if (isExcludedIncidentAircraft(icao24)) return []
   const configuredIdentity = INCIDENT_AIRCRAFT.get(icao24)
   const identity = configuredIdentity || (aircraft?.selectionBasis ? aircraft : null)
   const baseTimestamp = finiteNumber(payload?.timestamp)
@@ -157,7 +163,7 @@ export function normalizeAircraftTrace(payload, aircraft, provider) {
   const baseTimestampMs = baseTimestamp * 1_000
 
   const seen = new Set()
-  return (Array.isArray(payload.trace) ? payload.trace : []).flatMap((row) => {
+  const observations = (Array.isArray(payload.trace) ? payload.trace : []).flatMap((row) => {
     if (!Array.isArray(row)) return []
     const offsetSeconds = finiteNumber(row[0])
     const latitude = finiteNumber(row[1])
@@ -166,7 +172,6 @@ export function normalizeAircraftTrace(payload, aircraft, provider) {
     const observedAt = new Date(baseTimestampMs + offsetSeconds * 1_000).toISOString()
     if (observedAt < FLIGHT_HISTORY_START) return []
     const distanceDrossartKm = incidentDistanceKm(latitude, longitude)
-    if (distanceDrossartKm > INCIDENT_RADIUS_KM) return []
     const key = `${observedAt}|${latitude}|${longitude}`
     if (seen.has(key)) return []
     seen.add(key)
@@ -192,6 +197,7 @@ export function normalizeAircraftTrace(payload, aircraft, provider) {
       groundSpeedKt: finiteNumber(row[4]),
       trackDegrees: finiteNumber(row[5]),
       distanceDrossartKm,
+      routeScope: distanceDrossartKm <= INCIDENT_RADIUS_KM ? 'incident-area' : 'full-route',
       updateType: `${provider.name} ${traceType} observation`,
       providerId: provider.id,
       providerName: provider.name,
@@ -199,6 +205,29 @@ export function normalizeAircraftTrace(payload, aircraft, provider) {
       corroboratedBy: [],
     }]
   })
+
+  // Daily trace files can contain multiple unrelated flights by one airframe.
+  // Keep every complete available session that actually enters the incident
+  // area, including its approach and departure, but not a separate session
+  // elsewhere that day. A one-hour receiver gap is a conservative boundary;
+  // shorter coverage gaps remain connected and are still broken visually by
+  // the map's stricter two-minute connector rule.
+  const sessions = []
+  observations
+    .sort((left, right) => Date.parse(left.observedAt) - Date.parse(right.observedAt))
+    .forEach((observation) => {
+      const session = sessions.at(-1)
+      const previous = session?.at(-1)
+      if (!previous
+        || Date.parse(observation.observedAt) - Date.parse(previous.observedAt) > AIRCRAFT_ROUTE_SESSION_GAP_MS) {
+        sessions.push([observation])
+      } else {
+        session.push(observation)
+      }
+    })
+  return sessions.flatMap((session) => (
+    session.some((observation) => observation.routeScope === 'incident-area') ? session : []
+  ))
 }
 
 async function fetchTrace(provider, aircraft, date) {
@@ -292,6 +321,7 @@ export function normalizeLegacyFlightSnapshot(snapshot) {
         groundSpeedKt: null,
         trackDegrees: null,
         distanceDrossartKm,
+        routeScope: 'incident-area',
         updateType: `${source.name} ${source.product} observation`,
         providerId: source.id,
         providerName: source.name,

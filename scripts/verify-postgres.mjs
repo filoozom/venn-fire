@@ -75,6 +75,7 @@ const publicAircraft = publicDatasetPayload('aircraft', {
     longitude: 6.06,
     altitudeFt: 2_100,
     updateType: 'receiver observation',
+    routeScope: 'full-route',
     providerUrl: 'https://adsb.lol/',
     providerName: 'repeated metadata',
     sourceData: { large: true },
@@ -83,6 +84,19 @@ const publicAircraft = publicDatasetPayload('aircraft', {
 assert.equal(publicAircraft.observations[0].providerName, undefined)
 assert.equal(publicAircraft.observations[0].sourceData, undefined)
 assert.equal(publicAircraft.observations[0].callSign, 'GRZLY81')
+assert.equal(publicAircraft.observations[0].routeScope, 'full-route')
+
+const aircraftWithoutOovst = publicDatasetPayload('aircraft', {
+  observations: [{
+    icao24: '44da74',
+    callSign: 'OOVST',
+    observedAt: '2026-08-16T12:00:00.000Z',
+    latitude: 50.55,
+    longitude: 6.06,
+  }],
+  latestObservations: [],
+})
+assert.equal(aircraftWithoutOovst.observations.length, 0)
 
 const publicFirms = publicDatasetPayload('firms', {
   sensors: [],

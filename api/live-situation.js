@@ -1,4 +1,5 @@
 import { databaseOverview, loadPublicDatasets, setNoStoreHeaders } from '../server/database.mjs'
+import { isExcludedIncidentAircraft } from '../server/aircraft-policy.mjs'
 
 export const INCIDENT = { latitude: 50.54762, longitude: 6.05757 }
 export const INCIDENT_AIRCRAFT = new Map([
@@ -245,6 +246,10 @@ export function resolveIncidentAircraft(
 ) {
   const icao24 = cleanText(aircraft?.hex || aircraft?.icao24)?.toLowerCase()
   if (!icao24 || !/^[0-9a-f]{6}$/.test(icao24)) return null
+  // Exact reviewed exclusions override both automatic proximity promotion and
+  // identities retained by an earlier dataset version. Raw poll artifacts stay
+  // in Postgres for audit; they are simply not presented as incident aircraft.
+  if (isExcludedIncidentAircraft(icao24)) return null
   const callSign = cleanText(aircraft.flight || aircraft.callsign || aircraft.callSign)
   const known = identities.get(icao24)
   if (known) {
@@ -338,6 +343,7 @@ export function normalizeAircraft(
       trackDegrees: finiteNumber(aircraft.track),
       seenPositionSeconds,
       distanceDrossartKm,
+      routeScope: 'incident-area',
       updateType: `${provider.name} live receiver observation`,
       providerId: provider.id,
       providerName: provider.name,

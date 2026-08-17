@@ -252,6 +252,12 @@ await liveAircraftHydrated
 if (liveErrors.length) throw new Error(`Live-report browser errors: ${liveErrors.join(' | ')}`)
 if (errors.length) throw new Error(`Browser errors: ${errors.join(' | ')}`)
 
+// The viewer refreshes uncached scopes asynchronously. Let any in-flight route
+// callbacks settle before disposing Playwright's request context, otherwise a
+// healthy slow database response can turn teardown into a false failure.
+await livePage.unrouteAll({ behavior: 'wait' })
+await page.unrouteAll({ behavior: 'wait' })
+
 console.log(JSON.stringify({
   asyncShell,
   mobileAsyncShell,

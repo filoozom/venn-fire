@@ -143,12 +143,14 @@ const catchup = observation('480849', '2026-08-15T12:06:00.000Z', 50.551, 6.061,
   selectionBasis: 'verified-icao24',
   providerId: 'adsb-lol-current-trace',
   providerName: 'ADSB.lol current trace',
+  routeScope: 'full-route',
 })
 const catchupImport = await persistFlightObservations({ observations: [catchup] }, options)
 assert.equal(catchupImport.persistedObservations, 1)
 assert.equal(catchupImport.observations.length, 3)
 assert.equal(catchupImport.observations.at(-1).aircraftType, 'H47')
 assert.equal(catchupImport.observations.at(-1).selectionBasis, 'verified-icao24')
+assert.equal(catchupImport.observations.at(-1).routeScope, 'full-route')
 assert.equal(database.state.runs.size, 1, 'trace catch-up must not overwrite the live five-minute poll audit row')
 
 console.log('Verified: Postgres flight history is durable, bucketed and idempotent.')

@@ -1,6 +1,6 @@
 export const FIVE_MINUTES_MS = 5 * 60 * 1000
 export const AIRCRAFT_PATH_MAX_GAP_MS = 2 * 60 * 1000
-export const AIRCRAFT_PATH_MAX_SPEED_KT = 160
+export const AIRCRAFT_PATH_MAX_SPEED_KT = 300
 
 const RECEIVER_FLIGHT_COLORS = ['#d35400', '#008c7a', '#b23a6f', '#7b5fc0', '#2d6f93', '#9b6b13']
 
@@ -54,6 +54,8 @@ function receiverObservation(observation) {
     timestampMs,
     position: [Number(observation.latitude), Number(observation.longitude)],
     altitudeFt: observation.altitudeFt,
+    trackDegrees: observation.trackDegrees,
+    routeScope: observation.routeScope || null,
     updateType: observation.updateType,
     sourceUrl: observation.providerUrl,
   }
@@ -141,12 +143,12 @@ export function mergeIncidentFlights(configuredFlights = [], aircraftObservation
         source: 'Database-retained ADS-B/MLAT observations',
         sourceUrl: `https://adsb.lol/?icao=${icao24}`,
         status: latest.selectionBasis === 'incident-callsign'
-          ? 'Selected by an incident GRZLY callsign and exact receiver fixes inside 10 km; operational purpose is not inferred'
+          ? 'Selected by an incident GRZLY callsign after entering the 10 km incident area; its complete available incident-connected route sessions are retained, but operational purpose is not inferred'
           : String(latest.selectionBasis || '').startsWith('incident-area-')
               || latest.selectionBasis === 'incident-response-type'
-            ? 'Plausible low-altitude incident-area response candidate supported by aircraft type, repeated fixes or multiple providers; operational role is not independently verified'
-            : 'Verified incident aircraft with exact receiver fixes retained inside 10 km',
-        pathMethod: 'Dashed straight connectors: ≤2 min gap and ≤160 kt implied speed',
+            ? 'Plausible low-altitude incident-area response candidate supported by aircraft type, repeated fixes or multiple providers; its complete available incident-connected route sessions are retained, but operational role is not independently verified'
+            : 'Verified incident aircraft after entering the 10 km incident area; its complete available incident-connected route sessions are retained',
+        pathMethod: 'Dashed exact-fix connectors: ≤2 min gap and ≤300 kt implied speed',
         observations,
         coverageWindows: receiverCoverageWindows(observations),
         evidenceObservations: [],
@@ -422,6 +424,9 @@ function normalizeTimelineEvent(event, timelineStartMs, frameCount) {
 export function aircraftObservationEvents(observations, timelineStartMs, frameCount) {
   const groups = new Map()
   for (const observation of observations || []) {
+    // Full-route rows explain where a qualified aircraft came from and went;
+    // only the incident-area rows establish the incident timeline event.
+    if (observation?.routeScope === 'full-route') continue
     const timestampMs = Date.parse(observation?.observedAt)
     const icao24 = String(observation?.icao24 || '').trim().toLowerCase()
     if (!Number.isFinite(timestampMs) || !/^[0-9a-f]{6}$/u.test(icao24)) continue
@@ -537,7 +542,7 @@ export function runtimeDataFromResponse(response) {
   const officialPerimeter = optionalPayload(datasets, 'official-perimeter', { current: null, snapshots: [] })
   const sentinel2 = optionalPayload(datasets, 'sentinel2', { scenes: [] })
   const ems = optionalPayload(datasets, 'ems', { activations: [], matches: [] })
-  const sourceRegistry = optionalPayload(datasets, 'source-registry', { sources: [], coverageGaps: [] })
+  const sourceRegistry = optionalPayload(datasets, 'source-registry', { sources: [] })
   const timelineStartMs = Number(incident.timelineStartMs)
   if (!Number.isFinite(timelineStartMs)) throw new Error('Database incident timeline start is invalid')
   const generatedAtMs = Date.parse(response.generatedAt)

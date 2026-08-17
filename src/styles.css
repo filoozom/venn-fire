@@ -989,6 +989,22 @@ button {
   transform-origin: center;
 }
 
+.aircraft-map-marker > b {
+  position: absolute;
+  top: 7px;
+  left: 36px;
+  padding: 2px 4px;
+  color: #24483c;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(62, 91, 80, 0.22);
+  border-radius: 4px;
+  box-shadow: 0 2px 6px rgba(30, 48, 42, 0.16);
+  font-size: 9px;
+  font-weight: 850;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .photo-evidence-marker {
   background: transparent;
   border: 0;
@@ -2020,6 +2036,17 @@ button {
   cursor: pointer;
 }
 
+.air-ops-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.air-ops-summary button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .flight-list {
   display: flex;
   flex-direction: column;
@@ -2124,6 +2151,26 @@ button {
   margin-top: 9px;
   color: #937241;
   font-size: 9px;
+}
+
+.flight-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 9px;
+}
+
+.flight-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 7px;
+  color: #315b4c;
+  background: #f2f7f4;
+  border: 1px solid #dce7e0;
+  border-radius: 5px;
+  font-size: 9px;
+  font-weight: 750;
+  cursor: pointer;
 }
 
 .coverage-note {
@@ -2638,18 +2685,6 @@ button.connection-card--upload {
 .directory-row--inactive:hover {
   border-color: #e4e8e5;
   transform: none;
-}
-
-.directory-row--gap {
-  background: #fffaf2;
-  border-color: #eee1ca;
-}
-
-.directory-row--gap em {
-  max-width: 140px;
-  color: #916e3d;
-  text-align: right;
-  white-space: normal;
 }
 
 .directory-row > span:nth-child(2) {

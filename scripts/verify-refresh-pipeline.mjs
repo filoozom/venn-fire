@@ -11,6 +11,7 @@ import {
   LIVE_AIRCRAFT_PROVIDERS,
   normalizeAircraft,
   promoteIncidentAircraftCandidates,
+  resolveIncidentAircraft,
 } from '../api/live-situation.js'
 import {
   CURRENT_AIRCRAFT_TRACE_PROVIDERS,
@@ -41,7 +42,12 @@ import {
   parseMunicipalRdfFeed,
   parseHlzNewsList,
 } from '../server/municipal-sources.mjs'
-import { firmsDetectionKey, REFRESH_SOURCES } from '../server/refresh-sources.mjs'
+import {
+  completedUtcDatesBeforeToday,
+  firmsDetectionKey,
+  REFRESH_SOURCES,
+  routeRecoveryTargets,
+} from '../server/refresh-sources.mjs'
 import { aircraftObservationEvents, buildEvents, mergeIncidentFlights } from '../src/data.js'
 import {
   nextRefreshWakeAt,
@@ -57,6 +63,7 @@ const expectedSources = [
   'aircraft-artifacts',
   'aircraft-traces',
   'aircraft-history',
+  'aircraft-route-history',
   'open-meteo',
   'reports',
   'local-authority-updates',
@@ -138,9 +145,15 @@ assert.deepEqual(REFRESH_SOURCES.map((source) => source.key), expectedSources)
 assert.ok(REFRESH_SOURCES.every((source) => source.intervalMinutes >= 5))
 assert.ok(REFRESH_SOURCES.every((source) => source.intervalMinutes % 5 === 0))
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'aircraft').intervalMinutes, 5)
-assert.equal(REFRESH_SOURCES.find((source) => source.key === 'aircraft-traces').intervalMinutes, 30)
+assert.equal(REFRESH_SOURCES.find((source) => source.key === 'aircraft-traces').intervalMinutes, 5)
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'aircraft-history').intervalMinutes, 360)
+assert.equal(REFRESH_SOURCES.find((source) => source.key === 'aircraft-route-history').intervalMinutes, 5)
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'firms').intervalMinutes, 15)
+assert.deepEqual(completedUtcDatesBeforeToday(Date.parse('2026-08-17T12:00:00.000Z')), [
+  '2026-08-16',
+  '2026-08-15',
+  '2026-08-14',
+])
 assert.equal(LIVE_AIRCRAFT_PROVIDERS.length, 3)
 assert.equal(LIVE_AIRCRAFT_PROVIDERS.at(-1).id, 'airplanes-live')
 assert.equal(LIVE_AIRCRAFT_PROVIDERS.at(-1).intervalMinutes, 60)
@@ -270,6 +283,26 @@ const highAircraft = normalizeAircraft({
 }, provider, Date.parse('2026-08-15T12:05:01Z'), INCIDENT_AIRCRAFT, { includeCandidates: true })
 assert.equal(highAircraft.length, 0, 'high/fast transit traffic must be rejected before candidate promotion')
 
+const excludedOovst = {
+  hex: '44da74',
+  flight: 'OOVST ',
+  r: 'OO-VST',
+  t: 'P06T',
+  desc: 'TECNAM P-2006T',
+  lat: 50.55,
+  lon: 6.06,
+  alt_baro: 2_500,
+  gs: 95,
+}
+assert.equal(resolveIncidentAircraft(excludedOovst, INCIDENT_AIRCRAFT, { allowCandidate: true }), null)
+assert.equal(normalizeAircraft(
+  { now: 1_786_781_100, ac: [excludedOovst] },
+  provider,
+  Date.parse('2026-08-15T12:05:01Z'),
+  INCIDENT_AIRCRAFT,
+  { includeCandidates: true },
+).length, 0, 'reviewed proximity-only OOVST observations must stay out of incident products')
+
 const traceProvider = CURRENT_AIRCRAFT_TRACE_PROVIDERS[0]
 const trace = normalizeAircraftTrace({
   timestamp: Date.parse('2026-08-15T08:00:00.000Z') / 1_000,
@@ -279,9 +312,25 @@ const trace = normalizeAircraftTrace({
     [90, 50.80, 6.50, 2_100, 72, 185, 0, 0, null, 'mlat'],
   ],
 }, { icao24: '44c1e5', callSign: 'G10', registration: 'OO-POE' }, traceProvider)
-assert.equal(trace.length, 2, 'trace catch-up must retain exact in-radius fixes and reject distant MLAT points')
+assert.equal(trace.length, 3, 'a qualifying trace must retain its complete exact provider route')
 assert.equal(trace[0].observedAt, '2026-08-15T08:00:30.000Z')
 assert.equal(trace[0].providerId, 'adsb-lol-current-trace')
+assert.deepEqual(trace.map((row) => row.routeScope), ['incident-area', 'incident-area', 'full-route'])
+assert.equal(normalizeAircraftTrace({
+  timestamp: Date.parse('2026-08-15T08:00:00.000Z') / 1_000,
+  trace: [[30, 50.80, 6.50, 2_100, 72, 185]],
+}, { icao24: '44c1e5', callSign: 'G10', registration: 'OO-POE' }, traceProvider).length, 0,
+'a trace that never entered the incident area must not be attached to the incident')
+const sessionFilteredTrace = normalizeAircraftTrace({
+  timestamp: Date.parse('2026-08-15T08:00:00.000Z') / 1_000,
+  trace: [
+    [30, 50.80, 6.50, 2_100, 72, 185],
+    [3_700, 50.55, 6.06, 2_100, 72, 185],
+    [3_730, 50.56, 6.07, 2_100, 72, 185],
+  ],
+}, { icao24: '44c1e5', callSign: 'G10', registration: 'OO-POE' }, traceProvider)
+assert.equal(sessionFilteredTrace.length, 2, 'a separate same-day route that never entered the incident area must be omitted')
+assert.ok(sessionFilteredTrace.every((row) => row.routeScope === 'incident-area'))
 
 const discoveredTrace = normalizeAircraftTrace({
   timestamp: Date.parse('2026-08-15T16:45:00.000Z') / 1_000,
@@ -326,6 +375,24 @@ const activeTraceTargets = trackedAircraftFromObservations([...discoveredTrace, 
   observedAfter: '2026-08-16T00:00:00.000Z',
 })
 assert.deepEqual(activeTraceTargets.map((aircraft) => aircraft.icao24), ['480440'], 'current trace calls must be limited to recently observed identities')
+assert.equal(trackedAircraftFromObservations([{
+  icao24: '44da74',
+  callSign: 'OOVST',
+  observedAt: '2026-08-16T12:00:00.000Z',
+  selectionBasis: 'incident-area-corroborated',
+}], { includeConfigured: false }).length, 0, 'OOVST must not receive future trace requests')
+assert.deepEqual(routeRecoveryTargets([
+  { ...d479Trace[0], observedAt: '2026-08-16T09:43:59.000Z' },
+  { ...d479Trace[0], observedAt: '2026-08-16T10:00:00.000Z', routeScope: 'full-route' },
+  {
+    icao24: '44da74',
+    callSign: 'OOVST',
+    observedAt: '2026-08-16T12:00:00.000Z',
+    latitude: 50.55,
+    longitude: 6.06,
+    distanceDrossartKm: 1,
+  },
+], '2026-08-16').map((aircraft) => aircraft.icao24), ['480440'])
 
 const displayFlights = mergeIncidentFlights([{ id: 'g10', icao24: '44c1e5', callSign: 'G10', observations: [] }], [
   normalized[0],
@@ -338,6 +405,7 @@ assert.equal(displayFlights.find((flight) => flight.icao24 === '480849').callSig
 const observationEvents = aircraftObservationEvents([
   { ...normalized[0], observedAt: '2026-08-17T08:01:00.000Z' },
   { ...normalized[0], observedAt: '2026-08-17T08:11:00.000Z' },
+  { ...normalized[0], observedAt: '2026-08-17T08:12:00.000Z', routeScope: 'full-route' },
 ], Date.parse('2026-08-14T11:00:00.000Z'), 1_000)
 assert.equal(observationEvents.length, 1, 'aircraft fixes on one local day must produce one lightweight timeline event')
 assert.equal(observationEvents[0].time, '10:01')

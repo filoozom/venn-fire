@@ -2,9 +2,11 @@ import {
   databaseQuery as applicationDatabaseQuery,
   databaseUrl as applicationDatabaseUrl,
 } from './database.mjs'
+import { isExcludedIncidentAircraft } from './aircraft-policy.mjs'
 
 export const FLIGHT_HISTORY_START = '2026-08-14T11:00:00.000Z'
-export const FLIGHT_HISTORY_LIMIT = 50_000
+export const FLIGHT_HISTORY_LIMIT = 100_000
+export const FLIGHT_PUBLIC_SAMPLE_SECONDS = 10
 
 const schemaPromises = new WeakMap()
 
@@ -121,6 +123,7 @@ function storedObservation(row) {
     displayType: sourceData.displayType || null,
     selectionBasis: sourceData.selectionBasis || null,
     candidateEvidence: Array.isArray(sourceData.candidateEvidence) ? sourceData.candidateEvidence : [],
+    routeScope: sourceData.routeScope || null,
     observedAt: isoTimestamp(row.observed_at),
     latitude: Number(row.latitude),
     longitude: Number(row.longitude),
@@ -172,23 +175,38 @@ export async function loadFlightHistory({
   }
   await ensureFlightHistorySchema(query)
   const rows = await query(`
-    SELECT * FROM (
+    WITH sampled_history AS (
+      SELECT
+        icao24, callsign, registration, observed_at, latitude, longitude,
+        altitude_ft, ground_speed_kt, track_degrees, distance_drossart_km,
+        update_type, provider_id, provider_name, provider_url, corroborated_by,
+        source_data,
+        row_number() OVER (
+          PARTITION BY icao24, floor(extract(epoch FROM observed_at) / ${FLIGHT_PUBLIC_SAMPLE_SECONDS})
+          ORDER BY observed_at DESC, observation_key DESC
+        ) AS sample_rank
+      FROM flight_observations
+      WHERE observed_at >= $1::timestamptz
+    ), recent_history AS (
       SELECT
         icao24, callsign, registration, observed_at, latitude, longitude,
         altitude_ft, ground_speed_kt, track_degrees, distance_drossart_km,
         update_type, provider_id, provider_name, provider_url, corroborated_by,
         source_data
-      FROM flight_observations
-      WHERE observed_at >= $1::timestamptz
+      FROM sampled_history
+      WHERE sample_rank = 1
       ORDER BY observed_at DESC
       LIMIT $2
-    ) AS recent_history
+    )
+    SELECT * FROM recent_history
     ORDER BY observed_at ASC
   `, [since, limit])
   return {
     configured: true,
     ok: true,
-    observations: rows.map(storedObservation),
+    observations: rows.map(storedObservation).filter((observation) => (
+      !isExcludedIncidentAircraft(observation.icao24)
+    )),
   }
 }
 

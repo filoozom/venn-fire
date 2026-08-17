@@ -78,7 +78,7 @@ function aircraftIcon(flight, heading = 0) {
   const helicopterPath = '<path d="M3 7.5h18M12 7.5V5m-1-1h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M8.5 9h7.4c1.7 0 3.1 1.3 3.1 3v.5H8.5a3.5 3.5 0 010-7h2v3.5z" fill="currentColor"/><path d="M8 13.5l-2 3m9-3 2 3M4.5 17h13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>'
   return L.divIcon({
     className: 'aircraft-map-marker',
-    html: `<span style="--flight-color:${flight.color};--aircraft-rotation:${heading}deg"><svg viewBox="0 0 24 24" aria-hidden="true">${flight.type === 'plane' ? planePath : helicopterPath}</svg></span>`,
+    html: `<span style="--flight-color:${flight.color};--aircraft-rotation:${heading}deg"><svg viewBox="0 0 24 24" aria-hidden="true">${flight.type === 'plane' ? planePath : helicopterPath}</svg></span><b>${escapeHtml(flight.callSign)}</b>`,
     iconSize: [32, 32],
     iconAnchor: [16, 16],
   })
@@ -132,7 +132,10 @@ export default function MapView({
     const map = L.map(nodeRef.current, {
       zoomControl: false,
       attributionControl: true,
-      minZoom: 9,
+      // Route-fit controls may need a regional view (for example G17's
+      // receiver-supported leg toward Brussels); Home still returns to the
+      // incident extent.
+      minZoom: 7,
       maxZoom: 18,
       zoomSnap: 0.25,
       preferCanvas: true,
@@ -146,10 +149,29 @@ export default function MapView({
     tileRef.current = tile
 
     const home = () => map.fitBounds(INCIDENT_MAP_BOUNDS, INCIDENT_MAP_PADDING)
+    const fitPositions = (positions = []) => {
+      const valid = positions.filter((position) => (
+        Array.isArray(position)
+        && Number.isFinite(Number(position[0]))
+        && Number.isFinite(Number(position[1]))
+      ))
+      if (!valid.length) return
+      if (valid.length === 1) {
+        map.flyTo(valid[0], 13, { duration: 0.8 })
+        return
+      }
+      map.flyToBounds(L.latLngBounds(valid), {
+        paddingTopLeft: [35, 95],
+        paddingBottomRight: [35, 185],
+        maxZoom: 14,
+        duration: 0.8,
+      })
+    }
     onMapReady?.({
       zoomIn: () => map.zoomIn(0.75),
       zoomOut: () => map.zoomOut(0.75),
       home,
+      fitPositions,
       fire: () => map.flyToBounds(L.latLngBounds(effisArea?.rings?.[0] || INCIDENT_MAP_BOUNDS), {
         paddingTopLeft: [35, 95],
         paddingBottomRight: [35, 185],
@@ -343,31 +365,21 @@ export default function MapView({
               opacity: 0.78 * path.opacity,
               dashArray: '5 6',
             })
-              .bindTooltip(`<strong>${flight.callSign}: receiver-observed path</strong><br>${path.observations.length.toLocaleString('en-GB')} exact fixes · ${localObservationTime(path.observations[0].observedAt)}–${localObservationTime(path.observations.at(-1).observedAt)} CEST<br><small>Fades linearly and disappears after 24 hours. Gaps over 2 minutes and implausible links are omitted; no position is inferred between fixes.</small>`, { sticky: true })
+              .bindTooltip(`<strong>${flight.callSign}: provider-supported route</strong><br>${path.observations.length.toLocaleString('en-GB')} exact fixes · ${localObservationTime(path.observations[0].observedAt)}–${localObservationTime(path.observations.at(-1).observedAt)} CEST<br><small>The aircraft qualified by entering the incident area. Its complete available incident-connected session fades linearly and disappears after 24 hours. Gaps over 2 minutes and implausible links are omitted; no position is inferred between fixes.</small>`, { sticky: true })
               .addTo(group)
           })
 
           const latest = visible.at(-1)
           const age = frame.timestampMs - latest.timestampMs
           const fadeOpacity = aircraftTraceOpacity(latest.timestampMs, frame.timestampMs)
-          if (age < 0 || age > OBSERVATION_RECENCY_MS) {
-            L.circleMarker(latest.position, {
-              radius: 3.5,
-              color: '#dcecff',
-              weight: 1,
-              opacity: fadeOpacity,
-              fillColor: flight.color,
-              fillOpacity: 0.58 * fadeOpacity,
-            })
-              .bindTooltip(`<strong>${flight.callSign} last observed</strong><br>${localObservationTime(latest.observedAt)} CEST · ${latest.altitudeFt ?? '—'} ft<br><small>${latest.updateType}; fades completely after 24 hours; no position inferred after this fix</small>`, { direction: 'top' })
-              .addTo(group)
-          }
-
-          if (age >= 0 && age <= OBSERVATION_RECENCY_MS) {
-            L.marker(latest.position, { icon: aircraftIcon(flight), opacity: fadeOpacity, zIndexOffset: 900 })
-              .bindTooltip(`<strong>${flight.callSign}: recent observation</strong><br>${localObservationTime(latest.observedAt)} CEST<br><small>This marker does not assert current airborne status.</small>`, { direction: 'top', offset: [0, -15] })
-              .addTo(group)
-          }
+          const recencyLabel = age <= OBSERVATION_RECENCY_MS ? 'recent observation' : 'last observed position'
+          L.marker(latest.position, {
+            icon: aircraftIcon(flight, latest.trackDegrees || 0),
+            opacity: fadeOpacity,
+            zIndexOffset: 900,
+          })
+            .bindTooltip(`<strong>${flight.callSign}: ${recencyLabel}</strong><br>${localObservationTime(latest.observedAt)} CEST · ${latest.altitudeFt ?? '—'} ft<br><small>${escapeHtml(latest.updateType || 'Receiver observation')}; this marker does not assert current airborne status, and no position is inferred after this fix.</small>`, { direction: 'top', offset: [0, -15] })
+            .addTo(group)
           return
         }
 

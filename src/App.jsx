@@ -422,7 +422,6 @@ function DataModal({
   firmsDetectionCount,
   sourceLinks,
   activeSources = [],
-  coverageGaps = [],
   sourceRuns = [],
   sentinel2 = { scenes: [] },
 }) {
@@ -607,22 +606,6 @@ function DataModal({
                   <a key={source.key} href={source.providerUrl} target="_blank" rel="noreferrer" className="directory-row">{content}</a>
                 ) : <div key={source.key} className="directory-row directory-row--inactive">{content}</div>
               })}
-              {coverageGaps.length ? (
-                <>
-                  <div className="directory-section-title directory-section-title--references">
-                    <strong>Known limits that are not synchronized</strong>
-                    <small>Access, privacy or source-history constraints</small>
-                  </div>
-                  {coverageGaps.map((gap) => (
-                    <div key={gap.key} className="directory-row directory-row--gap">
-                      <SourceMark tone="official" />
-                      <span><strong>{gap.key.replaceAll('-', ' ')}</strong><small>{gap.detail}</small></span>
-                      <em>{gap.status.replaceAll('-', ' ')}</em>
-                      <CircleHelp size={15} />
-                    </div>
-                  ))}
-                </>
-              ) : null}
               <div className="directory-section-title directory-section-title--references">
                 <strong>Historical and methodological references</strong>
                 <small>Linked evidence retained with the incident record</small>
@@ -723,6 +706,13 @@ function FireViewer({ runtime, databaseError }) {
   const latestSelectedDayFlight = flightsSeenOnSelectedDay
     .slice()
     .sort((left, right) => right.latest.timestampMs - left.latest.timestampMs)[0] ?? null
+
+  const showAircraftRoute = (observations) => {
+    const positions = (observations || []).map((observation) => observation.position).filter(Boolean)
+    if (!positions.length) return
+    setLayers((current) => ({ ...current, aircraft: true }))
+    mapActions?.fitPositions?.(positions)
+  }
 
   useEffect(() => {
     const previousLength = framesLengthRef.current
@@ -853,7 +843,8 @@ function FireViewer({ runtime, databaseError }) {
 
   const aircraftEstimateFlights = useMemo(() => visibleDisplayFlights.map((flight) => ({
     ...flight,
-    observations: visibleAircraftObservations(flight.observations, frame.timestampMs),
+    observations: visibleAircraftObservations(flight.observations, frame.timestampMs)
+      .filter((observation) => observation.routeScope !== 'full-route'),
   })).filter((flight) => flight.observations.length), [visibleDisplayFlights, frame.timestampMs])
 
   const aircraftSupportedEdge = useMemo(() => deriveAircraftSupportedEdge({
@@ -870,15 +861,22 @@ function FireViewer({ runtime, databaseError }) {
   // 24-hour display window. Re-running the same strict inference against all
   // retained observations preserves its legitimate historical outer reach for
   // the subdued touched-zone boundary; rejected route outliers pass neither.
+  const touchedAircraftEdgeFlights = useMemo(() => displayFlights.map((flight) => ({
+    ...flight,
+    observations: (flight.observations || []).filter((observation) => (
+      observation.routeScope !== 'full-route'
+    )),
+  })), [displayFlights])
+
   const touchedAircraftEdge = useMemo(() => deriveAircraftSupportedEdge({
-    flights: displayFlights,
+    flights: touchedAircraftEdgeFlights,
     detections: bestEstimateCoreDetections,
     outlineRings: viirsCoreOutlineRings,
     frameTimestampMs: frame.timestampMs,
     origin: firmsData.locationReference,
     gridCellM: AIRCRAFT_EDGE_GRID_CELL_M,
     timeBucketMs: AIRCRAFT_EDGE_TIME_BUCKET_MS,
-  }), [displayFlights, bestEstimateCoreDetections, viirsCoreOutlineRings, frame.timestampMs, firmsData.locationReference])
+  }), [touchedAircraftEdgeFlights, bestEstimateCoreDetections, viirsCoreOutlineRings, frame.timestampMs, firmsData.locationReference])
 
   const modisSupportedExtent = useMemo(() => deriveModisSupportedExtent({
     detections: firmsDetectionsAtTime,
@@ -1304,7 +1302,14 @@ function FireViewer({ runtime, databaseError }) {
                   : aircraftHistoryUnavailable
                     ? 'Retained aircraft fixes are temporarily unavailable. Provider polling continues in the database and this view will retry.'
                     : `${flightsSeenOnSelectedDay.length} aircraft were seen on the selected day; ${receiverObservedFlights.length} remain visible inside the 24-hour window${receiverObservedCallSigns ? `: ${receiverObservedCallSigns}` : ''}. Plausible candidates are labelled separately. G12 remains photo-confirmed only. Receiver positions establish proximity, not water pickups or drops.`}</p>
-                <button type="button" onClick={() => setDataOpen(true)}><FileUp size={14} /> Import tracks</button>
+                <div className="air-ops-actions">
+                  <button
+                    type="button"
+                    disabled={!flightsSeenOnSelectedDay.length}
+                    onClick={() => showAircraftRoute(flightsSeenOnSelectedDay.flatMap((entry) => entry.observations))}
+                  ><LocateFixed size={14} /> Show selected-day routes</button>
+                  <button type="button" onClick={() => setDataOpen(true)}><FileUp size={14} /> Import tracks</button>
+                </div>
               </div>
 
               <div className="flight-list">
@@ -1337,12 +1342,17 @@ function FireViewer({ runtime, databaseError }) {
                       </div>
                       <div className="flight-stats"><span><small>24 H FIXES</small><strong>{observationCount ?? '—'}</strong></span><span><small>SELECTED DAY</small><strong>{selectedDayObservationCount ?? '—'}</strong></span><span><small>CLUSTERS</small><strong>{coverageCount ?? '—'}</strong></span><span><small>PHOTOS</small><strong>{photoCount || '—'}</strong></span></div>
                       <div className="flight-provenance"><Info size={12} /> {flight.status}{flight.pathMethod ? ` · ${flight.pathMethod}` : ''}</div>
+                      {visibleObservations?.length ? (
+                        <div className="flight-actions">
+                          <button type="button" onClick={() => showAircraftRoute(visibleObservations)}><MapPin size={12} /> Show complete visible route</button>
+                        </div>
+                      ) : null}
                     </article>
                   )
                 })}
               </div>
 
-              <div className="coverage-note"><Radio size={15} /><p><strong>Aircraft evidence fades for 24 hours.</strong><span>Each exact fix and gap-limited connector becomes linearly more transparent against the selected five-minute frame, then disappears completely at 24 hours. PostgreSQL retains the source history.</span></p></div>
+              <div className="coverage-note"><Radio size={15} /><p><strong>Qualified aircraft routes fade for 24 hours.</strong><span>After an aircraft enters the incident area, its complete available provider route is shown from the first to last receiver-supported fix. This can approach takeoff and landing, but transponder or coverage gaps are not invented. Every fix and gap-limited connector fades against the selected five-minute frame, then disappears completely at 24 hours; PostgreSQL retains the source history.</span></p></div>
               <div className="coverage-note"><Flame size={15} /><p><strong>Qualifying aircraft evidence extends the same solid Best estimate outline.</strong><span>Repeated GRZLY direction changes must remain within 1 km of the thermal core and within 900 m of another five-minute evidence frame. Each local cluster bounds its own compact lobe on the shared 50 m raster, so approach, reservoir and disconnected route legs cannot be bridged into the outline. Receiver positions do not prove a drop or confirmed fire front.</span></p></div>
               <div className="coverage-note"><Info size={15} /><p><strong>Wide-area checks separate this incident from nearby activity.</strong><span>{runtime.incidentAircraftMeta.negativeFindings?.[0]} {runtime.incidentAircraftMeta.negativeFindings?.[1]} The known Aachen/Walheim MLAT artifact is excluded.</span></p></div>
             </div>
@@ -1359,7 +1369,6 @@ function FireViewer({ runtime, databaseError }) {
         firmsDetectionCount={firmsData.detections.length}
         sourceLinks={runtime.sourceLinks}
         activeSources={runtime.sourceRegistry.sources}
-        coverageGaps={runtime.sourceRegistry.coverageGaps}
         sourceRuns={sourceRuns}
         sentinel2={runtime.sentinel2}
       />

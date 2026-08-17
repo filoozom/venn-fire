@@ -49,6 +49,7 @@ import { archiveProviderResponses } from './source-artifacts.mjs'
 
 const INCIDENT = { latitude: 50.54762, longitude: 6.05757 }
 const INCIDENT_START = '2026-08-14T11:00:00.000Z'
+const AIRCRAFT_ROUTE_HISTORY_RECOVERY_KEY = 'aircraft-route-history-recovery'
 
 function finiteNumber(value) {
   const number = Number(value)
@@ -280,12 +281,13 @@ async function refreshAircraftTraceSource({
   sourceKey,
   includeConfigured = true,
   observedAfter = null,
+  aircraftOverride = null,
 }) {
   const previous = await previousPayload('aircraft', query, { observations: [] })
-  const aircraft = trackedAircraftFromObservations(previous.observations, {
-    includeConfigured,
-    observedAfter,
-  })
+  const aircraft = aircraftOverride || trackedAircraftFromObservations(previous.observations, {
+      includeConfigured,
+      observedAfter,
+    })
   const result = await loadAircraftTraces({ providers, date, aircraft })
   const artifacts = await archiveProviderResponses({
     sourceKey,
@@ -353,6 +355,95 @@ async function refreshHistoricalAircraftTraces({ requestedAtMs, query, bucketAt 
     date,
     sourceKey: 'aircraft-history',
   })
+}
+
+export function completedUtcDatesBeforeToday(requestedAtMs) {
+  const firstDateMs = Date.parse(`${INCIDENT_START.slice(0, 10)}T00:00:00.000Z`)
+  const todayMs = Date.parse(`${new Date(requestedAtMs).toISOString().slice(0, 10)}T00:00:00.000Z`)
+  const dates = []
+  for (let dateMs = todayMs - 24 * 60 * 60 * 1_000; dateMs >= firstDateMs; dateMs -= 24 * 60 * 60 * 1_000) {
+    dates.push(new Date(dateMs).toISOString().slice(0, 10))
+  }
+  return dates
+}
+
+export function routeRecoveryTargets(observations, date) {
+  const rows = (observations || []).filter((observation) => {
+    if (String(observation?.observedAt || '').slice(0, 10) !== date) return false
+    if (observation.routeScope === 'full-route') return false
+    const distanceKm = finiteNumber(observation.distanceDrossartKm)
+      ?? haversineKm(Number(observation.latitude), Number(observation.longitude))
+    return Number.isFinite(distanceKm) && distanceKm <= 10
+  })
+  return trackedAircraftFromObservations(rows, { includeConfigured: false })
+    .sort((left, right) => left.icao24.localeCompare(right.icao24))
+}
+
+async function refreshAircraftRouteHistory({ requestedAtMs, query, bucketAt }) {
+  const generatedAt = new Date(requestedAtMs).toISOString()
+  const [previousAircraft, previousRecovery] = await Promise.all([
+    previousPayload('aircraft', query, { observations: [] }),
+    previousPayload(AIRCRAFT_ROUTE_HISTORY_RECOVERY_KEY, query, { dates: {} }),
+  ])
+  const priorDates = previousRecovery.dates || {}
+  const pending = completedUtcDatesBeforeToday(requestedAtMs).flatMap((date) => {
+    const aircraft = routeRecoveryTargets(previousAircraft.observations, date)
+    const fingerprint = aircraft.map((item) => item.icao24).join(',')
+    return aircraft.length && priorDates[date]?.fingerprint !== fingerprint
+      ? [{ date, aircraft, fingerprint }]
+      : []
+  })
+
+  if (!pending.length) {
+    return {
+      itemCount: 0,
+      metadata: {
+        changed: false,
+        complete: true,
+        recoveredDates: Object.keys(priorDates).sort(),
+        pendingDateCount: 0,
+      },
+    }
+  }
+
+  // Recover one completed day per five-minute run so the work is resumable and
+  // upstream requests remain bounded. The newest missing day is handled first.
+  const target = pending[0]
+  const result = await refreshAircraftTraceSource({
+    query,
+    bucketAt,
+    providers: HISTORICAL_AIRCRAFT_TRACE_PROVIDERS,
+    date: target.date,
+    sourceKey: 'aircraft-route-history',
+    includeConfigured: false,
+    aircraftOverride: target.aircraft,
+  })
+  const dates = {
+    ...priorDates,
+    [target.date]: {
+      fingerprint: target.fingerprint,
+      icao24s: target.aircraft.map((aircraft) => aircraft.icao24),
+      attemptedAt: generatedAt,
+      complete: result.metadata.complete,
+      receivedObservationCount: result.metadata.receivedObservationCount,
+      failedResponses: result.metadata.failedResponses,
+    },
+  }
+  const stored = await saveDataset({
+    key: AIRCRAFT_ROUTE_HISTORY_RECOVERY_KEY,
+    payload: { schemaVersion: 1, generatedAt, dates },
+    sourceUpdatedAt: generatedAt,
+  }, query)
+  return {
+    ...result,
+    metadata: {
+      ...result.metadata,
+      changed: result.metadata.changed || stored.changed,
+      recoveryDate: target.date,
+      recoveredDates: Object.keys(dates).sort(),
+      pendingDateCount: Math.max(0, pending.length - 1),
+    },
+  }
 }
 
 async function refreshOpenMeteo({ requestedAtMs, query }) {
@@ -1198,14 +1289,19 @@ export const REFRESH_SOURCES = [
     coverage: 'Reprocesses retained raw point responses without provider calls, promoting response-type, cross-provider or repeated low-altitude incident-area candidates and backfilling exact fixes',
   },
   {
-    key: 'aircraft-traces', label: 'Current aircraft trace catch-up', intervalMinutes: 30, run: refreshCurrentAircraftTraces,
+    key: 'aircraft-traces', label: 'Current aircraft trace catch-up', intervalMinutes: 5, run: refreshCurrentAircraftTraces,
     providerUrl: 'https://www.adsb.lol/',
-    coverage: 'Current-day ADSB.lol traces for every retained incident aircraft recover exact incident-area fixes missed between five-minute live polls',
+    coverage: 'Current-day ADSB.lol traces for recently retained incident aircraft recover complete available incident-connected route sessions every five minutes after an incident-area qualification',
   },
   {
     key: 'aircraft-history', label: 'Completed aircraft history catch-up', intervalMinutes: 360, run: refreshHistoricalAircraftTraces,
     providerUrl: 'https://globe.airplanes.live/',
-    coverage: 'Previous-day Airplanes.live and ADSB.lol full traces for every retained incident aircraft, filtered to exact fixes inside 10 km and retained with raw source files',
+    coverage: 'Previous-day Airplanes.live and ADSB.lol full traces for every retained incident aircraft; only sessions that entered the incident area are accepted, then their complete exact fixes and raw source files are retained',
+  },
+  {
+    key: 'aircraft-route-history', label: 'Completed aircraft full-route recovery', intervalMinutes: 5, run: refreshAircraftRouteHistory,
+    providerUrl: 'https://globe.airplanes.live/',
+    coverage: 'Resumable one-day-at-a-time recovery of complete incident-connected route sessions for aircraft already qualified in the incident area on every completed incident day',
   },
   {
     key: 'open-meteo', label: 'Open-Meteo model weather', intervalMinutes: 5, run: refreshOpenMeteo,
@@ -1310,49 +1406,6 @@ function registrySources(environment = process.env) {
   })
 }
 
-const COVERAGE_GAPS = [
-  {
-    key: 'aircraft-receiver-visibility',
-    status: 'inherent-source-limit',
-    detail: 'ADS-B/MLAT can miss aircraft with no public transponder position, poor receiver coverage or an observation outside the ten-kilometre incident filter. Candidate status establishes proximity only, not an assigned firefighting role.',
-  },
-  {
-    key: 'walloon-live-road-events',
-    status: 'access-not-supplied',
-    detail: 'The official DATEX II adapter is ready, but no provider credentials or authenticated agency push has been supplied.',
-  },
-  {
-    key: 'field-confirmed-fire-perimeter',
-    status: 'access-not-supplied',
-    detail: 'No fire-service or crisis-centre GeoJSON perimeter feed/export has been supplied to the ready pull/push adapter.',
-  },
-  {
-    key: 'sanitized-suppression-operations',
-    status: 'access-not-supplied',
-    detail: 'No agency-approved dispatch, water pickup/drop, closure, evacuation or aggregate-compliance feed/export has been supplied.',
-  },
-  {
-    key: 'historical-be-alert-before-collection',
-    status: 'not-reconstructable-from-live-feed',
-    detail: 'Alerts that expired before collection began are absent unless an external archive is supplied.',
-  },
-  {
-    key: 'sentinel-analysis-ready-imagery',
-    status: 'credentials-required',
-    detail: 'Public quicklooks are retained; clipped multispectral bands and derived burn products require Copernicus Data Space OAuth credentials.',
-  },
-  {
-    key: 'raw-cad-and-radio',
-    status: 'not-public-and-potentially-sensitive',
-    detail: 'Raw dispatch/CAD and tactical radio traffic are not published. Only an agency-approved sanitized export will be ingested.',
-  },
-  {
-    key: 'evacuation-compliance-identities',
-    status: 'intentionally-excluded',
-    detail: 'Personal-level compliance data must not be exposed; the adapter accepts agency-approved aggregate counts only.',
-  },
-]
-
 export async function refreshAllSources({ requestedAtMs = Date.now() } = {}) {
   const query = databaseQuery()
   await saveDataset({
@@ -1361,7 +1414,6 @@ export async function refreshAllSources({ requestedAtMs = Date.now() } = {}) {
       schemaVersion: 1,
       schedulerGranularityMinutes: 5,
       sources: registrySources(),
-      coverageGaps: COVERAGE_GAPS,
     },
     sourceUpdatedAt: null,
   }, query)

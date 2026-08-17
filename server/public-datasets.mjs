@@ -1,3 +1,5 @@
+import { isExcludedIncidentAircraft } from './aircraft-policy.mjs'
+
 export const PUBLIC_DATASET_KEYS = Object.freeze([
   'aircraft',
   'effis',
@@ -42,11 +44,16 @@ function compactAircraft(payload) {
     'displayType',
     'selectionBasis',
     'candidateEvidence',
+    'routeScope',
   ])
   return {
     ...payload,
-    observations: (payload.observations ?? []).map(compactObservation),
-    latestObservations: (payload.latestObservations ?? []).map(compactObservation),
+    observations: (payload.observations ?? [])
+      .filter((observation) => !isExcludedIncidentAircraft(observation))
+      .map(compactObservation),
+    latestObservations: (payload.latestObservations ?? [])
+      .filter((observation) => !isExcludedIncidentAircraft(observation))
+      .map(compactObservation),
   }
 }
 
