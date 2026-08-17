@@ -14,6 +14,7 @@
     "verify:map-tracks": "node scripts/verify-map-tracks.mjs",
     "verify:modis-fire-extent": "node scripts/verify-modis-fire-extent.mjs",
     "verify:sentinel2": "node scripts/verify-sentinel2.mjs",
+    "verify:environmental": "node scripts/verify-environmental-sources.mjs",
     "verify:firms-sensors": "node scripts/verify-firms-sensors.mjs",
     "verify:postgres": "node scripts/verify-postgres.mjs",
     "verify:live-reports": "node scripts/verify-live-reports.mjs",

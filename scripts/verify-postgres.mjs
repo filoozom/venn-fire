@@ -62,6 +62,11 @@ assert.equal(configured.application_name, 'fire-test')
 
 assert(PUBLIC_DATASET_KEYS.includes('aircraft'))
 assert(PUBLIC_DATASET_KEYS.includes('firms'))
+assert(PUBLIC_DATASET_KEYS.includes('rmi-radar'))
+assert(PUBLIC_DATASET_KEYS.includes('nasa-gibs'))
+assert(PUBLIC_DATASET_KEYS.includes('cams'))
+assert(PUBLIC_DATASET_KEYS.includes('sentinel1'))
+assert(PUBLIC_DATASET_KEYS.includes('sentinel3-frp'))
 assert(!PUBLIC_DATASET_KEYS.includes('road-events'))
 assert(!PUBLIC_DATASET_KEYS.includes('official-perimeter'))
 assert(!PUBLIC_DATASET_KEYS.includes('public-operations'))
@@ -122,6 +127,41 @@ assert.equal(publicSentinel.scenes[0].quicklook.sha256, undefined)
 assert.equal(publicSentinel.scenes[0].quicklook.databaseUrl, '/api/sentinel-quicklook?id=public-id')
 assert.equal(publicSentinel.analyses[0].sourceRasterArtifactKey, undefined)
 assert.deepEqual(publicSentinel.analyses[0].supportCells, [[1, 2]])
+
+const publicEnvironmental = publicDatasetPayload('cams', {
+  frames: [{
+    productKey: 'wildfire-pm10',
+    validAt: '2026-08-17T17:00:00Z',
+    point: { value: 1.88, unit: 'µg/m³' },
+    valueArtifactKey: 'private-value-artifact',
+    image: {
+      artifactKey: 'private-image-artifact',
+      sha256: 'private-hash',
+      databaseUrl: '/api/source-image?id=opaque',
+      contentType: 'image/png',
+      byteLength: 12_000,
+    },
+  }],
+})
+assert.equal(publicEnvironmental.frames[0].valueArtifactKey, undefined)
+assert.equal(publicEnvironmental.frames[0].image.artifactKey, undefined)
+assert.equal(publicEnvironmental.frames[0].image.sha256, undefined)
+assert.equal(publicEnvironmental.frames[0].image.databaseUrl, '/api/source-image?id=opaque')
+
+const publicSentinel1 = publicDatasetPayload('sentinel1', {
+  scenes: [{
+    id: 'scene',
+    thumbnailProviderUrl: 'https://provider.invalid/private-detail',
+    thumbnail: {
+      stored: false,
+      providerUrl: 'https://provider.invalid/preview',
+      error: 'private upstream error',
+    },
+  }],
+})
+assert.equal(publicSentinel1.scenes[0].thumbnailProviderUrl, undefined)
+assert.equal(publicSentinel1.scenes[0].thumbnail.error, undefined)
+assert.equal(publicSentinel1.scenes[0].thumbnail.providerUrl, 'https://provider.invalid/preview')
 
 const aircraftWithoutOovst = publicDatasetPayload('aircraft', {
   observations: [{

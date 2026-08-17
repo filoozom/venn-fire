@@ -1,0 +1,91 @@
+#!/usr/bin/env node
+
+import assert from 'node:assert/strict'
+import { gzipSync } from 'node:zlib'
+
+import {
+  encodeRgbaPng,
+  extractWmsLayerTime,
+  geometryContainsIncident,
+  pairSentinel1Scenes,
+  parseCamsFeatureInfo,
+  parseRmiRadarPayload,
+  rmiRadarIncidentCategory,
+} from '../server/environmental-sources.mjs'
+
+const radarBody = Buffer.alloc(6 + 8 + 2)
+radarBody.writeUInt16BE(2, 0)
+radarBody.writeUInt16BE(1, 2)
+radarBody[4] = 3
+radarBody[5] = 1
+radarBody.writeBigUInt64LE(BigInt(Date.parse('2026-08-17T17:20:00.000Z') / 1_000), 6)
+radarBody[14] = 2 | (5 << 3)
+const radar = parseRmiRadarPayload(gzipSync(radarBody))
+assert.equal(radar.width, 2)
+assert.equal(radar.height, 1)
+assert.equal(radar.observedTimes[0], '2026-08-17T17:20:00.000Z')
+assert.deepEqual(rmiRadarIncidentCategory(radar, 0), {
+  value: 5,
+  label: 'heavy',
+  pixel: { x: 1, y: 0 },
+})
+
+const png = encodeRgbaPng(1, 1, Buffer.from([10, 20, 30, 255]))
+assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10])
+assert.equal(png.subarray(12, 16).toString('ascii'), 'IHDR')
+
+const timeDimension = extractWmsLayerTime(`
+  <Layer queryable="1">
+    <Name>composition_europe_pm_wf_forecast_surface</Name>
+    <Dimension name="time" default="2026-08-17T00:00:00Z" units="ISO8601">2026-07-19T00:00:00Z,2026-07-19T01:00:00Z/2026-08-21T00:00:00Z/PT1H</Dimension>
+  </Layer>
+`, 'composition_europe_pm_wf_forecast_surface')
+assert.equal(timeDimension.defaultTime, '2026-08-17T00:00:00Z')
+assert(timeDimension.values.endsWith('/PT1H'))
+
+assert.deepEqual(parseCamsFeatureInfo(`
+Name: composition_europe_pm_wf_forecast_surface
+Value: 1.88173 µg/m3
+Grid point latitude: 50.55
+Grid point longitude: 6.05
+`), {
+  value: 1.88173,
+  unit: 'µg/m³',
+  gridPoint: { latitude: 50.55, longitude: 6.05 },
+})
+
+const incidentGeometry = {
+  type: 'Polygon',
+  coordinates: [[[5.9, 50.4], [6.2, 50.4], [6.2, 50.7], [5.9, 50.7], [5.9, 50.4]]],
+}
+assert.equal(geometryContainsIncident(incidentGeometry), true)
+assert.equal(geometryContainsIncident({
+  type: 'Polygon',
+  coordinates: [[[7, 51], [8, 51], [8, 52], [7, 52], [7, 51]]],
+}), false)
+
+const pairs = pairSentinel1Scenes([{
+  id: 'pre',
+  acquiredAt: '2026-08-04T17:24:00.000Z',
+  platform: 'sentinel-1d',
+  relativeOrbit: 88,
+  orbitState: 'ascending',
+}, {
+  id: 'wrong-orbit',
+  acquiredAt: '2026-08-10T17:24:00.000Z',
+  platform: 'sentinel-1d',
+  relativeOrbit: 87,
+  orbitState: 'ascending',
+}, {
+  id: 'post',
+  acquiredAt: '2026-08-16T17:24:00.000Z',
+  platform: 'sentinel-1d',
+  relativeOrbit: 88,
+  orbitState: 'ascending',
+}])
+assert.equal(pairs.length, 1)
+assert.equal(pairs[0].preSceneId, 'pre')
+assert.equal(pairs[0].postSceneId, 'post')
+assert.equal(pairs[0].separationDays, 12)
+
+console.log('Verified: RMI radar decoding, PNG output, CAMS parsing, and conservative Sentinel pairing.')

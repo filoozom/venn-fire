@@ -1,7 +1,16 @@
 import { isExcludedIncidentAircraft } from './aircraft-policy.mjs'
 
+export const OPTIONAL_PUBLIC_DATASET_KEYS = Object.freeze([
+  'cams',
+  'nasa-gibs',
+  'rmi-radar',
+  'sentinel1',
+  'sentinel3-frp',
+])
+
 export const PUBLIC_DATASET_KEYS = Object.freeze([
   'aircraft',
+  ...OPTIONAL_PUBLIC_DATASET_KEYS,
   'effis',
   'ems',
   'firms',
@@ -122,11 +131,66 @@ function compactSentinel2(payload) {
   }
 }
 
+function compactStoredImage(image) {
+  if (!image) return null
+  return definedFields(image, [
+    'stored',
+    'databaseUrl',
+    'providerUrl',
+    'contentType',
+    'byteLength',
+  ])
+}
+
+function compactRmiRadar(payload) {
+  return {
+    ...payload,
+    frames: (payload.frames ?? []).map((frame) => ({
+      ...frame,
+      image: compactStoredImage(frame.image),
+    })),
+  }
+}
+
+function compactNasaGibs(payload) {
+  return {
+    ...payload,
+    images: (payload.images ?? []).map((entry) => ({
+      ...entry,
+      image: compactStoredImage(entry.image),
+    })),
+  }
+}
+
+function compactCams(payload) {
+  return {
+    ...payload,
+    frames: (payload.frames ?? []).map(({ valueArtifactKey: _valueArtifactKey, ...frame }) => ({
+      ...frame,
+      image: compactStoredImage(frame.image),
+    })),
+  }
+}
+
+function compactCatalogueScenes(payload) {
+  return {
+    ...payload,
+    scenes: (payload.scenes ?? []).map(({ thumbnailProviderUrl: _providerUrl, ...scene }) => ({
+      ...scene,
+      thumbnail: compactStoredImage(scene.thumbnail),
+    })),
+  }
+}
+
 export function publicDatasetPayload(key, payload) {
   if (!PUBLIC_DATASET_KEY_SET.has(key)) return null
   if (!payload || typeof payload !== 'object') return payload
   if (key === 'aircraft') return compactAircraft(payload)
+  if (key === 'cams') return compactCams(payload)
   if (key === 'firms') return compactFirms(payload)
+  if (key === 'nasa-gibs') return compactNasaGibs(payload)
+  if (key === 'rmi-radar') return compactRmiRadar(payload)
+  if (key === 'sentinel1' || key === 'sentinel3-frp') return compactCatalogueScenes(payload)
   if (key === 'sentinel2') return compactSentinel2(payload)
   if (key === 'source-registry') return compactSourceRegistry(payload)
   return payload

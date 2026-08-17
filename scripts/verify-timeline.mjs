@@ -95,7 +95,12 @@ await page.getByRole('button', { name: 'Source directory' }).click()
 const synchronizedSourceLinks = {
   reports: await page.locator('a.directory-row').filter({ hasText: 'Governor and BRF reports' }).count(),
   effis: await page.locator('a.directory-row').filter({ hasText: 'Copernicus EFFIS activity envelope' }).count(),
+  rmiRadar: await page.locator('a.directory-row').filter({ hasText: 'RMI precipitation radar' }).count(),
+  nasaGibs: await page.locator('a.directory-row').filter({ hasText: 'NASA GIBS visual imagery' }).count(),
+  cams: await page.locator('a.directory-row').filter({ hasText: 'CAMS smoke and air quality' }).count(),
+  sentinel1: await page.locator('a.directory-row').filter({ hasText: 'Sentinel-1 radar acquisitions' }).count(),
   sentinel2: await page.locator('a.directory-row').filter({ hasText: 'Sentinel-2 imagery and observed change' }).count(),
+  sentinel3: await page.locator('a.directory-row').filter({ hasText: 'Sentinel-3 SLSTR NRT FRP' }).count(),
 }
 if (Object.values(synchronizedSourceLinks).some((count) => count !== 1)) {
   throw new Error(`Database source registry entries are not exposed exactly once: ${JSON.stringify(synchronizedSourceLinks)}`)

@@ -31,6 +31,13 @@ import {
 } from './database.mjs'
 import { backfillLegacyEffisHistory } from './effis-sources.mjs'
 import {
+  refreshCams,
+  refreshNasaGibs,
+  refreshRmiRadar,
+  refreshSentinel1,
+  refreshSentinel3Frp,
+} from './environmental-sources.mjs'
+import {
   flightObservationKey,
   persistFlightObservations,
   persistFlightPoll,
@@ -1425,6 +1432,11 @@ export const REFRESH_SOURCES = [
     coverage: 'Ten-minute observations from Mont Rigi; newest values may await quality validation.',
   },
   {
+    key: 'rmi-radar', label: 'RMI precipitation radar', intervalMinutes: 5, run: refreshRmiRadar,
+    providerUrl: 'https://www.meteo.be/en/weather/observations/precipitation/lightning',
+    coverage: 'Official public precipitation-radar animation retained as georeferenced observation frames; the public product currently supplies ten-minute images.',
+  },
+  {
     key: 'dwd', label: 'DWD nearby wind stations', intervalMinutes: 10, run: refreshDwd,
     providerUrl: DWD_ROOT,
     coverage: 'Ten-minute wind observations from nearby German stations.',
@@ -1433,6 +1445,11 @@ export const REFRESH_SOURCES = [
     key: 'firms', label: 'NASA FIRMS detections', intervalMinutes: 15, run: refreshFirms,
     providerUrl: 'https://firms.modaps.eosdis.nasa.gov/',
     coverage: 'Thermal detections from VIIRS, MODIS and Meteosat.',
+  },
+  {
+    key: 'nasa-gibs', label: 'NASA GIBS visual imagery', intervalMinutes: 30, run: refreshNasaGibs,
+    providerUrl: 'https://www.earthdata.nasa.gov/data/tools/gibs',
+    coverage: 'Daily VIIRS true-colour and short-wave-infrared visual context; imagery is not treated as a hotspot or perimeter measurement.',
   },
   {
     key: 'firms-history', label: 'NASA FIRMS ignition-day recovery', intervalMinutes: 360, run: refreshFirmsHistory,
@@ -1460,6 +1477,21 @@ export const REFRESH_SOURCES = [
     key: 'sentinel2', label: 'Sentinel-2 imagery and observed change', intervalMinutes: 5, run: refreshSentinel2,
     providerUrl: 'https://dataspace.copernicus.eu/',
     coverage: 'Cloud-masked before/after change evidence from 20 m Sentinel-2 imagery.',
+  },
+  {
+    key: 'sentinel3-frp', label: 'Sentinel-3 SLSTR NRT FRP', intervalMinutes: 30, run: refreshSentinel3Frp,
+    providerUrl: 'https://dataspace.copernicus.eu/',
+    coverage: 'Near-real-time SLSTR fire-radiative-power overpasses and retained public previews; catalogue records alone are not plotted as local hotspots.',
+  },
+  {
+    key: 'sentinel1', label: 'Sentinel-1 radar acquisitions', intervalMinutes: 60, run: refreshSentinel1,
+    providerUrl: 'https://dataspace.copernicus.eu/',
+    coverage: 'Cloud-independent, matched-platform and matched-orbit radar acquisition pairs retained for conservative change corroboration.',
+  },
+  {
+    key: 'cams', label: 'CAMS smoke and air quality', intervalMinutes: 60, run: refreshCams,
+    providerUrl: 'https://atmosphere.copernicus.eu/',
+    coverage: 'Copernicus modelled wildfire-only PM10 and PM2.5 surface concentrations, including incident-point values and georeferenced forecast images.',
   },
 ]
 

@@ -21,6 +21,10 @@
       "maxDuration": 30,
       "regions": ["fra1"]
     },
+    "api/source-image.js": {
+      "maxDuration": 30,
+      "regions": ["fra1"]
+    },
     "api/refresh.js": {
       "maxDuration": 60,
       "regions": ["fra1"]

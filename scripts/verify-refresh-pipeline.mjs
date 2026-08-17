@@ -65,13 +65,18 @@ const expectedSources = [
   'vedia',
   'public-alerts',
   'rmi',
+  'rmi-radar',
   'dwd',
   'firms',
+  'nasa-gibs',
   'firms-history',
   'effis',
   'effis-history-migration',
   'ems',
   'sentinel2',
+  'sentinel3-frp',
+  'sentinel1',
+  'cams',
 ]
 
 const legacyReports = parseLegacyReportSource(`
@@ -142,6 +147,11 @@ assert.equal(REFRESH_SOURCES.find((source) => source.key === 'aircraft-history')
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'aircraft-route-history').intervalMinutes, 5)
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'firms').intervalMinutes, 15)
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'sentinel2').intervalMinutes, 5)
+assert.equal(REFRESH_SOURCES.find((source) => source.key === 'rmi-radar').intervalMinutes, 5)
+assert.equal(REFRESH_SOURCES.find((source) => source.key === 'nasa-gibs').intervalMinutes, 30)
+assert.equal(REFRESH_SOURCES.find((source) => source.key === 'sentinel3-frp').intervalMinutes, 30)
+assert.equal(REFRESH_SOURCES.find((source) => source.key === 'sentinel1').intervalMinutes, 60)
+assert.equal(REFRESH_SOURCES.find((source) => source.key === 'cams').intervalMinutes, 60)
 assert.deepEqual(completedUtcDatesBeforeToday(Date.parse('2026-08-17T12:00:00.000Z')), [
   '2026-08-16',
   '2026-08-15',

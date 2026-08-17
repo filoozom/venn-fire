@@ -2473,6 +2473,10 @@ button {
   grid-template-columns: 112px 1fr;
 }
 
+.connection-card--environmental {
+  align-items: center;
+}
+
 .sentinel-preview {
   width: 112px;
   height: 72px;
@@ -2480,6 +2484,17 @@ button {
   background: #e8ece9;
   border: 1px solid #d8e0db;
   border-radius: 8px;
+}
+
+.environmental-preview--radar {
+  background-color: #edf3f5;
+  background-image:
+    linear-gradient(45deg, rgb(120 145 154 / 8%) 25%, transparent 25%),
+    linear-gradient(-45deg, rgb(120 145 154 / 8%) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgb(120 145 154 / 8%) 75%),
+    linear-gradient(-45deg, transparent 75%, rgb(120 145 154 / 8%) 75%);
+  background-position: 0 0, 0 5px, 5px -5px, -5px 0;
+  background-size: 10px 10px;
 }
 
 .sentinel-comparison {

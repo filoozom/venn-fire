@@ -134,7 +134,9 @@ export default function MapView({
   onMapReady,
   importedTracks = [],
   firmsDetections = [],
+  rasterOverlays = [],
   sentinelBurnGeometry = null,
+  sentinel3Detections = [],
   fireOutlineRings = [],
   mapLabels = [],
   protectedArea = [],
@@ -238,6 +240,16 @@ export default function MapView({
     // incident reports, not a fire measurement, and read as an ignition point.
     // The database incident center remains the measurement datum for distances.
 
+    rasterOverlays.forEach((overlay) => {
+      if (!overlay?.url || !Array.isArray(overlay.bounds)) return
+      L.imageOverlay(overlay.url, overlay.bounds, {
+        opacity: overlay.opacity ?? 0.58,
+        interactive: false,
+        className: `environmental-raster environmental-raster--${overlay.kind || 'source'}`,
+        attribution: overlay.attribution || '',
+      }).addTo(group)
+    })
+
     if (layers.protected && protectedArea.length >= 3) {
       L.polygon(protectedArea, {
         color: '#77a878',
@@ -323,6 +335,26 @@ export default function MapView({
         + `${detection.corroboratingSensors > 1 ? `<br>${detection.corroboratingSensors} satellites saw this cell` : ''}`
         + `<br><small>NASA FIRMS · ${detection.acquiredAt.replace('T', ' ').slice(0, 16)} UTC</small>`
         + `<br><small>${footprintDetail}</small>`,
+        { direction: 'top' },
+      ).addTo(group)
+    })
+
+    sentinel3Detections.forEach((detection) => {
+      const latitude = Number(detection.latitude)
+      const longitude = Number(detection.longitude)
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return
+      L.circleMarker([latitude, longitude], {
+        className: 'sentinel3-frp-detection',
+        color: '#9f2f73',
+        fillColor: '#e04c9a',
+        weight: 1.2,
+        opacity: 0.9,
+        fillOpacity: 0.3,
+        radius: 5,
+      }).bindTooltip(
+        `<strong>Sentinel-3 SLSTR FRP detection</strong><br>`
+        + `${formatDecimal(detection.frpMw)} MW${detection.channel ? ` · ${escapeHtml(detection.channel)}` : ''}<br>`
+        + `<small>${escapeHtml(String(detection.acquiredAt || '').replace('T', ' ').slice(0, 16))} UTC · ${formatDecimal(detection.nominalResolutionM, 0)} m nominal product resolution</small>`,
         { direction: 'top' },
       ).addTo(group)
     })
@@ -453,7 +485,7 @@ export default function MapView({
         }), { direction: 'top', offset: [0, -18] })
         .addTo(group)
     })
-  }, [frameIndex, frame, flights, effisArea, effisCarriedForward, layers, importedTracks, firmsDetections, sentinelBurnGeometry, fireOutlineRings, protectedArea])
+  }, [frameIndex, frame, flights, effisArea, effisCarriedForward, layers, importedTracks, firmsDetections, rasterOverlays, sentinelBurnGeometry, sentinel3Detections, fireOutlineRings, protectedArea])
 
   return (
     <div className="map-surface" aria-label="Interactive fire situation map">

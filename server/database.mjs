@@ -1,7 +1,11 @@
 import { createHash } from 'node:crypto'
 
 import { postgresQuery, postgresUrl } from './postgres.mjs'
-import { PUBLIC_DATASET_KEYS, publicDatasetPayload } from './public-datasets.mjs'
+import {
+  OPTIONAL_PUBLIC_DATASET_KEYS,
+  PUBLIC_DATASET_KEYS,
+  publicDatasetPayload,
+} from './public-datasets.mjs'
 
 const schemaPromises = new WeakMap()
 
@@ -230,7 +234,8 @@ export async function loadPublicDatasets(keys = PUBLIC_DATASET_KEYS, query = dat
     ORDER BY dataset_key
   `, [selectedKeys])
   const datasets = datasetsFromRows(rows)
-  const missing = selectedKeys.filter((key) => !datasets[key])
+  const optionalKeys = new Set(OPTIONAL_PUBLIC_DATASET_KEYS)
+  const missing = selectedKeys.filter((key) => !datasets[key] && !optionalKeys.has(key))
   if (missing.length) throw new Error(`Public database datasets are unavailable: ${missing.join(', ')}`)
   return datasets
 }

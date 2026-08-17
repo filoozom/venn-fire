@@ -537,7 +537,12 @@ export function runtimeDataFromResponse(response) {
   const aircraft = optionalPayload(datasets, 'aircraft', { observations: [], sources: [] })
   const mediaReports = optionalPayload(datasets, 'media-reports', { articles: [], events: [] })
   const localAuthorityUpdates = optionalPayload(datasets, 'local-authority-updates', { notices: [], events: [] })
+  const cams = optionalPayload(datasets, 'cams', { frames: [], products: [] })
+  const nasaGibs = optionalPayload(datasets, 'nasa-gibs', { images: [], layers: [] })
+  const rmiRadar = optionalPayload(datasets, 'rmi-radar', { frames: [] })
+  const sentinel1 = optionalPayload(datasets, 'sentinel1', { scenes: [], matchedPairs: [], changeAnalyses: [] })
   const sentinel2 = optionalPayload(datasets, 'sentinel2', { scenes: [] })
+  const sentinel3Frp = optionalPayload(datasets, 'sentinel3-frp', { scenes: [], detections: [] })
   const ems = optionalPayload(datasets, 'ems', { activations: [], matches: [] })
   const sourceRegistry = optionalPayload(datasets, 'source-registry', { sources: [] })
   const timelineStartMs = Number(incident.timelineStartMs)
@@ -595,7 +600,12 @@ export function runtimeDataFromResponse(response) {
     reports: reportsPayload,
     mediaReports,
     localAuthorityUpdates,
+    cams,
+    nasaGibs,
+    rmiRadar,
+    sentinel1,
     sentinel2,
+    sentinel3Frp,
     ems,
     sourceRegistry,
   }

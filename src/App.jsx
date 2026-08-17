@@ -81,6 +81,14 @@ const FIRMS_LAYER_KEYS = Object.fromEntries(FIRMS_SENSORS.map((sensor) => [senso
 // field. NASA's confidence value is never rewritten: a detection we cannot
 // corroborate is still exactly what NASA reported it to be.
 const FIRE_OUTLINE_KEY = 'fireOutline'
+const ENVIRONMENT_LAYER_KEYS = Object.freeze({
+  rmiRadar: 'rmiRadar',
+  gibsFalseColor: 'gibsFalseColor',
+  gibsTrueColor: 'gibsTrueColor',
+  camsWildfirePm10: 'camsWildfirePm10',
+  camsPm2p5: 'camsPm2p5',
+  sentinel3Frp: 'sentinel3Frp',
+})
 
 const FIRMS_CONFIDENCE_LEVELS = [
   { key: 'firmsConfidence:high', level: 'high', label: 'High confidence' },
@@ -119,21 +127,45 @@ const SOURCE_DIRECTORY_COPY = {
   vedia: { label: 'Vedia incident reporting', coverage: 'Incident reporting from the regional news service.' },
   'public-alerts': { label: 'BE-Alert public alerts', coverage: 'Public emergency alerts retained after they expire from the live feed.' },
   rmi: { label: 'RMI Mont Rigi observations', coverage: 'Ten-minute observations from Mont Rigi; newest values may await quality validation.' },
+  'rmi-radar': { label: 'RMI precipitation radar', coverage: 'Official public precipitation-radar frames, retained and aligned to their observation times.' },
   dwd: { label: 'DWD nearby wind stations', coverage: 'Ten-minute wind observations from nearby German stations.' },
   firms: { label: 'NASA FIRMS detections', coverage: 'Thermal detections from VIIRS, MODIS and Meteosat.' },
+  'nasa-gibs': { label: 'NASA GIBS visual imagery', coverage: 'Daily VIIRS true-colour and short-wave-infrared visual context.' },
   effis: { label: 'Copernicus EFFIS activity envelope', coverage: 'Daily VIIRS-derived activity envelope; not an official burned-area perimeter.' },
   ems: { label: 'Copernicus EMS activations', coverage: 'Rapid Mapping activation catalogue and matching incident details when available.' },
+  cams: { label: 'CAMS smoke and air quality', coverage: 'Modelled wildfire-only PM10 and PM2.5 surface concentrations and transport context.' },
+  sentinel1: { label: 'Sentinel-1 radar acquisitions', coverage: 'Matched-platform and matched-orbit radar acquisitions for cloud-independent corroboration.' },
   sentinel2: { label: 'Sentinel-2 imagery and observed change', coverage: 'Cloud-masked before/after change evidence from 20 m Sentinel-2 imagery.' },
+  'sentinel3-frp': { label: 'Sentinel-3 SLSTR NRT FRP', coverage: 'Near-real-time fire-radiative-power overpass records and retained visual previews.' },
 }
 
 function dwdWindLayerKey(stationId) {
   return `dwdWind:${stationId}`
 }
 
+function latestTimedRecord(rows, timeField, timestampMs, predicate = () => true) {
+  return (rows ?? []).filter((row) => (
+    predicate(row)
+    && Number.isFinite(Date.parse(row?.[timeField]))
+    && Date.parse(row[timeField]) <= timestampMs
+  )).at(-1) ?? null
+}
+
+function latestDailyImage(rows, layerKey, timestampMs) {
+  const selectedDate = new Date(timestampMs).toISOString().slice(0, 10)
+  return (rows ?? []).filter((entry) => entry.layerKey === layerKey && entry.date <= selectedDate).at(-1) ?? null
+}
+
 function initialLayerState(runtime) {
   return {
     ...runtime.initialLayers,
     sentinel2BurnChange: true,
+    [ENVIRONMENT_LAYER_KEYS.rmiRadar]: false,
+    [ENVIRONMENT_LAYER_KEYS.gibsFalseColor]: false,
+    [ENVIRONMENT_LAYER_KEYS.gibsTrueColor]: false,
+    [ENVIRONMENT_LAYER_KEYS.camsWildfirePm10]: false,
+    [ENVIRONMENT_LAYER_KEYS.camsPm2p5]: false,
+    [ENVIRONMENT_LAYER_KEYS.sentinel3Frp]: true,
     ...FIRMS_LAYER_DEFAULTS,
     ...Object.fromEntries(runtime.dwdWindStations.map((station) => [dwdWindLayerKey(station.id), true])),
     [FIRE_OUTLINE_KEY]: true,
@@ -147,6 +179,7 @@ function layerOptionsFor(
   frame = null,
   dwdWindStations = [],
   sentinelAnalysis = null,
+  environmental = {},
 ) {
   return [
   { key: 'perimeter', label: 'EFFIS activity envelope', detail: effisArea ? `${effisArea.productDate}${isCarriedForward ? ' carried forward' : ''} · ${Math.round(effisArea.areaHa).toLocaleString('en-GB')} ha envelope` : 'No product available at selected time', icon: Layers3, color: '#e96838' },
@@ -158,6 +191,56 @@ function layerOptionsFor(
       : 'No usable post-fire image at selected time',
     icon: Satellite,
     color: '#7f55a5',
+  },
+  {
+    key: ENVIRONMENT_LAYER_KEYS.sentinel3Frp,
+    label: 'Sentinel-3 FRP detections',
+    detail: environmental.sentinel3DetectionCount
+      ? `${environmental.sentinel3DetectionCount.toLocaleString('en-GB')} published local detections at selected time`
+      : `${environmental.sentinel3OverpassCount ?? 0} overpasses catalogued · no local detection coordinates in this view`,
+    icon: Satellite,
+    color: '#be3c83',
+  },
+  {
+    key: ENVIRONMENT_LAYER_KEYS.rmiRadar,
+    label: 'RMI precipitation radar',
+    detail: environmental.rmiRadarFrame
+      ? `${environmental.rmiRadarFrame.observedAt.slice(11, 16)} UTC · incident pixel: ${environmental.rmiRadarFrame.incident?.label ?? 'unavailable'}`
+      : 'No radar observation available at selected time',
+    icon: Droplets,
+    color: '#356fae',
+  },
+  {
+    key: ENVIRONMENT_LAYER_KEYS.gibsFalseColor,
+    label: 'NASA VIIRS false colour',
+    detail: environmental.gibsFalseColor ? `${environmental.gibsFalseColor.date} daily imagery` : 'No daily image available at selected time',
+    icon: Satellite,
+    color: '#9d5a42',
+  },
+  {
+    key: ENVIRONMENT_LAYER_KEYS.gibsTrueColor,
+    label: 'NASA VIIRS true colour',
+    detail: environmental.gibsTrueColor ? `${environmental.gibsTrueColor.date} daily imagery` : 'No daily image available at selected time',
+    icon: Eye,
+    color: '#557b62',
+  },
+  {
+    key: ENVIRONMENT_LAYER_KEYS.camsWildfirePm10,
+    label: 'CAMS wildfire-only PM10',
+    detail: environmental.camsWildfirePm10
+      ? `${formatDecimal(environmental.camsWildfirePm10.point?.value, 2)} ${environmental.camsWildfirePm10.point?.unit ?? ''} at the incident model grid · ${environmental.camsWildfirePm10.validAt.slice(11, 16)} UTC`
+      : 'No model frame available at selected time',
+    icon: Wind,
+    color: '#8b69b4',
+  },
+  {
+    key: ENVIRONMENT_LAYER_KEYS.camsPm2p5,
+    label: 'CAMS PM2.5',
+    detail: environmental.camsPm2p5
+      ? `${formatDecimal(environmental.camsPm2p5.point?.value, 2)} ${environmental.camsPm2p5.point?.unit ?? ''} at the incident model grid · ${environmental.camsPm2p5.validAt.slice(11, 16)} UTC`
+      : 'No model frame available at selected time',
+    icon: Wind,
+    color: '#638db0',
   },
   ...FIRMS_SENSORS.map((sensor) => {
     const summary = firmsSummaries.find((entry) => entry.sensorKey === sensor.key)
@@ -471,6 +554,17 @@ function SourceMark({ tone }) {
   return <span className="source-monogram source-monogram--adsb"><Airplay size={17} /></span>
 }
 
+function sourceTone(sourceKey) {
+  if (sourceKey === 'firms' || sourceKey === 'nasa-gibs') return 'nasa'
+  if (sourceKey === 'effis' || sourceKey === 'ems' || sourceKey === 'sentinel1'
+    || sourceKey === 'sentinel2' || sourceKey === 'sentinel3-frp' || sourceKey === 'cams') return 'effis'
+  if (sourceKey === 'rmi-radar') return 'rmi'
+  if (sourceKey.includes('meteo') || sourceKey === 'dwd' || sourceKey === 'rmi') return 'weather'
+  if (sourceKey === 'reports' || sourceKey === 'vedia') return 'report'
+  if (sourceKey === 'local-authority-updates' || sourceKey === 'public-alerts') return 'official'
+  return 'adsb'
+}
+
 function DataModal({
   open,
   onClose,
@@ -481,7 +575,12 @@ function DataModal({
   sourceLinks,
   activeSources = [],
   sourceRuns = [],
+  cams = { frames: [] },
+  nasaGibs = { images: [] },
+  rmiRadar = { frames: [] },
+  sentinel1 = { scenes: [], matchedPairs: [] },
   sentinel2 = { scenes: [] },
+  sentinel3Frp = { scenes: [], detections: [] },
 }) {
   const [tab, setTab] = useState('connections')
   const [status, setStatus] = useState('idle')
@@ -491,6 +590,16 @@ function DataModal({
   const preFireQuicklook = sentinel2.lastPreFireScene?.quicklook?.stored ? sentinel2.lastPreFireScene : null
   const postFireQuicklook = sentinel2.firstPostFireScene?.quicklook?.stored ? sentinel2.firstPostFireScene : null
   const latestSentinelAnalysis = (sentinel2.analyses ?? []).filter((analysis) => analysis.status === 'ready').at(-1)
+  const latestRmiRadar = (rmiRadar.frames ?? []).at(-1)
+  const latestGibsFalseColor = (nasaGibs.images ?? []).filter((entry) => entry.layerKey === 'false-color').at(-1)
+  const latestGibsTrueColor = (nasaGibs.images ?? []).filter((entry) => entry.layerKey === 'true-color').at(-1)
+  const latestSentinel3Scene = (sentinel3Frp.scenes ?? []).filter((scene) => scene.thumbnail?.stored).at(-1)
+  const sentinel1Scenes = new globalThis.Map((sentinel1.scenes ?? []).map((scene) => [scene.id, scene]))
+  const latestSentinel1Pair = (sentinel1.matchedPairs ?? []).at(-1)
+  const sentinel1PreScene = latestSentinel1Pair ? sentinel1Scenes.get(latestSentinel1Pair.preSceneId) : null
+  const sentinel1PostScene = latestSentinel1Pair ? sentinel1Scenes.get(latestSentinel1Pair.postSceneId) : null
+  const latestCamsWildfire = (cams.frames ?? []).filter((entry) => entry.productKey === 'wildfire-pm10').at(-1)
+  const latestCamsPm2p5 = (cams.frames ?? []).filter((entry) => entry.productKey === 'pm2p5').at(-1)
   const sourceRunByKey = new globalThis.Map(sourceRuns.map((run) => [run.sourceKey, run]))
   const directorySources = activeSources
     .filter((source) => !NON_DIRECTORY_SOURCE_KEYS.has(source.key))
@@ -617,6 +726,67 @@ function DataModal({
                     <span className="connection-meta">Near-infrared and short-wave infrared comparison · checked for new images every 5 min · analysed crop retained in PostgreSQL</span>
                   </span>
                 </div>
+
+                <div className="connection-card connection-card--sentinel connection-card--environmental">
+                  {latestRmiRadar?.image?.databaseUrl ? (
+                    <img className="sentinel-preview environmental-preview environmental-preview--radar" src={latestRmiRadar.image.databaseUrl} alt={`RMI precipitation radar observed ${latestRmiRadar.observedAt}`} />
+                  ) : <span className="connection-icon connection-icon--weather"><Droplets size={20} /></span>}
+                  <span className="connection-copy">
+                    <span className="connection-title"><strong>RMI precipitation radar</strong><span className="status-pill status-pill--connected">{latestRmiRadar ? latestRmiRadar.incident?.label?.toUpperCase() : 'AWAITING FRAME'}</span></span>
+                    <p>{latestRmiRadar ? `The newest retained radar frame is ${absoluteObservationTimeLabel(Date.parse(latestRmiRadar.observedAt))}; its incident pixel is classified as ${latestRmiRadar.incident?.label ?? 'unavailable'}.` : 'No public radar frame has been retained yet.'}</p>
+                    <span className="connection-meta">Official RMI public animation · checked every 5 min · observation images currently arrive every 10 min</span>
+                  </span>
+                </div>
+
+                <div className="connection-card connection-card--sentinel connection-card--environmental">
+                  {latestGibsFalseColor && latestGibsTrueColor ? (
+                    <span className="sentinel-comparison" aria-label="NASA GIBS false-colour and true-colour imagery">
+                      <span><img className="sentinel-preview" src={latestGibsFalseColor.image.databaseUrl} alt={`NASA VIIRS false colour ${latestGibsFalseColor.date}`} /><b>SWIR</b></span>
+                      <span><img className="sentinel-preview" src={latestGibsTrueColor.image.databaseUrl} alt={`NASA VIIRS true colour ${latestGibsTrueColor.date}`} /><b>TRUE</b></span>
+                    </span>
+                  ) : <span className="connection-icon"><Eye size={20} /></span>}
+                  <span className="connection-copy">
+                    <span className="connection-title"><strong>NASA GIBS visual imagery</strong><span className="status-pill status-pill--connected">{latestGibsFalseColor?.date ?? 'AWAITING IMAGE'}</span></span>
+                    <p>Daily VIIRS true colour provides smoke and cloud context; the M11/I2/I1 composite makes heat and surface change easier to inspect. Neither image is treated as a hotspot or perimeter measurement.</p>
+                    <span className="connection-meta">Daily imagery checked every 30 min · distinct revisions retained in PostgreSQL</span>
+                  </span>
+                </div>
+
+                <div className="connection-card connection-card--sentinel connection-card--environmental">
+                  {latestSentinel3Scene?.thumbnail?.databaseUrl ? (
+                    <img className="sentinel-preview" src={latestSentinel3Scene.thumbnail.databaseUrl} alt={`Sentinel-3 SLSTR preview acquired ${latestSentinel3Scene.acquiredAt}`} />
+                  ) : <span className="connection-icon"><Satellite size={20} /></span>}
+                  <span className="connection-copy">
+                    <span className="connection-title"><strong>Sentinel-3 SLSTR NRT FRP</strong><span className="status-pill status-pill--connected">{(sentinel3Frp.scenes?.length ?? 0).toLocaleString('en-GB')} PASSES</span></span>
+                    <p>{latestSentinel3Scene ? `Latest intersecting overpass: ${absoluteObservationTimeLabel(Date.parse(latestSentinel3Scene.acquiredAt))}. ${(sentinel3Frp.detections?.length ?? 0).toLocaleString('en-GB')} local FRP coordinates are currently available to plot.` : 'The near-real-time FRP catalogue is synchronized; no intersecting preview is stored yet.'}</p>
+                    <span className="connection-meta">500 m SWIR / 1 km MWIR product · catalogue passes and previews do not become map detections by themselves</span>
+                  </span>
+                </div>
+
+                <div className="connection-card connection-card--sentinel connection-card--environmental">
+                  {sentinel1PreScene?.thumbnail?.stored && sentinel1PostScene?.thumbnail?.stored ? (
+                    <span className="sentinel-comparison" aria-label="Matched Sentinel-1 radar acquisition previews">
+                      <span><img className="sentinel-preview" src={sentinel1PreScene.thumbnail.databaseUrl} alt={`Sentinel-1 before acquisition ${sentinel1PreScene.acquiredAt}`} /><b>BEFORE</b></span>
+                      <span><img className="sentinel-preview" src={sentinel1PostScene.thumbnail.databaseUrl} alt={`Sentinel-1 after acquisition ${sentinel1PostScene.acquiredAt}`} /><b>AFTER</b></span>
+                    </span>
+                  ) : <span className="connection-icon"><Satellite size={20} /></span>}
+                  <span className="connection-copy">
+                    <span className="connection-title"><strong>Sentinel-1 radar acquisitions</strong><span className="status-pill status-pill--connected">{(sentinel1.matchedPairs?.length ?? 0).toLocaleString('en-GB')} MATCHED</span></span>
+                    <p>{latestSentinel1Pair ? `${latestSentinel1Pair.platform?.toUpperCase() ?? 'Sentinel-1'} relative orbit ${latestSentinel1Pair.relativeOrbit}, ${latestSentinel1Pair.orbitState}: ${latestSentinel1Pair.preAcquiredAt.slice(0, 10)} compared with ${latestSentinel1Pair.postAcquiredAt.slice(0, 10)}.` : 'No same-platform, same-orbit pre/post acquisition pair is catalogued yet.'} Preview images are context only and do not alter the Best estimate.</p>
+                    <span className="connection-meta">Cloud-independent radar catalogue · checked hourly · conservative matched-orbit pairs retained</span>
+                  </span>
+                </div>
+
+                <div className="connection-card connection-card--sentinel connection-card--environmental">
+                  {latestCamsWildfire?.image?.databaseUrl ? (
+                    <img className="sentinel-preview" src={latestCamsWildfire.image.databaseUrl} alt={`CAMS wildfire PM10 forecast valid ${latestCamsWildfire.validAt}`} />
+                  ) : <span className="connection-icon connection-icon--weather"><Wind size={20} /></span>}
+                  <span className="connection-copy">
+                    <span className="connection-title"><strong>CAMS smoke and air quality</strong><span className="status-pill status-pill--connected">MODEL</span></span>
+                    <p>{latestCamsWildfire ? `Incident grid: ${formatDecimal(latestCamsWildfire.point?.value, 2)} ${latestCamsWildfire.point?.unit ?? ''} wildfire-only PM10${latestCamsPm2p5 ? ` and ${formatDecimal(latestCamsPm2p5.point?.value, 2)} ${latestCamsPm2p5.point?.unit ?? ''} PM2.5` : ''}, valid ${latestCamsWildfire.validAt.slice(0, 16).replace('T', ' ')} UTC.` : 'No CAMS forecast frame has been retained yet.'}</p>
+                    <span className="connection-meta">Copernicus/ECMWF ensemble surface forecast · modelled transport context, not a ground sensor or fire edge</span>
+                  </span>
+                </div>
               </div>
 
               {message && (
@@ -639,7 +809,8 @@ function DataModal({
                 <article><span>02</span><div><strong>Reported area</strong><p>The line is a timestamped step series. A figure becomes visible when published; when its stated effective time differs, both times are retained and shown. Between reports it means “last reported,” not measured growth.</p></div></article>
                 <article><span>03</span><div><strong>EFFIS activity envelope</strong><p>EFFIS groups a day of VIIRS activity into a broad shape. Its calculated area can include ground between detections, so it is neither the reported affected area nor a field-confirmed perimeter.</p></div></article>
                 <article><span>04</span><div><strong>Aircraft observations</strong><p>Routes use exact receiver fixes. Missing coverage stays missing, and routes fade away after 24 hours. An aircraft seen near the incident is not automatically a firefighting aircraft; only repeated, near-fire GRZLY manoeuvres can influence the Best estimate.</p></div></article>
-                <article><span>05</span><div><strong>Situation reports</strong><p>Published estimates appear from their stated time and link to the original source. BRF figures remain labelled as local reporting rather than official measurements.</p></div></article>
+                <article><span>05</span><div><strong>Environmental context</strong><p>RMI radar shows precipitation; GIBS provides visual imagery; CAMS models smoke and particulate transport. Sentinel-3 catalogue passes and Sentinel-1 preview pairs remain context unless coordinate-level measurements pass the map and estimate rules.</p></div></article>
+                <article><span>06</span><div><strong>Situation reports</strong><p>Published estimates appear from their stated time and link to the original source. BRF figures remain labelled as local reporting rather than official measurements.</p></div></article>
               </div>
               <div className="safety-note"><ShieldAlert size={17} /><span>This viewer is informational and must not be used for evacuation or preservation-of-life decisions. Follow BE-Alert and emergency services.</span></div>
             </div>
@@ -659,7 +830,7 @@ function DataModal({
                         : cadenceLabel(source.intervalMinutes)
                 const content = (
                   <>
-                    <SourceMark tone={source.key === 'firms' ? 'nasa' : source.key === 'effis' || source.key === 'ems' || source.key === 'sentinel2' ? 'effis' : source.key.includes('meteo') || source.key === 'dwd' || source.key === 'rmi' ? 'weather' : source.key === 'reports' || source.key === 'vedia' ? 'report' : source.key === 'local-authority-updates' || source.key === 'public-alerts' ? 'official' : 'adsb'} />
+                    <SourceMark tone={sourceTone(source.key)} />
                     <span><strong>{source.label}</strong><small>{source.coverage}</small></span>
                     <em>{state}</em>
                     {source.providerUrl ? <ExternalLink size={15} /> : <CircleHelp size={15} />}
@@ -682,7 +853,7 @@ function DataModal({
                 </a>
               ))}
               <div className="source-footnote"><Database size={15} /><p>Current records and their history are stored in PostgreSQL. Source links open the original provider.</p></div>
-              <div className="source-footnote"><CircleHelp size={15} /><p>Timestamped aircraft-track exports or georeferenced satellite and aerial imagery could improve this record. <a href="https://apyos.com" target="_blank" rel="noreferrer">Contact us if you have access to this information.</a></p></div>
+              <div className="source-footnote"><CircleHelp size={15} /><p>Timestamped aircraft-track exports, georeferenced aerial imagery, or coordinate-level Sentinel-1/Sentinel-3 measurements could improve this record. <a href="https://apyos.com" target="_blank" rel="noreferrer">Contact us if you have access to this information.</a></p></div>
             </div>
           )}
         </div>
@@ -742,6 +913,41 @@ function FireViewer({ runtime, databaseError }) {
     analysis.status === 'ready' && Date.parse(analysis.acquiredAt) <= frame.timestampMs
   )), [runtime.sentinel2.analyses, frame.timestampMs])
   const currentSentinelAnalysis = visibleSentinelAnalyses.at(-1) ?? null
+  const currentRmiRadar = useMemo(
+    () => latestTimedRecord(runtime.rmiRadar.frames, 'observedAt', frame.timestampMs),
+    [runtime.rmiRadar.frames, frame.timestampMs],
+  )
+  const currentGibsFalseColor = useMemo(
+    () => latestDailyImage(runtime.nasaGibs.images, 'false-color', frame.timestampMs),
+    [runtime.nasaGibs.images, frame.timestampMs],
+  )
+  const currentGibsTrueColor = useMemo(
+    () => latestDailyImage(runtime.nasaGibs.images, 'true-color', frame.timestampMs),
+    [runtime.nasaGibs.images, frame.timestampMs],
+  )
+  const currentCamsWildfirePm10 = useMemo(
+    () => latestTimedRecord(runtime.cams.frames, 'validAt', frame.timestampMs, (entry) => entry.productKey === 'wildfire-pm10'),
+    [runtime.cams.frames, frame.timestampMs],
+  )
+  const currentCamsPm2p5 = useMemo(
+    () => latestTimedRecord(runtime.cams.frames, 'validAt', frame.timestampMs, (entry) => entry.productKey === 'pm2p5'),
+    [runtime.cams.frames, frame.timestampMs],
+  )
+  const visibleSentinel3Detections = useMemo(() => (runtime.sentinel3Frp.detections ?? []).filter((detection) => (
+    Number.isFinite(Date.parse(detection.acquiredAt)) && Date.parse(detection.acquiredAt) <= frame.timestampMs
+  )), [runtime.sentinel3Frp.detections, frame.timestampMs])
+  const sentinel3OverpassCount = useMemo(() => (runtime.sentinel3Frp.scenes ?? []).filter((scene) => (
+    Number.isFinite(Date.parse(scene.acquiredAt)) && Date.parse(scene.acquiredAt) <= frame.timestampMs
+  )).length, [runtime.sentinel3Frp.scenes, frame.timestampMs])
+  const environmentalAtTime = useMemo(() => ({
+    rmiRadarFrame: currentRmiRadar,
+    gibsFalseColor: currentGibsFalseColor,
+    gibsTrueColor: currentGibsTrueColor,
+    camsWildfirePm10: currentCamsWildfirePm10,
+    camsPm2p5: currentCamsPm2p5,
+    sentinel3DetectionCount: visibleSentinel3Detections.length,
+    sentinel3OverpassCount,
+  }), [currentRmiRadar, currentGibsFalseColor, currentGibsTrueColor, currentCamsWildfirePm10, currentCamsPm2p5, visibleSentinel3Detections.length, sentinel3OverpassCount])
   const sentinelSupportCells = useMemo(() => {
     const unique = new globalThis.Map()
     visibleSentinelAnalyses.forEach((analysis) => (analysis.supportCells ?? []).forEach((cell) => {
@@ -767,8 +973,8 @@ function FireViewer({ runtime, databaseError }) {
       })),
   }), [visibleSentinelAnalyses])
   const layerOptions = useMemo(
-    () => layerOptionsFor(currentEffisArea, effisCarriedForward, firmsData.sensors, frame, runtime.dwdWindStations, currentSentinelAnalysis),
-    [currentEffisArea, effisCarriedForward, firmsData.sensors, frame, runtime.dwdWindStations, currentSentinelAnalysis],
+    () => layerOptionsFor(currentEffisArea, effisCarriedForward, firmsData.sensors, frame, runtime.dwdWindStations, currentSentinelAnalysis, environmentalAtTime),
+    [currentEffisArea, effisCarriedForward, firmsData.sensors, frame, runtime.dwdWindStations, currentSentinelAnalysis, environmentalAtTime],
   )
   const reportedAreaText = frame.reportedAreaText
 
@@ -991,6 +1197,49 @@ function FireViewer({ runtime, databaseError }) {
       && activeConfidenceLevels.includes(detection.confidence.label)
   )), [firmsDetectionsAtTime, layers, activeConfidenceLevels])
 
+  const rasterOverlays = useMemo(() => [
+    ...(layers[ENVIRONMENT_LAYER_KEYS.gibsFalseColor] && currentGibsFalseColor?.image?.databaseUrl ? [{
+      id: `gibs-false-${currentGibsFalseColor.date}`,
+      kind: 'gibs-false-color',
+      url: currentGibsFalseColor.image.databaseUrl,
+      bounds: runtime.nasaGibs.bounds,
+      opacity: 0.72,
+      attribution: 'NASA EOSDIS GIBS',
+    }] : []),
+    ...(layers[ENVIRONMENT_LAYER_KEYS.gibsTrueColor] && currentGibsTrueColor?.image?.databaseUrl ? [{
+      id: `gibs-true-${currentGibsTrueColor.date}`,
+      kind: 'gibs-true-color',
+      url: currentGibsTrueColor.image.databaseUrl,
+      bounds: runtime.nasaGibs.bounds,
+      opacity: 0.72,
+      attribution: 'NASA EOSDIS GIBS',
+    }] : []),
+    ...(layers[ENVIRONMENT_LAYER_KEYS.camsWildfirePm10] && currentCamsWildfirePm10?.image?.databaseUrl ? [{
+      id: `cams-wildfire-${currentCamsWildfirePm10.validAt}`,
+      kind: 'cams-wildfire-pm10',
+      url: currentCamsWildfirePm10.image.databaseUrl,
+      bounds: runtime.cams.bounds,
+      opacity: 0.44,
+      attribution: runtime.cams.attribution,
+    }] : []),
+    ...(layers[ENVIRONMENT_LAYER_KEYS.camsPm2p5] && currentCamsPm2p5?.image?.databaseUrl ? [{
+      id: `cams-pm2p5-${currentCamsPm2p5.validAt}`,
+      kind: 'cams-pm2p5',
+      url: currentCamsPm2p5.image.databaseUrl,
+      bounds: runtime.cams.bounds,
+      opacity: 0.42,
+      attribution: runtime.cams.attribution,
+    }] : []),
+    ...(layers[ENVIRONMENT_LAYER_KEYS.rmiRadar] && currentRmiRadar?.image?.databaseUrl ? [{
+      id: `rmi-radar-${currentRmiRadar.observedAt}`,
+      kind: 'rmi-radar',
+      url: currentRmiRadar.image.databaseUrl,
+      bounds: runtime.rmiRadar.bounds,
+      opacity: 0.74,
+      attribution: 'Royal Meteorological Institute of Belgium',
+    }] : []),
+  ], [layers, currentGibsFalseColor, currentGibsTrueColor, currentCamsWildfirePm10, currentCamsPm2p5, currentRmiRadar, runtime.nasaGibs.bounds, runtime.cams.bounds, runtime.cams.attribution, runtime.rmiRadar.bounds])
+
   // The estimate is the area of the exact 50 m raster union used by the solid
   // boundary, so the number and the map geometry cannot disagree.
   const bestEstimateArea = useMemo(() => estimateFootprintArea(bestEstimateDetections, {
@@ -1195,7 +1444,9 @@ function FireViewer({ runtime, databaseError }) {
             onMapReady={setMapActions}
             importedTracks={visibleImportedTracks}
             firmsDetections={visibleFirmsDetections}
+            rasterOverlays={rasterOverlays}
             sentinelBurnGeometry={layers.sentinel2BurnChange ? sentinelBurnGeometry : null}
+            sentinel3Detections={layers[ENVIRONMENT_LAYER_KEYS.sentinel3Frp] ? visibleSentinel3Detections : []}
             fireOutlineRings={layers[FIRE_OUTLINE_KEY] ? fireOutlineRings : []}
             mapLabels={runtime.mapLabels}
             protectedArea={runtime.protectedArea}
@@ -1414,7 +1665,12 @@ function FireViewer({ runtime, databaseError }) {
         sourceLinks={runtime.sourceLinks}
         activeSources={runtime.sourceRegistry.sources}
         sourceRuns={sourceRuns}
+        cams={runtime.cams}
+        nasaGibs={runtime.nasaGibs}
+        rmiRadar={runtime.rmiRadar}
+        sentinel1={runtime.sentinel1}
         sentinel2={runtime.sentinel2}
+        sentinel3Frp={runtime.sentinel3Frp}
       />
     </div>
   )
