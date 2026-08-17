@@ -22,7 +22,17 @@ function errorResponse(status, error) {
 
 function allowedPath(value) {
   if (value === '/wp-sitemap-posts-post-1.xml') return value
-  return /^\/[a-z0-9][a-z0-9-]{1,180}\/$/u.test(value) ? value : null
+  if (typeof value !== 'string' || value.length > 800 || !value.startsWith('/') || !value.endsWith('/')) return null
+  try {
+    const decoded = decodeURIComponent(value)
+    const segments = decoded.slice(1, -1).split('/')
+    return segments.length >= 1 && segments.length <= 6
+      && segments.every((segment) => /^[\p{Letter}\p{Number}][\p{Letter}\p{Number}._~-]{0,180}$/u.test(segment))
+      ? value
+      : null
+  } catch {
+    return null
+  }
 }
 
 function bytesFromHex(value) {

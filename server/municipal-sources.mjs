@@ -519,7 +519,8 @@ async function refreshRdfProvider(provider, retrievedAt, query) {
       status: 'ok',
       itemCount: items.length,
       matchedCount: notices.length,
-      detailFailures: details.filter((detail) => detail.status === 'rejected').length,
+      detailFailures: detailFailureDetails.length,
+      detailFailureDetails,
     },
     notices,
   }
@@ -597,6 +598,14 @@ async function refreshHlz(provider, retrievedAt, query) {
   const notices = details.flatMap((detail) => (
     detail.status === 'fulfilled' && detail.value ? [detail.value] : []
   ))
+  const detailFailureDetails = details.flatMap((detail, index) => (
+    detail.status === 'rejected'
+      ? [{
+          url: candidates[index]?.url || null,
+          error: String(detail.reason?.message || detail.reason).slice(0, 200),
+        }]
+      : []
+  ))
   return {
     provider: {
       id: provider.id,
@@ -662,6 +671,14 @@ async function refreshButgenbach(
   const notices = details.flatMap((detail) => (
     detail.status === 'fulfilled' && detail.value ? [detail.value] : []
   ))
+  const detailFailureDetails = details.flatMap((detail, index) => (
+    detail.status === 'rejected'
+      ? [{
+          url: candidates[index]?.url || null,
+          error: String(detail.reason?.message || detail.reason).slice(0, 200),
+        }]
+      : []
+  ))
   return {
     provider: {
       id: provider.id,
@@ -674,7 +691,8 @@ async function refreshButgenbach(
       status: 'ok',
       itemCount: items.length,
       matchedCount: notices.length,
-      detailFailures: details.filter((detail) => detail.status === 'rejected').length,
+      detailFailures: detailFailureDetails.length,
+      detailFailureDetails,
       latestItemIds: latestItems.map((item) => item.id),
     },
     notices,
@@ -774,6 +792,9 @@ export async function refreshMunicipalUpdates({ requestedAtMs, query }) {
       failedProviders: providers.filter((provider) => provider.status === 'failed').map((provider) => provider.id),
       degradedProviders: providers.filter((provider) => provider.detailFailures > 0).map((provider) => provider.id),
       detailFailures: providers.reduce((total, provider) => total + (provider.detailFailures || 0), 0),
+      detailFailureDetails: providers.flatMap((provider) => (
+        provider.detailFailureDetails || []
+      ).map((failure) => ({ providerId: provider.id, ...failure }))),
       providerItemCounts: Object.fromEntries(providers.map((provider) => [provider.id, provider.itemCount])),
     },
   }

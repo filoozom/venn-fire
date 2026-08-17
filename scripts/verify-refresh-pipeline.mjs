@@ -20,6 +20,7 @@ import {
   trackedAircraftFromObservations,
 } from '../server/aircraft-sources.mjs'
 import { buildProviderArtifact } from '../server/source-artifacts.mjs'
+import { parseLegacyReportSource } from '../server/report-sources.mjs'
 import { payloadHash, setNoStoreHeaders } from '../server/database.mjs'
 import {
   normalizeDatexRoadEvents,
@@ -70,6 +71,54 @@ const expectedSources = [
   'ems',
   'sentinel2',
 ]
+
+const legacyReports = parseLegacyReportSource(`
+export const areaReports = [
+  {
+    timestampMs: Date.parse('2026-08-14T16:00:00+02:00'),
+    reportedHa: 60,
+    areaPrefix: '~',
+    areaLabel: 'official estimate at 16:00 CEST',
+    source: 'Governor of Liège',
+    sourceUrl: 'https://gouverneur.provincedeliege.be/fr/node/7923',
+  },
+  {
+    timestampMs: Date.parse('2026-08-14T20:00:00+02:00'),
+    reportedHa: 100,
+    areaPrefix: '~',
+    areaLabel: 'official estimate at 20:00 CEST',
+    source: 'Governor of Liège',
+    sourceUrl: 'https://gouverneur.provincedeliege.be/fr/node/7923',
+  },
+  {
+    timestampMs: Date.parse('2026-08-15T07:00:00+02:00'),
+    reportedHa: 850,
+    areaPrefix: '~',
+    areaLabel: 'official estimate at 07:00 CEST',
+    source: 'Governor of Liège',
+    sourceUrl: 'https://gouverneur.provincedeliege.be/fr/node/7923',
+  },
+  {
+    timestampMs: Date.parse('2026-08-15T11:28:00+02:00'),
+    reportedHa: 900,
+    areaPrefix: '>',
+    areaLabel: 'local reporting updated at 11:28 CEST',
+    source: 'BRF',
+    sourceUrl: 'https://brf.be/regional/2100196/',
+  },
+  {
+    timestampMs: Date.parse('2026-08-15T14:30:00+02:00'),
+    reportedHa: 1500,
+    areaPrefix: '>',
+    areaLabel: 'BRF update at 14:30 CEST',
+    source: 'BRF',
+    sourceUrl: 'https://brf.be/regional/2100196/',
+  },
+]
+
+export function mergeAreaReports() {}
+`)
+assert.deepEqual(legacyReports.map((report) => report.reportedHa), [60, 100, 850, 900, 1500])
 assert.deepEqual(REFRESH_SOURCES.map((source) => source.key), expectedSources)
 assert.ok(REFRESH_SOURCES.every((source) => source.intervalMinutes >= 5))
 assert.ok(REFRESH_SOURCES.every((source) => source.intervalMinutes % 5 === 0))
@@ -617,6 +666,22 @@ try {
   assert.equal(proxyResponse.status, 200)
   assert.equal(proxiedUrl, `https://butgenbach.be${proxyPath}`)
   assert.match(proxyResponse.headers.get('cache-control'), /no-store/)
+
+  const nestedProxyPath = '/2026/08/wichtige-information-zum-hohen-venn/'
+  const nestedProxySignature = createHmac('sha256', proxyToken)
+    .update(`${proxyTimestamp}\n${nestedProxyPath}`)
+    .digest('hex')
+  const nestedProxyResponse = await butgenbachSourceHandler(new Request(
+    `https://venn-fire.vercel.app/api/butgenbach-source?path=${encodeURIComponent(nestedProxyPath)}`,
+    {
+      headers: {
+        'X-Venn-Timestamp': String(proxyTimestamp),
+        'X-Venn-Signature': nestedProxySignature,
+      },
+    },
+  ))
+  assert.equal(nestedProxyResponse.status, 200, 'nested official WordPress article paths must be allowed')
+  assert.equal(proxiedUrl, `https://butgenbach.be${nestedProxyPath}`)
 
   proxiedUrl = null
   const rejectedProxyResponse = await butgenbachSourceHandler(new Request(

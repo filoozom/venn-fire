@@ -43,6 +43,7 @@ import {
 } from './flight-history.mjs'
 import { refreshVedia } from './media-sources.mjs'
 import { refreshMunicipalUpdates } from './municipal-sources.mjs'
+import { backfillLegacyReportHistory } from './report-sources.mjs'
 import { archiveProviderResponses } from './source-artifacts.mjs'
 
 const INCIDENT = { latitude: 50.54762, longitude: 6.05757 }
@@ -434,16 +435,17 @@ function mergeReportEvents(previous, incoming) {
 
 async function refreshReports({ requestedAtMs, query }) {
   const generatedAt = new Date(requestedAtMs).toISOString()
-  const [incoming, previous, historicalVersions] = await Promise.all([
+  const [incoming, previous, historicalVersions, legacyHistory] = await Promise.all([
     loadAreaReports(),
     previousPayload('reports', query, { areaReports: [] }),
     loadDatasetVersionPayloads('reports', { limit: 1_000 }, query),
+    backfillLegacyReportHistory({ requestedAtMs, query }),
   ])
   if (!incoming.ok) throw new Error('No live situation-report source succeeded')
   const historicalAreaReports = historicalVersions.flatMap((payload) => payload.areaReports || [])
   const historicalEvents = historicalVersions.flatMap((payload) => payload.events || [])
   const areaReports = mergeAreaReports(
-    [...historicalAreaReports, ...(previous.areaReports || [])],
+    [...(legacyHistory.reports || []), ...historicalAreaReports, ...(previous.areaReports || [])],
     incoming.areaReports,
   )
   const events = mergeReportEvents(
@@ -460,6 +462,8 @@ async function refreshReports({ requestedAtMs, query }) {
       areaReportCount: areaReports.length,
       eventCount: events.length,
       historicalVersionCount: historicalVersions.length,
+      legacyBackfillApplied: legacyHistory.applied,
+      legacyBackfillReportCount: legacyHistory.reportCount,
     },
   }
 }
