@@ -762,6 +762,9 @@ export function firmsDetectionKey(detection) {
   ].join('|')
 }
 
+const FIRMS_HISTORY_RECOVERY_KEY = 'migration-firms-history-20260814'
+const FIRMS_HISTORY_REQUESTED_AT_MS = Date.parse('2026-08-15T12:00:00.000Z')
+
 async function refreshFirms({ requestedAtMs, query, bucketAt }) {
   const mapKey = process.env.FIRMS_MAP_KEY?.trim()
   if (!mapKey) throw new Error('FIRMS_MAP_KEY is not configured')
@@ -822,6 +825,68 @@ async function refreshFirms({ requestedAtMs, query, bucketAt }) {
       rawArtifactCount: artifacts.length,
       rawArtifacts: artifacts.map((artifact) => artifact.artifactKey),
     },
+  }
+}
+
+async function refreshFirmsHistory({ requestedAtMs, query, bucketAt }) {
+  const [existing, previous] = await Promise.all([
+    loadDataset(FIRMS_HISTORY_RECOVERY_KEY, query),
+    previousPayload('firms', query, { sensors: [], detections: [] }),
+  ])
+  if (existing) {
+    return {
+      itemCount: previous.detections?.length || 0,
+      metadata: { changed: false, applied: false, ...existing.payload },
+    }
+  }
+  const mapKey = process.env.FIRMS_MAP_KEY?.trim()
+  if (!mapKey) throw new Error('FIRMS_MAP_KEY is not configured')
+  const incoming = await loadFirms({
+    mapKey,
+    requestedAtMs: FIRMS_HISTORY_REQUESTED_AT_MS,
+    includeRaw: true,
+  })
+  const { rawResponses, ...incomingPayload } = incoming
+  const artifacts = await archiveProviderResponses({
+    sourceKey: 'firms-history',
+    bucketAt,
+    responses: rawResponses,
+  }, query)
+  const failedSensors = incomingPayload.sources.filter((source) => !source.ok)
+  if (failedSensors.length || incomingPayload.sensors.length !== FIRMS_SENSORS.length) {
+    throw new Error(`FIRMS history recovery failed for ${failedSensors.map((source) => source.sensorKey).join(', ') || 'an incomplete sensor set'}`)
+  }
+  const detections = mergeRows(
+    previous.detections,
+    incomingPayload.detections,
+    firmsDetectionKey,
+    (left, right) => Date.parse(left.acquiredAt) - Date.parse(right.acquiredAt)
+      || left.sensorKey.localeCompare(right.sensorKey),
+  )
+  const generatedAt = new Date(requestedAtMs).toISOString()
+  const stored = await saveDataset({
+    key: 'firms',
+    payload: {
+      ...previous,
+      schemaVersion: previous.schemaVersion || 1,
+      generatedAt,
+      detections,
+      latestAcquiredAt: previous.latestAcquiredAt || incomingPayload.latestAcquiredAt,
+    },
+  }, query)
+  const recoveryPayload = {
+    schemaVersion: 1,
+    appliedAt: generatedAt,
+    requestedWindowStart: incomingPayload.incidentDate,
+    requestedDayRange: incomingPayload.dayRange,
+    recoveredDetectionCount: incomingPayload.detections.length,
+    newlyAddedDetectionCount: detections.length - (previous.detections?.length || 0),
+    rawArtifactCount: artifacts.length,
+  }
+  await saveDataset({ key: FIRMS_HISTORY_RECOVERY_KEY, payload: recoveryPayload }, query)
+  return {
+    itemCount: detections.length,
+    metadata: { changed: stored.changed, applied: true, ...recoveryPayload },
   }
 }
 
@@ -1235,6 +1300,11 @@ export const REFRESH_SOURCES = [
     key: 'firms', label: 'NASA FIRMS detections', intervalMinutes: 15, run: refreshFirms,
     providerUrl: 'https://firms.modaps.eosdis.nasa.gov/',
     coverage: 'Exact VIIRS and MODIS thermal detections plus GOES_NRT Meteosat detections with approximate viewing-geometry ground footprints from five products',
+  },
+  {
+    key: 'firms-history', label: 'NASA FIRMS ignition-day recovery', intervalMinutes: 360, run: refreshFirmsHistory,
+    providerUrl: 'https://firms.modaps.eosdis.nasa.gov/',
+    coverage: 'One-time official API recovery of the missing 14 August two-day sensor window; raw responses and completion marker retained in Postgres',
   },
   {
     key: 'effis', label: 'Copernicus EFFIS daily geometry', intervalMinutes: 360, run: refreshEffis,

@@ -507,6 +507,14 @@ async function refreshRdfProvider(provider, retrievedAt, query) {
     )
     return normalized ? [normalized] : []
   })
+  const detailFailureDetails = details.flatMap((detail, index) => (
+    detail.status === 'rejected'
+      ? [{
+          url: candidates[index]?.url || null,
+          error: String(detail.reason?.message || detail.reason).slice(0, 200),
+        }]
+      : []
+  ))
   return {
     provider: {
       id: provider.id,
@@ -618,7 +626,8 @@ async function refreshHlz(provider, retrievedAt, query) {
       status: 'ok',
       itemCount: items.length,
       matchedCount: notices.length,
-      detailFailures: details.filter((detail) => detail.status === 'rejected').length,
+      detailFailures: detailFailureDetails.length,
+      detailFailureDetails,
     },
     notices,
   }

@@ -67,6 +67,7 @@ const expectedSources = [
   'rmi',
   'dwd',
   'firms',
+  'firms-history',
   'effis',
   'effis-history',
   'ems',

@@ -81,6 +81,7 @@ The scheduler has five-minute granularity. A database lease makes repeated calls
 | RMI Mont Rigi WFS | Ten-minute station temperature, humidity, precipitation, wind, gust and validation flags | 10 min |
 | DWD CDC | Ten-minute wind observations and quality level from three nearby stations | 10 min |
 | NASA FIRMS, five products | Exact VIIRS Suomi-NPP, VIIRS NOAA-20 and VIIRS NOAA-21 footprints, MODIS detections, plus GOES_NRT Meteosat detections with approximate viewing-geometry ground footprints | 15 min |
+| NASA FIRMS ignition-day recovery | One official two-day API recovery for the missing 14 August window; completion marker prevents repeat allowance use | 6 h |
 | Copernicus EMS | Rapid Mapping activation catalogue and any incident match details | 60 min |
 | Copernicus Data Space | Sentinel-2 L2A catalogue metadata and public JPEG quicklook pixels archived as Postgres artifacts | 60 min |
 | Copernicus EFFIS WFS | Daily algorithmic VIIRS geometry nearest the incident | 6 h |
