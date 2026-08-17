@@ -77,6 +77,10 @@ if (unrelatedTrafficControls !== 0) {
   throw new Error(`Unrelated traffic is still exposed by ${unrelatedTrafficControls} UI control(s)`)
 }
 
+// The separately loaded aircraft payload updates the viewer once. Wait for that
+// update before operating the modal so React cannot replace a tab button during
+// Playwright's actionability checks.
+await page.getByText(/seen on selected day/).first().waitFor()
 await page.locator('.data-button').click()
 const publicImplementationLimits = await page.getByText('Known limits that are not synchronized', { exact: true }).count()
   + await page.getByText(/No fire-service or crisis-centre GeoJSON perimeter feed\/export has been supplied/).count()
@@ -147,12 +151,12 @@ const edgeNoteBeforeRepeat = await page.locator('.layer-note').first().innerText
 await selectTime('2026-08-15T21:10:00+02:00')
 const edgeAfterRepeat = await page.locator('.outline-method-key').innerText()
 const edgeNoteAfterRepeat = await page.locator('.layer-note').first().innerText()
-if (edgeNoteBeforeRepeat.includes('additional 50 m cells')) {
+if (edgeNoteBeforeRepeat.includes('additional 50 m aircraft cells')) {
   throw new Error(`Aircraft support appeared before repeat support: ${edgeNoteBeforeRepeat}`)
 }
 if (!edgeAfterRepeat.includes('Single combined outline')
   || edgeAfterRepeat.includes('Aircraft-supported edge')
-  || !edgeNoteAfterRepeat.includes('additional 50 m cells')
+  || !edgeNoteAfterRepeat.includes('additional 50 m aircraft cells')
   || !edgeNoteAfterRepeat.includes('direction changes')) {
   throw new Error(`Aircraft support did not enter the one outline on the expected five-minute frame: ${edgeAfterRepeat} / ${edgeNoteAfterRepeat}`)
 }

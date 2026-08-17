@@ -83,11 +83,38 @@ function compactSourceRegistry(payload) {
   return publicPayload
 }
 
+function compactSentinel2(payload) {
+  const compactQuicklook = (quicklook) => quicklook == null ? null : definedFields(quicklook, [
+    'stored',
+    'databaseUrl',
+    'providerUrl',
+    'contentType',
+    'byteLength',
+    'error',
+  ])
+  const compactScene = (scene) => scene == null ? null : {
+    ...scene,
+    quicklook: compactQuicklook(scene.quicklook),
+  }
+  const compactAnalysis = (analysis) => {
+    const { sourceRasterArtifactKey: _internalArtifactKey, ...publicAnalysis } = analysis
+    return publicAnalysis
+  }
+  return {
+    ...payload,
+    scenes: (payload.scenes ?? []).map(compactScene),
+    lastPreFireScene: compactScene(payload.lastPreFireScene),
+    firstPostFireScene: compactScene(payload.firstPostFireScene),
+    analyses: (payload.analyses ?? []).map(compactAnalysis),
+  }
+}
+
 export function publicDatasetPayload(key, payload) {
   if (!PUBLIC_DATASET_KEY_SET.has(key)) return null
   if (!payload || typeof payload !== 'object') return payload
   if (key === 'aircraft') return compactAircraft(payload)
   if (key === 'firms') return compactFirms(payload)
+  if (key === 'sentinel2') return compactSentinel2(payload)
   if (key === 'source-registry') return compactSourceRegistry(payload)
   return payload
 }

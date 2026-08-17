@@ -93,6 +93,29 @@ const publicSourceRegistry = publicDatasetPayload('source-registry', {
 assert.deepEqual(publicSourceRegistry.sources, [{ key: 'reports' }])
 assert.equal(publicSourceRegistry.coverageGaps, undefined)
 
+const publicSentinel = publicDatasetPayload('sentinel2', {
+  scenes: [{
+    name: 'scene',
+    quicklook: {
+      stored: true,
+      databaseUrl: '/api/sentinel-quicklook?id=public-id',
+      artifactKey: 'internal-artifact-key',
+      sha256: 'internal-sha',
+    },
+  }],
+  analyses: [{
+    status: 'ready',
+    supportCells: [[1, 2]],
+    geometry: { type: 'MultiPolygon', coordinates: [] },
+    sourceRasterArtifactKey: 'internal-raster-artifact-key',
+  }],
+})
+assert.equal(publicSentinel.scenes[0].quicklook.artifactKey, undefined)
+assert.equal(publicSentinel.scenes[0].quicklook.sha256, undefined)
+assert.equal(publicSentinel.scenes[0].quicklook.databaseUrl, '/api/sentinel-quicklook?id=public-id')
+assert.equal(publicSentinel.analyses[0].sourceRasterArtifactKey, undefined)
+assert.deepEqual(publicSentinel.analyses[0].supportCells, [[1, 2]])
+
 const aircraftWithoutOovst = publicDatasetPayload('aircraft', {
   observations: [{
     icao24: '44da74',

@@ -30,7 +30,7 @@ The PostgreSQL database is addressed through `DATABASE_URL`/`POSTGRES_URL` or th
 - `app_public_datasets`: compact current projections for the viewer. Canonical rows remain complete; repeated aircraft provider strings and reproducible FIRMS footprint coordinates are omitted only from this delivery copy to reduce database transfer.
 - `source_refresh_runs`: one status record for every claimed source/time bucket, including unchanged polls and errors.
 - `refresh_scheduler_ticks`: one leased status row per deployment/wake-up slot, preventing duplicate queue messages from branching the refresh chain.
-- `source_artifacts`: the content-addressed raw audit archive, including source API/feed responses and retained Sentinel quicklook bytes. Current counts and original-byte totals are reported by the database overview.
+- `source_artifacts`: the content-addressed raw audit archive, including source API/feed responses, retained Sentinel quicklook bytes and exact clipped Sentinel multispectral arrays. Current counts and original-byte totals are reported by the database overview.
 - `flight_import_runs` and `flight_observations`: exact, deduplicated receiver fixes retained for the incident lifetime.
 
 The repository contains no data snapshots, raw-response directory or local refresh daemon. The deleted aircraft snapshot is recovered once from its immutable Git revision, validated as 51 exact observations, archived and idempotently inserted into Postgres. The five timestamped area rows from the same pre-database revision are likewise checksum-validated and migrated once, which protects historical report steps that changed on their live article pages before the database cutover. Migration records prevent repeat upstream requests after either succeeds.
@@ -84,7 +84,7 @@ The scheduler has five-minute granularity. A database lease makes repeated calls
 | NASA FIRMS, five products | Exact VIIRS Suomi-NPP, VIIRS NOAA-20 and VIIRS NOAA-21 footprints, MODIS detections, plus GOES_NRT Meteosat detections with approximate viewing-geometry ground footprints | 15 min |
 | NASA FIRMS ignition-day recovery | One official two-day API recovery for the missing 14 August window; completion marker prevents repeat allowance use | 6 h |
 | Copernicus EMS | Rapid Mapping activation catalogue and any incident match details | 60 min |
-| Copernicus Data Space | Sentinel-2 L2A catalogue metadata and public JPEG quicklook pixels archived as Postgres artifacts | 60 min |
+| Copernicus Data Space + Earth Search public COGs | Sentinel-2 L2A catalogue metadata, public JPEG quicklooks, exact clipped B8A/B12/SCL arrays and cloud-masked dNBR geometry on the shared 50 m grid | 5 min catalogue check; raster processing once per new scene |
 | Copernicus EFFIS WFS | Daily algorithmic VIIRS geometry nearest the incident | 6 h |
 | Copernicus EFFIS historical-day recovery | Checksum-validated one-time recovery of the two pre-database daily products from the immutable project revision | 6 h |
 
@@ -157,18 +157,18 @@ Optional controlled-source variables:
 
 The source registry exposes only whether each adapter is configured; URLs issued privately by agencies, usernames, passwords, authorization headers and the ingestion token are never returned to the browser. Road pushes accept DATEX II XML, perimeter pushes accept WGS84 GeoJSON Polygon/MultiPolygon features, and operations pushes accept a publishable JSON `events` array. Raw CAD/radio traffic and personal evacuation-compliance records must not be sent; only agency-approved sanitized events and aggregate counts are accepted.
 
-Internal source and integration limitations are maintained in [`docs/known-source-limits.md`](docs/known-source-limits.md). They are deliberately excluded from the public viewer and its API payloads.
+Internal source and integration limitations are maintained in [`docs/known-source-limits.md`](docs/known-source-limits.md), and the retained raster format and selection rule are documented in [`docs/sentinel2-analysis.md`](docs/sentinel2-analysis.md). Internal limitations are deliberately excluded from the public viewer and its API payloads.
 
 Do not add a CDN cache in front of `/api/data`, `/api/live-reports`, `/api/live-situation`, `/api/firms-situation` or `/api/refresh`.
 
 ## Interpretation limits
 
 - The five-minute timeline carries the latest sourced value forward; it never interpolates a new measurement.
-- FIRMS pixels are thermal anomalies, not a burned-area perimeter. Standalone per-sensor figures remain separate and MODIS/Meteosat receive no standalone area. The Best estimate explicitly unions its corroborated VIIRS core, only the qualifying pixels from the newest high-confidence MODIS pass and any compact repeat-supported aircraft lobes; its displayed area is the area of that same solid 50 m raster outline. Meteosat never contributes.
+- FIRMS pixels are thermal anomalies, not a burned-area perimeter. Standalone per-sensor figures remain separate and MODIS/Meteosat receive no standalone area. The Best estimate explicitly unions its corroborated VIIRS core, only the qualifying pixels from the newest high-confidence MODIS pass, positive cloud-clear Sentinel-2 dNBR evidence anchored to that core, and any compact repeat-supported aircraft lobes; its displayed area is the area of that same solid 50 m raster outline. Meteosat never contributes.
 - EFFIS is a daily algorithmic VIIRS geometry, not a field-surveyed operational perimeter or within-day progression.
 - Aircraft markers and gap-limited connectors represent exact receiver observations, fade linearly and disappear after 24 hours. Coverage gaps remain gaps; no route, water pickup or drop is inferred. Repeated near-core `GRZLY##` direction changes may extend the same solid Best estimate union under the repeat-support rule, but do not establish a confirmed perimeter.
 - The dashed Touched zone retains the outermost strictly qualified historical raster edge from superseded MODIS passes and aircraft evidence that has left the current 24-hour window. It is cumulative context for possibly consumed ground, not an active-fire boundary; rejected approach and disconnected route outliers are never retained.
 - RMI and DWD station values remain separate from the Open-Meteo model. Near-real-time quality-control status is retained.
-- Copernicus EMS is a discovery catalogue. No EMS match means no matching activation was found in the current catalogue, not that operational mapping does not exist elsewhere. Sentinel-2 records include catalogue metadata and retained public JPEG quicklooks; they are not analysis-ready multispectral bands or a derived burn product.
+- Copernicus EMS is a discovery catalogue. No EMS match means no matching activation was found in the current catalogue, not that operational mapping does not exist elsewhere. Sentinel-2 contributes only positive, cloud-clear B8A/B12 dNBR change meeting the documented core-distance and connected-cell rule. Obscured or non-qualifying pixels remain unknown and never erase other evidence.
 - Municipal notices can report closures and evacuation guidance, but no agency feed is currently connected for a field-confirmed perimeter/fireline progression, live DATEX road state, suppression-resource dispatch, water pickup/drop events or aggregate evacuation compliance. Ready adapters remain empty until access or an agency-approved export is supplied. Raw CAD/radio and personal identities are intentionally excluded.
 - This viewer is informational, not an emergency service. Follow BE-Alert and local authorities.

@@ -9,6 +9,6 @@ This is internal implementation documentation. Do not render this list in the pu
 | `field-confirmed-fire-perimeter` | `access-not-supplied` | No fire-service or crisis-centre GeoJSON perimeter feed/export has been supplied to the ready pull/push adapter. |
 | `sanitized-suppression-operations` | `access-not-supplied` | No agency-approved dispatch, water pickup/drop, closure, evacuation or aggregate-compliance feed/export has been supplied. |
 | `historical-be-alert-before-collection` | `not-reconstructable-from-live-feed` | Alerts that expired before collection began are absent unless an external archive is supplied. |
-| `sentinel-analysis-ready-imagery` | `credentials-required` | Public quicklooks are retained; clipped multispectral bands and derived burn products require Copernicus Data Space OAuth credentials. |
+| `sentinel-cloud-obstruction` | `inherent-source-limit` | Public L2A COG windows now supply B8A, B12 and SCL for the derived dNBR product. Cloud, cirrus, smoke, shadow and classification uncertainty still leave obscured pixels unknown; missing change cannot be interpreted as unburned ground. |
 | `raw-cad-and-radio` | `not-public-and-potentially-sensitive` | Raw dispatch/CAD and tactical radio traffic are not published. Only an agency-approved sanitized export will be ingested. |
 | `evacuation-compliance-identities` | `intentionally-excluded` | Personal-level compliance data must not be exposed; the adapter accepts agency-approved aggregate counts only. |

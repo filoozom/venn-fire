@@ -45,6 +45,11 @@ import {
 import { refreshVedia } from './media-sources.mjs'
 import { refreshMunicipalUpdates } from './municipal-sources.mjs'
 import { backfillLegacyReportHistory } from './report-sources.mjs'
+import {
+  deriveSentinelBurnAnalysis,
+  searchSentinelAnalysisScenes,
+  SENTINEL_EARTH_SEARCH_URL,
+} from './sentinel-analysis.mjs'
 import { archiveProviderResponses } from './source-artifacts.mjs'
 
 const INCIDENT = { latitude: 50.54762, longitude: 6.05757 }
@@ -1169,6 +1174,24 @@ async function refreshEms({ requestedAtMs, query }) {
 const SENTINEL_CATALOGUE = 'https://catalogue.dataspace.copernicus.eu/odata/v1/Products'
 const IGNITION_ISO = '2026-08-14T11:06:00.000Z'
 
+async function archiveSentinelJson({ label, body, originalPath, capturedAt }, query) {
+  const buffer = Buffer.from(JSON.stringify(body))
+  const sha256 = createHash('sha256').update(buffer).digest('hex')
+  const artifactKey = `sentinel2-${label}-${sha256}`
+  await saveArtifact({
+    artifactKey,
+    sourceKey: 'sentinel2',
+    originalPath,
+    contentType: 'application/json',
+    contentEncoding: 'identity',
+    originalSize: buffer.byteLength,
+    sha256,
+    capturedAt,
+    contentBase64: buffer.toString('base64'),
+  }, query)
+  return artifactKey
+}
+
 async function refreshSentinel2({ requestedAtMs, query }) {
   const generatedAt = new Date(requestedAtMs).toISOString()
   const filter = [
@@ -1183,9 +1206,25 @@ async function refreshSentinel2({ requestedAtMs, query }) {
     $top: '50',
     $expand: 'Assets',
   })}`
-  const [response, previous] = await Promise.all([
+  const [response, previous, firms, analysisSearch] = await Promise.all([
     fetchJson(requestUrl, { timeoutMs: 45_000 }),
     previousPayload('sentinel2', query, { scenes: [] }),
+    previousPayload('firms', query, { detections: [] }),
+    searchSentinelAnalysisScenes(requestedAtMs),
+  ])
+  const rawArtifacts = await Promise.all([
+    archiveSentinelJson({
+      label: 'copernicus-catalogue',
+      body: response,
+      originalPath: requestUrl,
+      capturedAt: generatedAt,
+    }, query),
+    archiveSentinelJson({
+      label: 'earth-search-catalogue',
+      body: analysisSearch.body,
+      originalPath: SENTINEL_EARTH_SEARCH_URL,
+      capturedAt: generatedAt,
+    }, query),
   ])
   const previousScenes = new Map((previous.scenes ?? []).map((scene) => [scene.name, scene]))
   const incoming = await Promise.all((response.value ?? []).map(async (product) => {
@@ -1246,11 +1285,58 @@ async function refreshSentinel2({ requestedAtMs, query }) {
   )
   const preFire = scenes.filter((scene) => !scene.isPostFire)
   const postFire = scenes.filter((scene) => scene.isPostFire)
+  const previousAnalyses = previous.analyses ?? []
+  // An early catalogue poll can beat the FIRMS history needed to anchor a
+  // scene. Keep retrying that scene until the independent fire core exists;
+  // only completed raster analyses make a post scene final.
+  const analysedPostSceneIds = new Set(previousAnalyses
+    .filter((analysis) => analysis.status !== 'awaiting-corroborated-core')
+    .map((analysis) => analysis.postScene?.id))
+  const nextPostScene = analysisSearch.postScenes.find((scene) => !analysedPostSceneIds.has(scene.id))
+  let newAnalysis = null
+  let attemptedAnalysisStatus = null
+  if (analysisSearch.preScene && nextPostScene) {
+    const sourceRasterArtifactKey = `sentinel2-analysis-raster-${nextPostScene.id}`
+    let rasterStored = false
+    const derived = await deriveSentinelBurnAnalysis({
+      preScene: analysisSearch.preScene,
+      postScene: nextPostScene,
+      firmsPayload: firms,
+      onRasterArchive: async (archive) => {
+        await saveArtifact({
+          artifactKey: sourceRasterArtifactKey,
+          sourceKey: 'sentinel2',
+          originalPath: nextPostScene.links?.find((link) => link.rel === 'self')?.href ?? SENTINEL_EARTH_SEARCH_URL,
+          contentType: archive.contentType,
+          contentEncoding: archive.contentEncoding,
+          originalSize: archive.originalSize,
+          sha256: archive.sha256,
+          capturedAt: nextPostScene.properties?.datetime,
+          contentBase64: archive.content.toString('base64'),
+        }, query)
+        rasterStored = true
+      },
+    })
+    attemptedAnalysisStatus = derived.status
+    if (derived.status !== 'awaiting-corroborated-core') {
+      newAnalysis = {
+        ...derived,
+        ...(rasterStored ? { sourceRasterArtifactKey } : {}),
+      }
+      if (rasterStored) rawArtifacts.push(sourceRasterArtifactKey)
+    }
+  }
+  const analyses = mergeRows(
+    previousAnalyses,
+    newAnalysis ? [newAnalysis] : [],
+    (analysis) => analysis.postScene?.id,
+    (left, right) => Date.parse(left.acquiredAt) - Date.parse(right.acquiredAt),
+  )
   const gaps = scenes.slice(1).map((scene, index) => Number((
     (Date.parse(scene.acquiredAt) - Date.parse(scenes[index].acquiredAt)) / 86_400_000
   ).toFixed(2)))
   const payload = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     retrievedAt: generatedAt,
     source: { name: 'Copernicus Data Space Ecosystem catalogue', url: SENTINEL_CATALOGUE, requestUrl },
     locationReference: { name: 'Drossart locality', ...INCIDENT },
@@ -1262,6 +1348,7 @@ async function refreshSentinel2({ requestedAtMs, query }) {
     lastPreFireScene: preFire.at(-1) ?? null,
     firstPostFireScene: postFire[0] ?? null,
     scenes,
+    analyses,
     observedGapsDays: gaps,
     interpretation: previous.interpretation || [],
   }
@@ -1273,6 +1360,13 @@ async function refreshSentinel2({ requestedAtMs, query }) {
       postFireScenes: postFire.length,
       storedQuicklooks: payload.storedQuicklookCount,
       failedQuicklooks: payload.failedQuicklookCount,
+      analysisCount: analyses.length,
+      latestAnalysisStatus: analyses.at(-1)?.status ?? attemptedAnalysisStatus ?? 'awaiting-post-fire-scene',
+      latestAnalysisAcquiredAt: analyses.at(-1)?.acquiredAt ?? null,
+      latestAnalysisSupportCellCount: analyses.at(-1)?.supportCellCount ?? 0,
+      latestAnalysisClearFraction: analyses.at(-1)?.clearFraction ?? null,
+      rawArtifacts,
+      rawArtifactCount: rawArtifacts.length,
     },
   }
 }
@@ -1382,9 +1476,9 @@ export const REFRESH_SOURCES = [
     coverage: 'Rapid Mapping activation catalogue and full match details when an activation appears',
   },
   {
-    key: 'sentinel2', label: 'Sentinel-2 catalogue and quicklooks', intervalMinutes: 60, run: refreshSentinel2,
+    key: 'sentinel2', label: 'Sentinel-2 catalogue, quicklooks and burn change', intervalMinutes: 5, run: refreshSentinel2,
     providerUrl: 'https://dataspace.copernicus.eu/',
-    coverage: 'L2A scene metadata plus public JPEG quicklook pixels archived in Postgres',
+    coverage: 'Five-minute catalogue checks; official L2A metadata and public JPEG quicklooks plus cloud-masked 20 m B8A/B12 dNBR change from public L2A COG windows, dissolved onto the shared 50 m estimate grid and archived in Postgres',
   },
 ]
 

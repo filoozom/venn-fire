@@ -2482,6 +2482,35 @@ button {
   border-radius: 8px;
 }
 
+.sentinel-comparison {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  width: 112px;
+}
+
+.sentinel-comparison > span {
+  position: relative;
+  min-width: 0;
+}
+
+.sentinel-comparison .sentinel-preview {
+  display: block;
+  width: 100%;
+}
+
+.sentinel-comparison b {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  padding: 2px 3px;
+  border-radius: 3px;
+  color: #fff;
+  background: rgb(20 34 29 / 72%);
+  font-size: 6.5px;
+  letter-spacing: 0.08em;
+}
+
 button.connection-card--upload {
   color: inherit;
   text-align: left;

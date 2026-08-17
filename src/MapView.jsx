@@ -114,6 +114,7 @@ export default function MapView({
   onMapReady,
   importedTracks = [],
   firmsDetections = [],
+  sentinelBurnGeometry = null,
   fireOutlineRings = [],
   touchedZoneRings = [],
   mapLabels = [],
@@ -323,6 +324,29 @@ export default function MapView({
       ).addTo(group)
     })
 
+    if (sentinelBurnGeometry?.features?.length) {
+      L.geoJSON(sentinelBurnGeometry, {
+        style: {
+          color: '#765093',
+          weight: 1.15,
+          opacity: 0.88,
+          fillColor: '#8f6aab',
+          fillOpacity: 0.22,
+          className: 'sentinel-burn-change',
+        },
+        onEachFeature: (feature, layer) => {
+          const properties = feature.properties ?? {}
+          layer.bindTooltip(
+            `<strong>Sentinel-2 cloud-clear burn change</strong><br>`
+            + `${Number(properties.supportCellCount ?? 0).toLocaleString('en-GB')} qualified 50 m cells · ${Number(properties.supportAreaHa ?? 0).toLocaleString('en-GB')} ha grid coverage<br>`
+            + `<small>B8A/B12 dNBR · acquired ${escapeHtml(String(properties.acquiredAt ?? '').replace('T', ' ').slice(0, 16))} UTC · ${Math.round(Number(properties.clearFraction ?? 0) * 100)}% of the analysis crop cloud-clear</small><br>`
+            + '<small>Positive spectral change anchored to the corroborated fire core; not a field-confirmed perimeter or severity class. Obscured pixels remain unknown.</small>',
+            { sticky: true },
+          )
+        },
+      }).addTo(group)
+    }
+
     // The touched zone keeps the outermost strictly qualified historical reach.
     // It is drawn first, so the current solid estimate covers every overlapping
     // segment and only aged-out outer edges remain visibly dashed.
@@ -441,7 +465,7 @@ export default function MapView({
         }), { direction: 'top', offset: [0, -18] })
         .addTo(group)
     })
-  }, [frameIndex, frame, flights, effisArea, effisCarriedForward, layers, importedTracks, firmsDetections, fireOutlineRings, touchedZoneRings, protectedArea, officialPerimeter])
+  }, [frameIndex, frame, flights, effisArea, effisCarriedForward, layers, importedTracks, firmsDetections, sentinelBurnGeometry, fireOutlineRings, touchedZoneRings, protectedArea, officialPerimeter])
 
   return (
     <div className="map-surface" aria-label="Interactive fire situation map">

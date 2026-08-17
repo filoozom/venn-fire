@@ -588,7 +588,22 @@ function addSupportPolygonCells(occupied, supportPolygons, projection, gridCellM
   })
 }
 
-function rasterizedFootprintUnion(detections, { gridCellM, origin, supportPolygons = [] }) {
+function addDirectSupportCells(occupied, supportCells) {
+  for (const cell of supportCells) {
+    if (!Array.isArray(cell) || cell.length !== 2) continue
+    const x = Number(cell[0])
+    const y = Number(cell[1])
+    if (!Number.isInteger(x) || !Number.isInteger(y)) continue
+    occupied.add(`${x}:${y}`)
+  }
+}
+
+function rasterizedFootprintUnion(detections, {
+  gridCellM,
+  origin,
+  supportPolygons = [],
+  supportCells = [],
+}) {
   const anchorLat = origin?.latitude ?? detections[0].latitude
   const anchorLon = origin?.longitude ?? detections[0].longitude
   const projection = {
@@ -601,11 +616,15 @@ function rasterizedFootprintUnion(detections, { gridCellM, origin, supportPolygo
   detections.forEach((detection) => addDetectionCells(occupied, detection, projection, gridCellM))
   const sensorCellCount = occupied.size
   addSupportPolygonCells(occupied, supportPolygons, projection, gridCellM)
+  const polygonSupportCellCount = occupied.size - sensorCellCount
+  addDirectSupportCells(occupied, supportCells)
   return {
     occupied,
     projection,
     sensorCellCount,
     supportCellCount: occupied.size - sensorCellCount,
+    polygonSupportCellCount,
+    directSupportCellCount: occupied.size - sensorCellCount - polygonSupportCellCount,
   }
 }
 
@@ -613,8 +632,10 @@ export function estimateFootprintArea(detections, {
   gridCellM = 25,
   origin,
   supportPolygons = [],
+  supportCells = [],
 } = {}) {
   const hasSupport = supportPolygons.some((polygon) => Array.isArray(polygon) && polygon.length >= 4)
+    || supportCells.some((cell) => Array.isArray(cell) && cell.length === 2)
   const method = `Union of published sensor pixel footprints${hasSupport ? ' and qualifying support geometry' : ''}, dissolved on a ${gridCellM} m grid`
 
   if (!detections.length) {
@@ -625,6 +646,10 @@ export function estimateFootprintArea(detections, {
       detectionCount: 0,
       sensorUnionHa: 0,
       supportCellCount: 0,
+      polygonSupportCellCount: 0,
+      directSupportCellCount: 0,
+      polygonSupportAreaHa: 0,
+      directSupportAreaHa: 0,
       supportAreaHa: 0,
       gridCellM,
       method,
@@ -638,10 +663,17 @@ export function estimateFootprintArea(detections, {
     sumSquareMetres += detection.scanKm * detection.trackKm * 1e6
   }
 
-  const { occupied, sensorCellCount, supportCellCount } = rasterizedFootprintUnion(detections, {
+  const {
+    occupied,
+    sensorCellCount,
+    supportCellCount,
+    polygonSupportCellCount,
+    directSupportCellCount,
+  } = rasterizedFootprintUnion(detections, {
     gridCellM,
     origin,
     supportPolygons,
+    supportCells,
   })
   const unionHa = occupied.size * gridCellM * gridCellM / 10000
   const sensorUnionHa = sensorCellCount * gridCellM * gridCellM / 10000
@@ -655,6 +687,10 @@ export function estimateFootprintArea(detections, {
     detectionCount: detections.length,
     sensorUnionHa,
     supportCellCount,
+    polygonSupportCellCount,
+    directSupportCellCount,
+    polygonSupportAreaHa: polygonSupportCellCount * gridCellM * gridCellM / 10000,
+    directSupportAreaHa: directSupportCellCount * gridCellM * gridCellM / 10000,
     supportAreaHa,
     gridCellM,
     method,
@@ -826,6 +862,7 @@ export function footprintOutlineRings(detections, {
   gridCellM = 50,
   origin,
   supportPolygons = [],
+  supportCells = [],
 } = {}) {
   if (!detections.length) return []
 
@@ -835,6 +872,7 @@ export function footprintOutlineRings(detections, {
     gridCellM,
     origin,
     supportPolygons,
+    supportCells,
   })
   const { anchorLat, anchorLon, mPerLat, mPerLon } = projection
 

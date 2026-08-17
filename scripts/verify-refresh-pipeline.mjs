@@ -149,6 +149,7 @@ assert.equal(REFRESH_SOURCES.find((source) => source.key === 'aircraft-traces').
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'aircraft-history').intervalMinutes, 360)
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'aircraft-route-history').intervalMinutes, 5)
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'firms').intervalMinutes, 15)
+assert.equal(REFRESH_SOURCES.find((source) => source.key === 'sentinel2').intervalMinutes, 5)
 assert.deepEqual(completedUtcDatesBeforeToday(Date.parse('2026-08-17T12:00:00.000Z')), [
   '2026-08-16',
   '2026-08-15',
