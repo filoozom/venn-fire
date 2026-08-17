@@ -26,7 +26,6 @@ import {
   listArtifacts,
   loadDataset,
   loadDatasetVersionPayloads,
-  removeRetiredPlaceholderState,
   saveArtifact,
   saveDataset,
 } from './database.mjs'
@@ -1472,7 +1471,6 @@ function registrySources() {
 
 export async function refreshAllSources({ requestedAtMs = Date.now() } = {}) {
   const query = databaseQuery()
-  await removeRetiredPlaceholderState(query)
   await saveDataset({
     key: 'source-registry',
     payload: {
