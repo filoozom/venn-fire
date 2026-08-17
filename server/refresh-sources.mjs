@@ -1281,12 +1281,12 @@ export const REFRESH_SOURCES = [
   {
     key: 'aircraft', label: 'Live incident aircraft', intervalMinutes: 5, run: refreshAircraft,
     providerUrl: 'https://airplanes.live/api-guide/',
-    coverage: 'One incident-area point request to adsb.fi and ADSB.lol every five minutes, hourly Airplanes.live health checks, verified identities plus conservatively supported low-altitude response candidates, exact accepted fixes and every raw response retained',
+    coverage: 'One incident-area point request to adsb.fi and ADSB.lol every five minutes, hourly Airplanes.live health checks, verified identities, GRZLY callsigns and candidates with response-aircraft evidence, exact accepted fixes and every raw response retained',
   },
   {
     key: 'aircraft-artifacts', label: 'Retained aircraft poll recovery', intervalMinutes: 5, run: refreshAircraftArtifacts,
     providerUrl: null,
-    coverage: 'Reprocesses retained raw point responses without provider calls, promoting response-type, cross-provider or repeated low-altitude incident-area candidates and backfilling exact fixes',
+    coverage: 'Reprocesses retained raw point responses without provider calls, promoting only identities with response-aircraft evidence and backfilling exact fixes',
   },
   {
     key: 'aircraft-traces', label: 'Current aircraft trace catch-up', intervalMinutes: 5, run: refreshCurrentAircraftTraces,

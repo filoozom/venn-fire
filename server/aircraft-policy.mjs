@@ -4,6 +4,11 @@ export const EXCLUDED_INCIDENT_AIRCRAFT = new Map([
     registration: 'OO-VST',
     reason: 'Tecnam P2006T seen near the incident without response-specific aircraft, callsign or operational evidence',
   }],
+  ['06a30b', {
+    callSign: 'QTR8098',
+    registration: 'A7-BFX',
+    reason: 'Qatar Airways Boeing 777 transit traffic; cross-provider position agreement is not incident involvement',
+  }],
 ])
 
 export function excludedIncidentAircraft(icao24) {

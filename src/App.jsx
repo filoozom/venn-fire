@@ -696,12 +696,14 @@ function FireViewer({ runtime, databaseError }) {
   const selectedDayStartMs = Date.parse(`${selectedDayKey}T00:00:00+02:00`)
   const selectedDayEndMs = selectedDayStartMs + 24 * 60 * 60 * 1_000
   const flightsSeenOnSelectedDay = receiverObservedFlights.flatMap((flight) => {
-    const observations = visibleAircraftObservations(flight.observations, frame.timestampMs)
-      .filter((observation) => (
+    const visibleObservations = visibleAircraftObservations(flight.observations, frame.timestampMs)
+    const observations = visibleObservations.filter((observation) => (
         observation.timestampMs >= selectedDayStartMs
         && observation.timestampMs < selectedDayEndMs
       ))
-    return observations.length ? [{ flight, observations, latest: observations.at(-1) }] : []
+    return observations.length
+      ? [{ flight, observations, visibleObservations, latest: observations.at(-1) }]
+      : []
   })
   const latestSelectedDayFlight = flightsSeenOnSelectedDay
     .slice()
@@ -1306,8 +1308,8 @@ function FireViewer({ runtime, databaseError }) {
                   <button
                     type="button"
                     disabled={!flightsSeenOnSelectedDay.length}
-                    onClick={() => showAircraftRoute(flightsSeenOnSelectedDay.flatMap((entry) => entry.observations))}
-                  ><LocateFixed size={14} /> Show selected-day routes</button>
+                    onClick={() => showAircraftRoute(flightsSeenOnSelectedDay.flatMap((entry) => entry.visibleObservations))}
+                  ><LocateFixed size={14} /> Show selected-day flight sessions</button>
                   <button type="button" onClick={() => setDataOpen(true)}><FileUp size={14} /> Import tracks</button>
                 </div>
               </div>

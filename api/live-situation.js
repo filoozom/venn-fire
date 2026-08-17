@@ -35,6 +35,13 @@ export const INCIDENT_AIRCRAFT = new Map([
     aircraftDescription: 'Boeing CH-47F Chinook',
     displayType: 'helicopter',
   }],
+  ['480444', {
+    callSign: 'GRZLY80',
+    registration: 'D-483',
+    aircraftType: 'H47',
+    aircraftDescription: 'Boeing CH-47F Chinook',
+    displayType: 'helicopter',
+  }],
 ])
 export const INCIDENT_CALLSIGN_PATTERNS = [/^GRZLY\d{1,3}$/i]
 export const INCIDENT_RADIUS_KM = 10
@@ -355,14 +362,11 @@ export function normalizeAircraft(
 function candidateSupportBasis(observations) {
   const evidence = new Set(observations.flatMap((observation) => observation.candidateEvidence || []))
   if (evidence.size) return 'incident-response-type'
-
-  const providers = new Set(observations.map((observation) => observation.providerId).filter(Boolean))
-  if (providers.size >= 2) return 'incident-area-corroborated'
-
-  const buckets = new Set(observations.map((observation) => (
-    Math.floor(Date.parse(observation.observedAt) / (5 * 60 * 1_000))
-  )))
-  if (buckets.size >= 2) return 'incident-area-repeated'
+  // Multiple receivers can corroborate a position, not an operational role.
+  // OOVST and QTR8098 demonstrated that proximity/repetition alone promotes
+  // ordinary traffic. Unknown identities now require response-aircraft type,
+  // description, rotorcraft category or military metadata; verified hexes and
+  // explicit GRZLY callsigns are resolved before this candidate path.
   return null
 }
 

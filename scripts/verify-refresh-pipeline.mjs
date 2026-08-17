@@ -177,6 +177,13 @@ assert.deepEqual(INCIDENT_AIRCRAFT.get('48044c'), {
   aircraftDescription: 'Boeing CH-47F Chinook',
   displayType: 'helicopter',
 })
+assert.deepEqual(INCIDENT_AIRCRAFT.get('480444'), {
+  callSign: 'GRZLY80',
+  registration: 'D-483',
+  aircraftType: 'H47',
+  aircraftDescription: 'Boeing CH-47F Chinook',
+  displayType: 'helicopter',
+})
 assert.equal(CURRENT_AIRCRAFT_TRACE_PROVIDERS.length, 1)
 assert.equal(HISTORICAL_AIRCRAFT_TRACE_PROVIDERS.length, 2)
 assert.equal(REFRESH_QUEUE_TOPIC, 'venn-fire-refresh')
@@ -265,8 +272,8 @@ const genericFromLol = normalizeAircraft(
   { includeCandidates: true },
 )
 const corroboratedGeneric = promoteIncidentAircraftCandidates([...genericFromFi, ...genericFromLol])
-assert.equal(corroboratedGeneric.length, 2, 'two providers must retain a plausible incident-area candidate')
-assert.ok(corroboratedGeneric.every((row) => row.selectionBasis === 'incident-area-corroborated'))
+assert.equal(corroboratedGeneric.length, 0,
+  'two providers corroborate a position, not an incident role; generic traffic must not be promoted')
 const unrelatedSeparatedRows = promoteIncidentAircraftCandidates([
   genericFromFi[0],
   { ...genericFromFi[0], observedAt: '2026-08-15T13:05:00.000Z' },
@@ -302,6 +309,10 @@ assert.equal(normalizeAircraft(
   INCIDENT_AIRCRAFT,
   { includeCandidates: true },
 ).length, 0, 'reviewed proximity-only OOVST observations must stay out of incident products')
+assert.equal(resolveIncidentAircraft({
+  hex: '06a30b', flight: 'QTR8098', r: 'A7-BFX', t: 'B77L',
+}, INCIDENT_AIRCRAFT, { allowCandidate: true }), null,
+'reviewed scheduled-airline transit traffic must stay out of incident products')
 
 const traceProvider = CURRENT_AIRCRAFT_TRACE_PROVIDERS[0]
 const trace = normalizeAircraftTrace({

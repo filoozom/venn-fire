@@ -100,6 +100,12 @@ const aircraftWithoutOovst = publicDatasetPayload('aircraft', {
     observedAt: '2026-08-16T12:00:00.000Z',
     latitude: 50.55,
     longitude: 6.06,
+  }, {
+    icao24: '06a30b',
+    callSign: 'QTR8098',
+    observedAt: '2026-08-17T14:26:54.467Z',
+    latitude: 50.51,
+    longitude: 6.01,
   }],
   latestObservations: [],
 })
