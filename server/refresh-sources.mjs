@@ -36,6 +36,7 @@ import {
   refreshRoadEvents,
   ROAD_SOURCE_URL,
 } from './controlled-sources.mjs'
+import { backfillLegacyEffisHistory } from './effis-sources.mjs'
 import {
   flightObservationKey,
   persistFlightObservations,
@@ -999,48 +1000,11 @@ async function refreshEffis({ requestedAtMs, query }) {
   return { itemCount: products.length, metadata: { changed: stored.changed, productDate } }
 }
 
-function effisDatesBefore(endDate) {
-  const dates = []
-  for (let cursor = Date.parse('2026-08-14T00:00:00.000Z');
-    cursor < Date.parse(`${endDate}T00:00:00.000Z`);
-    cursor += 24 * 60 * 60 * 1_000) {
-    dates.push(new Date(cursor).toISOString().slice(0, 10))
-  }
-  return dates
-}
-
 async function refreshEffisHistory({ requestedAtMs, query }) {
-  const generatedAt = new Date(requestedAtMs).toISOString()
-  const previous = await previousPayload('effis', query, { products: [] })
-  const retainedDates = new Set((previous.products || []).map((product) => product.productDate))
-  const missingDates = effisDatesBefore(generatedAt.slice(0, 10))
-    .filter((productDate) => !retainedDates.has(productDate))
-  if (!missingDates.length) {
-    return {
-      itemCount: previous.products?.length || 0,
-      metadata: { changed: false, missingDates: [], recoveredDates: [] },
-    }
-  }
-  const recovered = await Promise.all(missingDates.map((productDate) => (
-    loadEffisProduct(productDate, generatedAt)
-  )))
-  const products = mergeRows(
-    previous.products,
-    recovered,
-    (item) => item.productDate,
-    (left, right) => left.productDate.localeCompare(right.productDate),
-  )
-  const stored = await saveDataset({
-    key: 'effis',
-    payload: { schemaVersion: 1, generatedAt, products },
-  }, query)
+  const recovery = await backfillLegacyEffisHistory({ requestedAtMs, query })
   return {
-    itemCount: products.length,
-    metadata: {
-      changed: stored.changed,
-      missingDates,
-      recoveredDates: recovered.map((product) => product.productDate),
-    },
+    itemCount: recovery.productCount,
+    metadata: { changed: recovery.applied, ...recovery },
   }
 }
 
@@ -1312,9 +1276,9 @@ export const REFRESH_SOURCES = [
     coverage: 'Nearest daily VIIRS-derived algorithmic geometry; distinct from a field perimeter',
   },
   {
-    key: 'effis-history', label: 'Copernicus EFFIS historical-day recovery', intervalMinutes: 360, run: refreshEffisHistory,
+    key: 'effis-history-migration', label: 'Copernicus EFFIS historical-day recovery', intervalMinutes: 360, run: refreshEffisHistory,
     providerUrl: EFFIS_SOURCE.documentation,
-    coverage: 'Leased recovery of missing incident-day geometries directly from the official WFS; no bundled geometry fallback',
+    coverage: 'Checksum-validated one-time recovery of the two pre-database daily products from the immutable project revision, archived and retained in Postgres',
   },
   {
     key: 'ems', label: 'Copernicus EMS activations', intervalMinutes: 60, run: refreshEms,

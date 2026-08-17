@@ -20,6 +20,7 @@ import {
   trackedAircraftFromObservations,
 } from '../server/aircraft-sources.mjs'
 import { buildProviderArtifact } from '../server/source-artifacts.mjs'
+import { parseLegacyEffisSource } from '../server/effis-sources.mjs'
 import { parseLegacyReportSource } from '../server/report-sources.mjs'
 import { payloadHash, setNoStoreHeaders } from '../server/database.mjs'
 import {
@@ -69,7 +70,7 @@ const expectedSources = [
   'firms',
   'firms-history',
   'effis',
-  'effis-history',
+  'effis-history-migration',
   'ems',
   'sentinel2',
 ]
@@ -121,6 +122,18 @@ export const areaReports = [
 export function mergeAreaReports() {}
 `)
 assert.deepEqual(legacyReports.map((report) => report.reportedHa), [60, 100, 850, 900, 1500])
+const legacyEffisProducts = parseLegacyEffisSource(`
+const effisBurnedArea20260814 = {
+  productDate: '2026-08-14', source: 'Copernicus EFFIS', areaHa: 501.4,
+  rings: [[[50.5, 6.0], [50.5, 6.1], [50.6, 6.1], [50.5, 6.0]]],
+}
+const effisBurnedArea20260815 = {
+  productDate: '2026-08-15', source: 'Copernicus EFFIS', areaHa: 4857,
+  rings: [[[50.4, 5.9], [50.4, 6.2], [50.7, 6.2], [50.4, 5.9]]],
+}
+export const effisBurnedAreas = [effisBurnedArea20260814, effisBurnedArea20260815]
+`)
+assert.deepEqual(legacyEffisProducts.map((product) => product.areaHa), [501.4, 4857])
 assert.deepEqual(REFRESH_SOURCES.map((source) => source.key), expectedSources)
 assert.ok(REFRESH_SOURCES.every((source) => source.intervalMinutes >= 5))
 assert.ok(REFRESH_SOURCES.every((source) => source.intervalMinutes % 5 === 0))
