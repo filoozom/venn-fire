@@ -476,6 +476,7 @@ async function refreshOpenMeteo({ requestedAtMs, query }) {
     generatedAt,
     rows,
     current: incoming.current,
+    hourlyUnits: incoming.hourlyUnits,
     source: { name: 'Open-Meteo', url: 'https://open-meteo.com/' },
   }
   const stored = await saveDataset({ key: 'weather-open-meteo', payload }, query)
@@ -1405,7 +1406,7 @@ export const REFRESH_SOURCES = [
   {
     key: 'open-meteo', label: 'Open-Meteo model weather', intervalMinutes: 5, run: refreshOpenMeteo,
     providerUrl: 'https://open-meteo.com/',
-    coverage: 'Hourly forecast-model weather for the incident area.',
+    coverage: 'Hourly recent model history plus a complete 48-hour weather outlook for the incident area.',
   },
   {
     key: 'reports', label: 'Governor and BRF reports', intervalMinutes: 5, run: refreshReports,

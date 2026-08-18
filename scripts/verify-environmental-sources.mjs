@@ -18,7 +18,7 @@ import {
   parseRmiRadarPayload,
   rmiRadarIncidentCategory,
 } from '../server/environmental-sources.mjs'
-import { mergePrecipitationRadar } from '../src/data.js'
+import { buildFireFrames, mergePrecipitationRadar } from '../src/data.js'
 
 const radarBody = Buffer.alloc(6 + 8 + 2)
 radarBody.writeUInt16BE(2, 0)
@@ -75,6 +75,38 @@ assert.deepEqual(mergedRadar.frames.map((frame) => frame.observedAt), [
 assert.equal(mergedRadar.frames.at(-1).incident.label, 'RMI')
 assert.equal(mergedRadar.frames[0].providerKey, 'dwd-radolan-yw')
 assert.equal(mergedRadar.historicalBackfill.frameCount, 2)
+
+const weatherFrames = buildFireFrames({
+  timelineStartMs: Date.parse('2026-08-18T12:00:00.000Z'),
+  endMs: Date.parse('2026-08-18T12:35:00.000Z'),
+  weatherRows: [{
+    observedAt: '2026-08-18T12:00:00.000Z',
+    sourceKind: 'model',
+    source: 'Open-Meteo hourly model',
+    windSpeed: 20,
+    windDirection: 240,
+    gust: 45,
+    temperature: 15,
+    humidity: 90,
+  }, {
+    observedAt: '2026-08-18T12:00:00.000Z',
+    sourceKind: 'station-observation',
+    source: 'RMI Mont Rigi automatic weather station',
+    windSpeed: 16,
+    windDirection: 245,
+    gust: 28,
+    temperature: 14,
+    humidity: 98,
+    precipitationMm: 0.2,
+    precipitationPeriodMinutes: 10,
+  }],
+  reportRows: [],
+  dwdSnapshot: { stations: [], observations: [] },
+  center: [50.54762, 6.05757],
+})
+assert.equal(weatherFrames.at(-1).weatherSourceKind, 'station-observation')
+assert.equal(weatherFrames.at(-1).weatherAgeMinutes, 35)
+assert.equal(weatherFrames.at(-1).precipitationMm, 0.2)
 
 const png = encodeRgbaPng(1, 1, Buffer.from([10, 20, 30, 255]))
 assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10])
@@ -135,10 +167,12 @@ assert.equal(pairs[0].preSceneId, 'pre')
 assert.equal(pairs[0].postSceneId, 'post')
 assert.equal(pairs[0].separationDays, 12)
 
-const [appSource, mapSource, styles] = await Promise.all([
+const [appSource, mapSource, styles, liveSituationSource, dataSource] = await Promise.all([
   readFile(new URL('../src/App.jsx', import.meta.url), 'utf8'),
   readFile(new URL('../src/MapView.jsx', import.meta.url), 'utf8'),
   readFile(new URL('../src/styles.css', import.meta.url), 'utf8'),
+  readFile(new URL('../api/live-situation.js', import.meta.url), 'utf8'),
+  readFile(new URL('../src/data.js', import.meta.url), 'utf8'),
 ])
 assert.match(appSource, /\[ENVIRONMENT_LAYER_KEYS\.rmiRadar\]: true/u)
 assert.match(appSource, /label: 'Precipitation radar'/u)
@@ -148,5 +182,12 @@ assert.match(mapSource, /map\.distance\(previous\.latlng, latlng\)/u)
 assert.match(mapSource, /clearMeasurement/u)
 assert.match(styles, /environmental-raster--cams-wildfire-pm10/u)
 assert.match(styles, /mask-image: radial-gradient/u)
+assert.match(styles, /weather-outlook-hours/u)
+assert.match(appSource, /48-HOUR WEATHER OUTLOOK/u)
+assert.match(appSource, /no qualifying incident aircraft since midnight/u)
+assert.match(liveSituationSource, /precipitation_probability/u)
+assert.match(liveSituationSource, /forecast_days: '3'/u)
+assert.match(dataSource, /45 \* 60 \* 1000/u)
+assert.match(dataSource, /weatherModel: openMeteo/u)
 
-console.log('Verified: retained RMI/DWD precipitation history, radar defaults, CAMS semantics/feathering, distance measurement, PNG output, and conservative Sentinel pairing.')
+console.log('Verified: retained radar history, stable station/model weather selection, full model outlook, aircraft-empty-state clarity, CAMS semantics, distance measurement, PNG output, and conservative Sentinel pairing.')

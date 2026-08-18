@@ -4,7 +4,11 @@ export const AIRCRAFT_PATH_MAX_SPEED_KT = 300
 
 const RECEIVER_FLIGHT_COLORS = ['#d35400', '#008c7a', '#b23a6f', '#7b5fc0', '#2d6f93', '#9b6b13']
 
-const RMI_STATION_MAX_AGE_MS = 20 * 60 * 1000
+// RMI's ten-minute observation can be published after the next scheduler tick.
+// A 20-minute cliff made the headline oscillate between station and model data
+// for a few minutes. Keep the measured source for up to 45 minutes and expose
+// its exact age rather than silently changing products at the live edge.
+const RMI_STATION_MAX_AGE_MS = 45 * 60 * 1000
 const LOCAL_UTC_OFFSET_MS = 2 * 60 * 60 * 1000
 
 const localClockFormatter = new Intl.DateTimeFormat('en-GB', {
@@ -232,6 +236,8 @@ function normalizeRmiWeather(snapshot) {
     windSpeed: observation.wind_speed_10m_kmh,
     windDirection: observation.wind_direction,
     gust: observation.wind_gusts_speed_kmh,
+    precipitationMm: observation.precip_quantity,
+    precipitationPeriodMinutes: snapshot.cadenceMinutes ?? 10,
     humidity: observation.humidity_rel_shelter_avg,
     temperature: observation.temp_dry_shelter_avg,
     source: 'RMI Mont Rigi automatic weather station',
@@ -330,6 +336,15 @@ export function buildFireFrames({
         weatherStationName: weather?.stationName ?? null,
         weatherStationDistanceKm: weather?.stationDistanceKm ?? null,
         weatherPosition: weather?.stationPosition ?? center,
+        apparentTemperature: weather?.apparentTemperature ?? null,
+        precipitationMm: weather?.precipitationMm ?? null,
+        precipitationProbability: weather?.precipitationProbability ?? null,
+        precipitationPeriodMinutes: weather?.precipitationPeriodMinutes
+          ?? weather?.cadenceMinutes
+          ?? null,
+        cloudCover: weather?.cloudCover ?? null,
+        visibilityM: weather?.visibilityM ?? null,
+        weatherCode: weather?.weatherCode ?? null,
         weatherAgeMinutes: weather?.timestampMs == null
           ? null
           : Math.max(0, Math.round((timestampMs - weather.timestampMs) / 60_000)),
@@ -340,6 +355,14 @@ export function buildFireFrames({
           windSpeed: modelWeather.windSpeed,
           windDirection: modelWeather.windDirection,
           gust: modelWeather.gust,
+          temperature: modelWeather.temperature,
+          apparentTemperature: modelWeather.apparentTemperature,
+          humidity: modelWeather.humidity,
+          precipitationMm: modelWeather.precipitationMm,
+          precipitationProbability: modelWeather.precipitationProbability,
+          cloudCover: modelWeather.cloudCover,
+          visibilityM: modelWeather.visibilityM,
+          weatherCode: modelWeather.weatherCode,
           source: modelWeather.source,
           sourceKind: 'model',
         } : null,
@@ -350,6 +373,10 @@ export function buildFireFrames({
           windSpeed: currentStationWeather.windSpeed,
           windDirection: currentStationWeather.windDirection,
           gust: currentStationWeather.gust,
+          temperature: currentStationWeather.temperature,
+          humidity: currentStationWeather.humidity,
+          precipitationMm: currentStationWeather.precipitationMm,
+          precipitationPeriodMinutes: currentStationWeather.precipitationPeriodMinutes,
           source: currentStationWeather.source,
           sourceKind: 'station-observation',
           validationStatus: currentStationWeather.validationStatus,
@@ -641,6 +668,8 @@ export function runtimeDataFromResponse(response) {
     mapLabels: incident.mapLabels ?? [],
     incidentCenter: center,
     dwdWindStations: dwd.stations ?? [],
+    weatherModel: openMeteo,
+    weatherStation: rmi,
     effisProducts: effis.products ?? [],
     firms,
     aircraft,

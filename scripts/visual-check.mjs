@@ -37,7 +37,11 @@ const layout = await page.evaluate(() => ({
 
 await page.screenshot({ path: '/tmp/fire-dashboard.png', fullPage: true })
 
-await page.getByRole('button', { name: /Air ops/ }).click()
+const weatherOutlook = page.locator('.weather-outlook-card')
+await weatherOutlook.scrollIntoViewIfNeeded()
+await weatherOutlook.screenshot({ path: '/tmp/fire-weather-outlook.png' })
+
+await page.locator('.inspector-tabs button').filter({ hasText: 'Aircraft' }).click()
 await page.waitForTimeout(250)
 const airCards = await page.locator('.flight-card').count()
 const flightStates = await page.locator('.flight-state').allTextContents()

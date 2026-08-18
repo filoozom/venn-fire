@@ -562,11 +562,14 @@ export async function loadWeather() {
   const parameters = new URLSearchParams({
     latitude: String(INCIDENT.latitude),
     longitude: String(INCIDENT.longitude),
-    hourly: 'temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m',
-    current: 'temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m',
+    hourly: 'temperature_2m,apparent_temperature,relative_humidity_2m,precipitation_probability,precipitation,rain,showers,weather_code,cloud_cover,visibility,wind_speed_10m,wind_direction_10m,wind_gusts_10m',
+    current: 'temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,rain,showers,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m',
     timezone: 'UTC',
-    past_days: '2',
-    forecast_days: '2',
+    // Keep enough overlap to repair recent model history after an outage and
+    // request three calendar days so the UI can always expose at least the
+    // next 48 hours, even late in the current UTC day.
+    past_days: '5',
+    forecast_days: '3',
   })
   const payload = await fetchJson(`https://api.open-meteo.com/v1/forecast?${parameters}`)
   const hourly = payload.hourly || {}
@@ -574,7 +577,15 @@ export async function loadWeather() {
     observedAt: new Date(`${time}Z`).toISOString(),
     timestampMs: Date.parse(`${time}Z`),
     temperature: finiteNumber(hourly.temperature_2m?.[index]),
+    apparentTemperature: finiteNumber(hourly.apparent_temperature?.[index]),
     humidity: finiteNumber(hourly.relative_humidity_2m?.[index]),
+    precipitationProbability: finiteNumber(hourly.precipitation_probability?.[index]),
+    precipitationMm: finiteNumber(hourly.precipitation?.[index]),
+    rainMm: finiteNumber(hourly.rain?.[index]),
+    showersMm: finiteNumber(hourly.showers?.[index]),
+    weatherCode: finiteNumber(hourly.weather_code?.[index]),
+    cloudCover: finiteNumber(hourly.cloud_cover?.[index]),
+    visibilityM: finiteNumber(hourly.visibility?.[index]),
     windSpeed: finiteNumber(hourly.wind_speed_10m?.[index]),
     windDirection: finiteNumber(hourly.wind_direction_10m?.[index]),
     gust: finiteNumber(hourly.wind_gusts_10m?.[index]),
@@ -584,13 +595,19 @@ export async function loadWeather() {
   const current = payload.current ? {
     observedAt: new Date(`${payload.current.time}Z`).toISOString(),
     temperature: finiteNumber(payload.current.temperature_2m),
+    apparentTemperature: finiteNumber(payload.current.apparent_temperature),
     humidity: finiteNumber(payload.current.relative_humidity_2m),
+    precipitationMm: finiteNumber(payload.current.precipitation),
+    rainMm: finiteNumber(payload.current.rain),
+    showersMm: finiteNumber(payload.current.showers),
+    weatherCode: finiteNumber(payload.current.weather_code),
+    cloudCover: finiteNumber(payload.current.cloud_cover),
     windSpeed: finiteNumber(payload.current.wind_speed_10m),
     windDirection: finiteNumber(payload.current.wind_direction_10m),
     gust: finiteNumber(payload.current.wind_gusts_10m),
   } : null
 
-  return { rows, current }
+  return { rows, current, hourlyUnits: payload.hourly_units ?? {} }
 }
 
 export default async function handler(request, response) {

@@ -3292,6 +3292,150 @@ button.connection-card--upload {
   stroke-linejoin: round;
 }
 
+.weather-outlook-card {
+  margin-top: 14px;
+  padding: 12px;
+  overflow: hidden;
+  background: #f3f8f6;
+  border: 1px solid #d8e6e1;
+  border-radius: 9px;
+}
+
+.weather-outlook-card .section-heading > span {
+  color: #225648;
+}
+
+.weather-outlook-card .section-heading > small {
+  color: #688078;
+}
+
+.weather-outlook-note,
+.weather-outlook-empty {
+  margin: 6px 0 10px;
+  color: #60766f;
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.weather-outlook-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  margin-bottom: 10px;
+}
+
+.weather-outlook-summary > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px 8px;
+  background: #fff;
+  border: 1px solid #dce9e5;
+  border-radius: 6px;
+}
+
+.weather-outlook-summary small {
+  color: #73877f;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.weather-outlook-summary strong {
+  overflow: hidden;
+  color: #244d42;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.weather-outlook-hours {
+  display: grid;
+  grid-auto-columns: 136px;
+  grid-auto-flow: column;
+  gap: 6px;
+  padding: 1px 1px 7px;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-color: #8fb1a6 #e1ece8;
+  scrollbar-width: thin;
+  scroll-snap-type: inline proximity;
+}
+
+.weather-outlook-hours:focus-visible {
+  outline: 2px solid #4a8c78;
+  outline-offset: 2px;
+}
+
+.weather-outlook-hour {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-height: 160px;
+  padding: 9px;
+  color: #4d685f;
+  background: #fff;
+  border: 1px solid #dbe8e3;
+  border-radius: 7px;
+  scroll-snap-align: start;
+}
+
+.weather-outlook-hour time {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 5px;
+}
+
+.weather-outlook-hour time strong {
+  color: #173f34;
+  font-size: 14px;
+}
+
+.weather-outlook-hour time small {
+  color: #82938d;
+  font-size: 8.5px;
+  text-transform: uppercase;
+}
+
+.weather-outlook-hour > b {
+  min-height: 25px;
+  color: #45675d;
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+.weather-outlook-temperature {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  color: #184c3e;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.weather-outlook-temperature small {
+  color: #82938d;
+  font-size: 8.5px;
+  font-weight: 600;
+}
+
+.weather-outlook-hour > span:not(.weather-outlook-temperature) {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  color: #60776f;
+  font-size: 9px;
+  line-height: 1.25;
+}
+
+.weather-outlook-hour > span:not(.weather-outlook-temperature) svg {
+  flex: 0 0 auto;
+  color: #4e8f7b;
+}
+
 /* Best-estimate fire extent card, alongside reported area and EFFIS. */
 .snapshot-card--estimate {
   border-color: rgba(232, 104, 56, 0.42);

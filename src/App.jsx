@@ -122,7 +122,7 @@ const NON_DIRECTORY_SOURCE_KEYS = new Set([
 ])
 const SOURCE_DIRECTORY_COPY = {
   aircraft: { label: 'Incident aircraft', coverage: 'Live positions and complete available routes for aircraft observed in the incident area.' },
-  'open-meteo': { label: 'Open-Meteo weather model', coverage: 'Hourly forecast-model weather for the incident area.' },
+  'open-meteo': { label: 'Open-Meteo weather model', coverage: 'Hourly recent model history and a full 48-hour forecast for the incident area.' },
   reports: { label: 'Governor and BRF reports', coverage: 'Published affected-area estimates and timestamped incident updates.' },
   'local-authority-updates': { label: 'Local-authority updates', coverage: 'Published incident notices from nearby municipalities, emergency services and police.' },
   vedia: { label: 'Vedia incident reporting', coverage: 'Incident reporting from the regional news service.' },
@@ -261,7 +261,7 @@ function layerOptionsFor(
   }),
   { key: 'aircraft', label: 'Aircraft observations', detail: 'Exact fixes · linear 24 h fade', icon: Helicopter, color: '#3a7fcc' },
   { key: 'wind', label: 'Drossart model wind', detail: frame?.drossartWind ? `Open-Meteo hourly grid · ${frame.drossartWind.ageMinutes} min old` : 'No model value at selected time', icon: Wind, color: '#478fc4' },
-  { key: 'rmiWind', label: 'Mont Rigi station wind', detail: frame?.montRigiWind ? `RMI 10 min observation · ${frame.montRigiWind.ageMinutes} min old · preliminary` : 'No station observation within 20 min of selected time', icon: Wind, color: '#4f9e90' },
+  { key: 'rmiWind', label: 'Mont Rigi station wind', detail: frame?.montRigiWind ? `RMI 10 min observation · ${frame.montRigiWind.ageMinutes} min old · preliminary` : 'No station observation within 45 min of selected time', icon: Wind, color: '#4f9e90' },
   ...dwdWindStations.map((station) => {
     const reading = frame?.dwdWinds?.find((item) => item.id === station.id)
     return {
@@ -283,6 +283,12 @@ const brusselsClockFormatter = new Intl.DateTimeFormat('en-GB', {
 })
 const brusselsShortDateFormatter = new Intl.DateTimeFormat('en-GB', {
   timeZone: 'Europe/Brussels',
+  day: '2-digit',
+  month: 'short',
+})
+const brusselsForecastDayFormatter = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/Brussels',
+  weekday: 'short',
   day: '2-digit',
   month: 'short',
 })
@@ -368,6 +374,22 @@ function windCardinal(deg) {
   const names = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
   const normalized = normalizeDegrees(deg)
   return normalized == null ? '—' : names[Math.round(normalized / 22.5) % 16]
+}
+
+function weatherConditionLabel(code) {
+  const value = Number(code)
+  if (value === 0) return 'Clear'
+  if (value === 1) return 'Mainly clear'
+  if (value === 2) return 'Partly cloudy'
+  if (value === 3) return 'Overcast'
+  if ([45, 48].includes(value)) return 'Fog'
+  if ([51, 53, 55, 56, 57].includes(value)) return 'Drizzle'
+  if ([61, 63, 65, 66, 67].includes(value)) return 'Rain'
+  if ([71, 73, 75, 77].includes(value)) return 'Snow'
+  if ([80, 81, 82].includes(value)) return 'Showers'
+  if ([85, 86].includes(value)) return 'Snow showers'
+  if ([95, 96, 99].includes(value)) return 'Thunderstorm'
+  return 'Conditions unavailable'
 }
 
 function observationState(flight, frame) {
@@ -914,6 +936,11 @@ function FireViewer({ runtime, databaseError }) {
   const aircraftLoadStatus = runtime.aircraftLoadState?.status || 'ready'
   const aircraftHistoryUnavailable = aircraftLoadStatus === 'error'
   const aircraftHistoryLoading = aircraftLoadStatus === 'loading'
+  const activeAircraftProviders = (runtime.aircraft.sources ?? []).filter((source) => source.polled)
+  const healthyAircraftProviders = activeAircraftProviders.filter((source) => source.ok)
+  const aircraftProviderStatus = activeAircraftProviders.length
+    ? `${healthyAircraftProviders.length}/${activeAircraftProviders.length} live receiver feeds healthy`
+    : 'live receiver feed status unavailable'
   const sourceRuns = runtime.database?.sources ?? []
   const firmsSourceRun = sourceRuns.find((source) => source.sourceKey === 'firms')
   const publicSourceKeys = new Set((runtime.sourceRegistry.sources ?? [])
@@ -1127,6 +1154,47 @@ function FireViewer({ runtime, databaseError }) {
       color: '#b9a0e8',
     })),
   ], [frame])
+
+  // Keep the latest forward model outlook separate from the historical
+  // selected-time observation. Moving the incident timeline must not make a
+  // newly issued forecast look like something that was known in the past.
+  const weatherOutlookRows = useMemo(() => {
+    const referenceMs = Date.parse(runtime.generatedAt)
+    if (!Number.isFinite(referenceMs)) return []
+    const firstHourMs = Math.floor(referenceMs / (60 * 60 * 1000)) * 60 * 60 * 1000
+    return (runtime.weatherModel?.rows ?? [])
+      .map((row) => ({
+        ...row,
+        timestampMs: Number.isFinite(row.timestampMs) ? row.timestampMs : Date.parse(row.observedAt),
+      }))
+      .filter((row) => (
+        Number.isFinite(row.timestampMs)
+        && row.timestampMs >= firstHourMs
+        && row.timestampMs <= referenceMs + 48 * 60 * 60 * 1000
+      ))
+      .sort((left, right) => left.timestampMs - right.timestampMs)
+      .slice(0, 48)
+  }, [runtime.generatedAt, runtime.weatherModel?.rows])
+  const weatherOutlookSummary = useMemo(() => {
+    const referenceMs = Date.parse(runtime.generatedAt)
+    const rows = weatherOutlookRows.filter((row) => (
+      row.timestampMs >= referenceMs
+      && row.timestampMs <= referenceMs + 24 * 60 * 60 * 1000
+    ))
+    const finite = (key) => rows.map((row) => Number(row[key])).filter(Number.isFinite)
+    const temperatures = finite('temperature')
+    const gusts = finite('gust')
+    const rainProbabilities = finite('precipitationProbability')
+    return {
+      minimumTemperature: temperatures.length ? Math.min(...temperatures) : null,
+      maximumTemperature: temperatures.length ? Math.max(...temperatures) : null,
+      maximumGust: gusts.length ? Math.max(...gusts) : null,
+      maximumRainProbability: rainProbabilities.length ? Math.max(...rainProbabilities) : null,
+      precipitationMm: rows.reduce((total, row) => (
+        total + (Number.isFinite(Number(row.precipitationMm)) ? Number(row.precipitationMm) : 0)
+      ), 0),
+    }
+  }, [runtime.generatedAt, weatherOutlookRows])
 
   // Database-retained FIRMS detections, placed on the five-minute timeline by
   // exact acquisition time. Polar overpasses remain visible as timestamped
@@ -1594,13 +1662,13 @@ function FireViewer({ runtime, databaseError }) {
                     : latestSelectedDayFlight
                       ? `latest ${latestSelectedDayFlight.flight.callSign} · ${observationTimeLabel(latestSelectedDayFlight.latest.timestampMs, frame.timestampMs)}`
                       : latestRetainedFlight
-                        ? `none since midnight · latest retained ${latestRetainedFlight.flight.callSign} ${observationTimeLabel(latestRetainedFlight.latest.timestampMs, frame.timestampMs)}`
-                        : 'no exact receiver fix within the last 24 hours'}</p></article>
+                        ? `no qualifying incident aircraft since midnight · ${aircraftProviderStatus} · latest retained ${latestRetainedFlight.flight.callSign} ${observationTimeLabel(latestRetainedFlight.latest.timestampMs, frame.timestampMs)}`
+                        : `no qualifying incident aircraft within 24 hours · ${aircraftProviderStatus}`}</p></article>
                 <article className="snapshot-card snapshot-card--wind"><span><Wind size={15} /> WIND FROM</span><strong>{windCardinal(frame.windDirection)}<small>{formatDegrees(frame.windDirection)}</small></strong><p>{formatDecimal(frame.windSpeed)} km/h · gust {formatDecimal(frame.gust)} · {frame.weatherSourceKind === 'station-observation' ? 'station obs.' : 'model'}</p></article>
               </div>
 
               <div className="conditions-card">
-                <div className="section-heading"><span>FIRE WEATHER</span><small>{frame.weatherSourceKind === 'station-observation' ? `Mont Rigi · 10 min · ${frame.weatherAgeMinutes} min old` : 'Drossart · hourly model fallback'}</small></div>
+                <div className="section-heading"><span>{frame.weatherSourceKind === 'station-observation' ? 'OBSERVED FIRE WEATHER' : 'MODEL FIRE WEATHER'}</span><small>{frame.weatherSourceKind === 'station-observation' ? `Mont Rigi · 10 min · ${frame.weatherAgeMinutes} min old` : 'Drossart · hourly model fallback'}</small></div>
                 <div className="wind-hero">
                   <span className="big-wind-arrow" title={`Wind travelling toward ${formatDegrees(Number(frame.windDirection) + 180)}`}>
                     <svg viewBox="0 0 24 24" style={{ '--wind-rotation': `${normalizeDegrees(Number(frame.windDirection) + 180) ?? 0}deg` }} aria-hidden="true">
@@ -1613,6 +1681,10 @@ function FireViewer({ runtime, databaseError }) {
                 <div className="condition-row">
                   <span><ThermometerSun size={15} /> Temperature<strong>{formatDecimal(frame.temperature)}°C</strong></span>
                   <span><Droplets size={15} /> Humidity<strong>{formatDecimal(frame.humidity)}%</strong></span>
+                </div>
+                <div className="condition-row condition-row--secondary">
+                  <span><Droplets size={15} /> {frame.weatherSourceKind === 'station-observation' ? 'Station rain' : 'Model rain'}<strong>{formatDecimal(frame.precipitationMm, 2)} mm / {frame.precipitationPeriodMinutes ?? (frame.weatherSourceKind === 'station-observation' ? 10 : 60)} min</strong></span>
+                  <span><CloudSun size={15} /> Model cloud<strong>{formatDecimal(frame.drossartWind?.cloudCover, 0)}%</strong></span>
                 </div>
                 <p className={`weather-provenance ${frame.weatherSourceKind === 'station-observation' ? 'is-unvalidated' : ''}`}>
                   {frame.weatherSourceKind === 'station-observation'
@@ -1632,6 +1704,33 @@ function FireViewer({ runtime, databaseError }) {
                   ))}
                 </div>
               </div>
+
+              <section className="weather-outlook-card" aria-label="Open-Meteo 48-hour weather forecast">
+                <div className="section-heading"><span>48-HOUR WEATHER OUTLOOK</span><small>Open-Meteo · hourly model</small></div>
+                <p className="weather-outlook-note">Latest forward forecast from the current database sync. It stays separate from the selected historical observation above.</p>
+                {weatherOutlookRows.length ? (
+                  <>
+                    <div className="weather-outlook-summary">
+                      <span><small>Next 24 h</small><strong>{formatDecimal(weatherOutlookSummary.minimumTemperature)}–{formatDecimal(weatherOutlookSummary.maximumTemperature)}°C</strong></span>
+                      <span><small>Model rain</small><strong>{formatDecimal(weatherOutlookSummary.precipitationMm, 1)} mm</strong></span>
+                      <span><small>Peak chance</small><strong>{formatDecimal(weatherOutlookSummary.maximumRainProbability, 0)}%</strong></span>
+                      <span><small>Peak gust</small><strong>{formatDecimal(weatherOutlookSummary.maximumGust)} km/h</strong></span>
+                    </div>
+                    <div className="weather-outlook-hours" tabIndex="0" aria-label="Hourly weather forecast; scroll horizontally for later hours">
+                      {weatherOutlookRows.map((row) => (
+                        <article className="weather-outlook-hour" key={row.observedAt}>
+                          <time dateTime={row.observedAt}><strong>{brusselsClockFormatter.format(new Date(row.timestampMs))}</strong><small>{brusselsForecastDayFormatter.format(new Date(row.timestampMs))}</small></time>
+                          <b>{weatherConditionLabel(row.weatherCode)}</b>
+                          <span className="weather-outlook-temperature">{formatDecimal(row.temperature)}°<small>feels {formatDecimal(row.apparentTemperature)}°</small></span>
+                          <span><Droplets size={12} /> {formatDecimal(row.precipitationProbability, 0)}% · {formatDecimal(row.precipitationMm, 1)} mm</span>
+                          <span><Wind size={12} /> {windCardinal(row.windDirection)} {formatDecimal(row.windSpeed)} · gust {formatDecimal(row.gust)}</span>
+                          <span><CloudSun size={12} /> {formatDecimal(row.cloudCover, 0)}% cloud · {formatDecimal(Number(row.visibilityM) / 1_000, 1)} km vis.</span>
+                        </article>
+                      ))}
+                    </div>
+                  </>
+                ) : <p className="weather-outlook-empty">No forward model rows are available in the database.</p>}
+              </section>
 
               <section className="event-log">
                 <div className="section-heading"><span>INCIDENT LOG</span><small>{displayEvents.filter((event) => event.frame <= frameIndex).length} visible</small></div>
@@ -1676,7 +1775,7 @@ function FireViewer({ runtime, databaseError }) {
                   ? 'Retained aircraft fixes are loading asynchronously; the incident map and other live sources are already usable.'
                   : aircraftHistoryUnavailable
                     ? 'Retained aircraft fixes are temporarily unavailable. Provider polling continues in the database and this view will retry.'
-                    : `${flightsSeenOnSelectedDay.length} aircraft were seen on the selected day; ${receiverObservedFlights.length} remain visible inside the 24-hour window${receiverObservedCallSigns ? `: ${receiverObservedCallSigns}` : ''}. Plausible candidates are labelled separately. G12 remains photo-confirmed only. Receiver positions establish proximity, not water pickups or drops.`}</p>
+                    : `${flightsSeenOnSelectedDay.length} qualifying incident aircraft were seen on the selected day; ${receiverObservedFlights.length} remain visible inside the 24-hour window${receiverObservedCallSigns ? `: ${receiverObservedCallSigns}` : ''}. ${aircraftProviderStatus}. Nearby ordinary traffic is intentionally excluded. Plausible candidates are labelled separately. G12 remains photo-confirmed only. Receiver positions establish proximity, not water pickups or drops.`}</p>
                 <div className="air-ops-actions">
                   <button
                     type="button"
