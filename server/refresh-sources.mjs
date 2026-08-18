@@ -32,6 +32,7 @@ import {
 import { backfillLegacyEffisHistory } from './effis-sources.mjs'
 import {
   refreshCams,
+  refreshDwdRadarHistory,
   refreshNasaGibs,
   refreshRmiRadar,
   refreshSentinel1,
@@ -1435,6 +1436,11 @@ export const REFRESH_SOURCES = [
     key: 'rmi-radar', label: 'RMI precipitation radar', intervalMinutes: 5, run: refreshRmiRadar,
     providerUrl: 'https://www.meteo.be/en/weather/observations/precipitation/lightning',
     coverage: 'Official public precipitation-radar animation retained as georeferenced observation frames; the public product currently supplies ten-minute images.',
+  },
+  {
+    key: 'dwd-radar-history', label: 'DWD historical precipitation radar', intervalMinutes: 5, run: refreshDwdRadarHistory,
+    providerUrl: 'https://opendata.dwd.de/climate_environment/CDC/grids_germany/5_minutes/radolan/recent/',
+    coverage: 'Official 1 km RADOLAN YW precipitation amounts at five-minute granularity; raw daily archives and incident-area frames are retained in PostgreSQL as each completed day is published.',
   },
   {
     key: 'dwd', label: 'DWD nearby wind stations', intervalMinutes: 10, run: refreshDwd,

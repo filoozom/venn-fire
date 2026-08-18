@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto'
-import { deflateSync, gzipSync, gunzipSync } from 'node:zlib'
+import { Readable } from 'node:stream'
+import { createGunzip, deflateSync, gzipSync, gunzipSync } from 'node:zlib'
+
+import proj4 from 'proj4'
 
 import { loadDataset, saveArtifact, saveDataset } from './database.mjs'
 
@@ -55,6 +58,28 @@ const RMI_RAIN_LABELS = Object.freeze([
   'heavy',
   'very heavy',
   'downpour or hail',
+])
+
+const DWD_RADOLAN_ARCHIVE_ROOT = 'https://opendata.dwd.de/climate_environment/CDC/grids_germany/5_minutes/radolan/recent/'
+const DWD_RADOLAN_PROJECTION = '+proj=stere +lat_0=90 +lat_ts=60 +lon_0=10 +a=6370040 +b=6370040 +units=m +no_defs'
+const DWD_RADOLAN_GRID = Object.freeze({
+  width: 900,
+  height: 900,
+  cellSizeM: 1_000,
+  westM: -523_462.1669,
+  southM: -4_658_644.7243,
+})
+const DWD_RADAR_IMAGE_SIZE = Object.freeze({ width: 72, height: 56 })
+const DWD_RADAR_MAX_ARCHIVES_PER_RUN = 3
+const DWD_RAIN_COLORS = Object.freeze([
+  [0, 0, 0, 0],
+  [233, 255, 255, 144],
+  [82, 255, 241, 160],
+  [75, 209, 220, 192],
+  [68, 162, 200, 200],
+  [60, 116, 179, 216],
+  [53, 69, 159, 224],
+  [46, 23, 138, 232],
 ])
 
 const GIBS_WMS_URL = 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi'
@@ -336,6 +361,391 @@ export function rmiRadarIncidentCategory(payload, imageIndex) {
   return { value, label: RMI_RAIN_LABELS[value] || 'unknown', pixel: { x, y } }
 }
 
+function dwdArchiveName(date) {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(date)) throw new Error(`Invalid DWD radar archive date: ${date}`)
+  return `YW-${date.slice(2).replaceAll('-', '')}.tar.gz`
+}
+
+export function dwdRadarArchiveUrl(date) {
+  return new URL(dwdArchiveName(date), DWD_RADOLAN_ARCHIVE_ROOT).toString()
+}
+
+export function parseDwdRadarArchiveDates(indexHtml) {
+  const dates = new Set()
+  for (const match of String(indexHtml).matchAll(/YW-(\d{2})(\d{2})(\d{2})\.tar\.gz/giu)) {
+    dates.add(`20${match[1]}-${match[2]}-${match[3]}`)
+  }
+  return [...dates].sort()
+}
+
+function dwdObservedAtFromName(fileName) {
+  const match = /-(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})-dwd/u.exec(fileName)
+  if (!match) throw new Error(`DWD RADOLAN member has no UTC timestamp: ${fileName}`)
+  const observedAt = `20${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:00.000Z`
+  if (!Number.isFinite(Date.parse(observedAt))) throw new Error(`DWD RADOLAN timestamp is invalid: ${fileName}`)
+  return observedAt
+}
+
+export function parseDwdRadolanYwFrame(bytes, fileName) {
+  const source = Buffer.from(bytes)
+  const headerEnd = source.indexOf(0x03)
+  if (headerEnd < 0) throw new Error(`DWD RADOLAN header terminator is missing: ${fileName}`)
+  const header = source.subarray(0, headerEnd).toString('ascii')
+  if (!header.startsWith('YW')) throw new Error(`DWD radar member is not a YW product: ${fileName}`)
+  const grid = /GP\s*(\d+)x\s*(\d+)/u.exec(header)
+  const precisionMatch = /PR\s*E([+-]\d+)/u.exec(header)
+  const intervalMatch = /INT\s*(\d+)/u.exec(header)
+  if (!grid || !precisionMatch || !intervalMatch) {
+    throw new Error(`DWD RADOLAN header metadata is incomplete: ${fileName}`)
+  }
+  // DWD documents GP as rows x columns. The incident archives use the national
+  // 900 x 900, 1 km RADOLAN grid.
+  const height = Number.parseInt(grid[1], 10)
+  const width = Number.parseInt(grid[2], 10)
+  const precisionExponent = Number.parseInt(precisionMatch[1], 10)
+  const precision = 10 ** precisionExponent
+  const intervalMinutes = Number.parseInt(intervalMatch[1], 10)
+  const dataOffset = headerEnd + 1
+  if (!width || !height || !Number.isFinite(precision) || intervalMinutes !== 5) {
+    throw new Error(`DWD RADOLAN YW grid metadata is invalid: ${fileName}`)
+  }
+  if (source.length < dataOffset + width * height * 2) {
+    throw new Error(`DWD RADOLAN YW data is truncated: ${fileName}`)
+  }
+  return {
+    bytes: source,
+    dataOffset,
+    fileName,
+    header,
+    height,
+    intervalMinutes,
+    observedAt: dwdObservedAtFromName(fileName),
+    precision,
+    precisionDigits: Math.max(0, -precisionExponent),
+    width,
+  }
+}
+
+export function dwdRadolanValueMm(frame, pixelIndex) {
+  if (!Number.isInteger(pixelIndex) || pixelIndex < 0 || pixelIndex >= frame.width * frame.height) return null
+  const encoded = frame.bytes.readUInt16LE(frame.dataOffset + pixelIndex * 2)
+  // Bits 14 and 16 mark missing and clutter values. Bit 15 is a negative
+  // sign used by other RADOLAN products and is not a valid YW precipitation
+  // amount. Bit 13 is only a provenance flag and does not change the value.
+  if ((encoded & 0x2000) || (encoded & 0x8000) || (encoded & 0x4000)) return null
+  const value = (encoded & 0x0fff) * frame.precision
+  return Number(value.toFixed(frame.precisionDigits))
+}
+
+class BufferQueue {
+  constructor() {
+    this.chunks = []
+    this.length = 0
+  }
+
+  push(chunk) {
+    const bytes = Buffer.from(chunk)
+    if (!bytes.length) return
+    this.chunks.push(bytes)
+    this.length += bytes.length
+  }
+
+  take(size) {
+    if (size > this.length) return null
+    const output = Buffer.allocUnsafe(size)
+    let outputOffset = 0
+    while (outputOffset < size) {
+      const chunk = this.chunks[0]
+      const length = Math.min(chunk.length, size - outputOffset)
+      chunk.copy(output, outputOffset, 0, length)
+      outputOffset += length
+      this.length -= length
+      if (length === chunk.length) this.chunks.shift()
+      else this.chunks[0] = chunk.subarray(length)
+    }
+    return output
+  }
+}
+
+async function* tarEntriesFromGzip(gzipBytes) {
+  const queue = new BufferQueue()
+  const stream = Readable.from([Buffer.from(gzipBytes)]).pipe(createGunzip({ chunkSize: 2 * 1024 * 1024 }))
+  let pending = null
+  let ended = false
+  for await (const chunk of stream) {
+    queue.push(chunk)
+    while (!ended) {
+      if (!pending) {
+        if (queue.length < 512) break
+        const header = queue.take(512)
+        if (header.every((value) => value === 0)) {
+          ended = true
+          break
+        }
+        const name = header.subarray(0, 100).toString('utf8').replace(/\0.*$/u, '')
+        const sizeText = header.subarray(124, 136).toString('ascii').replace(/\0.*$/u, '').trim()
+        const size = Number.parseInt(sizeText || '0', 8)
+        const type = String.fromCharCode(header[156] || 0)
+        if (!Number.isFinite(size) || size < 0 || size > 12 * 1024 * 1024) {
+          throw new Error(`DWD radar archive member has an invalid size: ${name}`)
+        }
+        pending = { name, size, type, paddedSize: Math.ceil(size / 512) * 512 }
+      }
+      if (queue.length < pending.paddedSize) break
+      const padded = queue.take(pending.paddedSize)
+      const entry = pending
+      pending = null
+      if (entry.type === '\0' || entry.type === '0') {
+        yield { name: entry.name, bytes: padded.subarray(0, entry.size) }
+      }
+    }
+  }
+  if (!ended && pending) throw new Error(`DWD radar archive ended inside member: ${pending.name}`)
+}
+
+function radolanGridPixel(longitude, latitude, frame = DWD_RADOLAN_GRID) {
+  const [x, y] = proj4('EPSG:4326', DWD_RADOLAN_PROJECTION, [longitude, latitude])
+  const column = Math.floor((x - DWD_RADOLAN_GRID.westM) / DWD_RADOLAN_GRID.cellSizeM)
+  const row = Math.floor((y - DWD_RADOLAN_GRID.southM) / DWD_RADOLAN_GRID.cellSizeM)
+  if (column < 0 || column >= frame.width || row < 0 || row >= frame.height) return null
+  return { column, row, index: row * frame.width + column }
+}
+
+let dwdRadarSampleIndexes = null
+
+function dwdRadarSamples(frame) {
+  if (frame.width !== DWD_RADOLAN_GRID.width || frame.height !== DWD_RADOLAN_GRID.height) {
+    throw new Error(`Unsupported DWD RADOLAN grid ${frame.height}x${frame.width}`)
+  }
+  if (dwdRadarSampleIndexes) return dwdRadarSampleIndexes
+  const indexes = new Int32Array(DWD_RADAR_IMAGE_SIZE.width * DWD_RADAR_IMAGE_SIZE.height)
+  indexes.fill(-1)
+  for (let imageY = 0; imageY < DWD_RADAR_IMAGE_SIZE.height; imageY += 1) {
+    const latitude = INCIDENT_AOI.north
+      - (imageY + 0.5) / DWD_RADAR_IMAGE_SIZE.height * (INCIDENT_AOI.north - INCIDENT_AOI.south)
+    for (let imageX = 0; imageX < DWD_RADAR_IMAGE_SIZE.width; imageX += 1) {
+      const longitude = INCIDENT_AOI.west
+        + (imageX + 0.5) / DWD_RADAR_IMAGE_SIZE.width * (INCIDENT_AOI.east - INCIDENT_AOI.west)
+      const gridPixel = radolanGridPixel(longitude, latitude, frame)
+      if (gridPixel) indexes[imageY * DWD_RADAR_IMAGE_SIZE.width + imageX] = gridPixel.index
+    }
+  }
+  dwdRadarSampleIndexes = indexes
+  return indexes
+}
+
+function dwdRainColor(valueMm) {
+  if (valueMm == null || valueMm <= 0) return DWD_RAIN_COLORS[0]
+  if (valueMm < 0.1) return DWD_RAIN_COLORS[1]
+  if (valueMm < 0.25) return DWD_RAIN_COLORS[2]
+  if (valueMm < 0.5) return DWD_RAIN_COLORS[3]
+  if (valueMm < 1) return DWD_RAIN_COLORS[4]
+  if (valueMm < 2) return DWD_RAIN_COLORS[5]
+  if (valueMm < 4) return DWD_RAIN_COLORS[6]
+  return DWD_RAIN_COLORS[7]
+}
+
+function dwdRadarIncidentMeasurement(frame) {
+  const pixel = radolanGridPixel(INCIDENT_POINT.longitude, INCIDENT_POINT.latitude, frame)
+  const valueMm = pixel ? dwdRadolanValueMm(frame, pixel.index) : null
+  return {
+    valueMm,
+    unit: 'mm / 5 min',
+    label: valueMm == null
+      ? 'outside valid radar coverage'
+      : valueMm === 0
+        ? 'none detected (0.00 mm / 5 min)'
+        : `${valueMm.toFixed(frame.precisionDigits)} mm / 5 min`,
+    pixel: pixel ? { column: pixel.column, row: pixel.row } : null,
+  }
+}
+
+function renderDwdRadarFrame(frame) {
+  const samples = dwdRadarSamples(frame)
+  const rgba = Buffer.alloc(samples.length * 4)
+  for (let imagePixel = 0; imagePixel < samples.length; imagePixel += 1) {
+    const valueMm = samples[imagePixel] < 0 ? null : dwdRadolanValueMm(frame, samples[imagePixel])
+    const color = dwdRainColor(valueMm)
+    const offset = imagePixel * 4
+    rgba[offset] = color[0]
+    rgba[offset + 1] = color[1]
+    rgba[offset + 2] = color[2]
+    rgba[offset + 3] = color[3]
+  }
+  return encodeRgbaPng(DWD_RADAR_IMAGE_SIZE.width, DWD_RADAR_IMAGE_SIZE.height, rgba)
+}
+
+async function storeDwdRadarFrames(frames, archiveUrl, query) {
+  const stored = []
+  const batchSize = 12
+  for (let start = 0; start < frames.length; start += batchSize) {
+    const batch = frames.slice(start, start + batchSize)
+    stored.push(...await Promise.all(batch.map(async (frame) => {
+      const image = await storeArtifact({
+        artifactPrefix: 'dwd-radar-image',
+        sourceKey: 'dwd-radar-history',
+        originalPath: archiveUrl,
+        contentType: 'image/png',
+        capturedAt: frame.observedAt,
+        bytes: frame.png,
+        discriminator: frame.observedAt,
+      }, query)
+      return {
+        observedAt: frame.observedAt,
+        providerKey: 'dwd-radolan-yw',
+        providerName: 'DWD RADOLAN YW',
+        accumulationMinutes: 5,
+        resolutionKm: 1,
+        bounds: INCIDENT_AOI_BOUNDS,
+        attribution: 'Deutscher Wetterdienst (DWD) Open Data',
+        incident: frame.incident,
+        image,
+      }
+    })))
+  }
+  return stored
+}
+
+async function ingestDwdRadarArchive({ date, archiveResponse, archiveUrl, query, generatedAt }) {
+  const rawArtifact = await storeArtifact({
+    artifactPrefix: 'dwd-radar-archive',
+    sourceKey: 'dwd-radar-history',
+    originalPath: archiveUrl,
+    contentType: archiveResponse.contentType || 'application/gzip',
+    capturedAt: generatedAt,
+    bytes: archiveResponse.bytes,
+    discriminator: date,
+  }, query)
+  const parsedFrames = []
+  let archiveFrameCount = 0
+  const firstIncidentBucketMs = Math.floor(Date.parse(INCIDENT_IGNITION) / 300_000) * 300_000
+  for await (const entry of tarEntriesFromGzip(archiveResponse.bytes)) {
+    if (!/raa01-yw_10000-\d{10}-dwd---bin$/u.test(entry.name)) continue
+    const frame = parseDwdRadolanYwFrame(entry.bytes, entry.name)
+    archiveFrameCount += 1
+    if (frame.observedAt.slice(0, 10) !== date) {
+      throw new Error(`DWD radar archive ${date} contains a frame for ${frame.observedAt.slice(0, 10)}`)
+    }
+    if (Date.parse(frame.observedAt) < firstIncidentBucketMs) continue
+    parsedFrames.push({
+      observedAt: frame.observedAt,
+      incident: dwdRadarIncidentMeasurement(frame),
+      png: renderDwdRadarFrame(frame),
+    })
+  }
+  if (archiveFrameCount < 280 || archiveFrameCount > 300) {
+    throw new Error(`DWD radar archive ${date} contains ${archiveFrameCount} frames; expected a complete daily archive`)
+  }
+  const frames = await storeDwdRadarFrames(parsedFrames, archiveUrl, query)
+  return {
+    frames,
+    archive: {
+      date,
+      providerUrl: archiveUrl,
+      archiveFrameCount,
+      retainedFrameCount: frames.length,
+      ingestedAt: generatedAt,
+      rawArtifact,
+    },
+  }
+}
+
+function completedIncidentDatesThroughYesterday(requestedAtMs) {
+  const yesterday = new Date(requestedAtMs - 86_400_000).toISOString().slice(0, 10)
+  if (yesterday < INCIDENT_IGNITION.slice(0, 10)) return []
+  return dateRange(INCIDENT_IGNITION.slice(0, 10), yesterday)
+}
+
+export async function refreshDwdRadarHistory({ requestedAtMs, query }) {
+  const generatedAt = new Date(requestedAtMs).toISOString()
+  const [index, previous] = await Promise.all([
+    fetchText(DWD_RADOLAN_ARCHIVE_ROOT, { timeoutMs: 30_000 }),
+    previousPayload('dwd-radar-history', query, { frames: [], archives: [], completedDates: [] }),
+  ])
+  const indexArtifact = await storeArtifact({
+    artifactPrefix: 'dwd-radar-index',
+    sourceKey: 'dwd-radar-history',
+    originalPath: DWD_RADOLAN_ARCHIVE_ROOT,
+    contentType: 'text/html',
+    capturedAt: generatedAt,
+    bytes: index.bytes,
+    compress: true,
+  }, query)
+  const requestedDates = completedIncidentDatesThroughYesterday(requestedAtMs)
+  const availableDates = new Set(parseDwdRadarArchiveDates(index.text))
+  const completedDates = new Set(previous.completedDates ?? [])
+  const datesToIngest = requestedDates
+    .filter((date) => !completedDates.has(date) && availableDates.has(date))
+    .slice(0, DWD_RADAR_MAX_ARCHIVES_PER_RUN)
+  const incomingFrames = []
+  const incomingArchives = []
+  for (const date of datesToIngest) {
+    const archiveUrl = dwdRadarArchiveUrl(date)
+    const archiveResponse = await fetchResponse(archiveUrl, { timeoutMs: 40_000 })
+    const ingested = await ingestDwdRadarArchive({
+      date,
+      archiveResponse,
+      archiveUrl,
+      query,
+      generatedAt,
+    })
+    incomingFrames.push(...ingested.frames)
+    incomingArchives.push(ingested.archive)
+    completedDates.add(date)
+  }
+  const frames = mergeUnique(
+    previous.frames,
+    incomingFrames,
+    (frame) => frame.observedAt,
+    (left, right) => Date.parse(left.observedAt) - Date.parse(right.observedAt),
+  )
+  const archives = mergeUnique(
+    previous.archives,
+    incomingArchives,
+    (archive) => archive.date,
+    (left, right) => left.date.localeCompare(right.date),
+  )
+  const pendingDates = requestedDates.filter((date) => !completedDates.has(date))
+  const payload = {
+    schemaVersion: 1,
+    generatedAt,
+    source: {
+      name: 'Deutscher Wetterdienst RADOLAN YW daily archive',
+      url: DWD_RADOLAN_ARCHIVE_ROOT,
+    },
+    cadenceMinutes: 5,
+    schedulerGranularityMinutes: 5,
+    resolutionKm: 1,
+    accumulationMinutes: 5,
+    unit: 'mm / 5 min',
+    bounds: INCIDENT_AOI_BOUNDS,
+    earliestObservedAt: frames[0]?.observedAt ?? null,
+    latestObservedAt: frames.at(-1)?.observedAt ?? null,
+    frames,
+    archives,
+    completedDates: [...completedDates].sort(),
+    pendingDates,
+    retentionPolicy: 'raw daily archives and incident-period five-minute frames retained in PostgreSQL',
+  }
+  const stored = await saveDataset({ key: 'dwd-radar-history', payload }, query)
+  return {
+    itemCount: frames.length,
+    metadata: {
+      changed: stored.changed,
+      archiveCount: archives.length,
+      completedDates: payload.completedDates,
+      pendingDates,
+      ingestedDates: datesToIngest,
+      newFrameCount: incomingFrames.length,
+      rawArtifactCount: 1 + incomingArchives.length + incomingFrames.length,
+      rawArtifacts: [
+        indexArtifact.artifactKey,
+        ...incomingArchives.map((archive) => archive.rawArtifact.artifactKey),
+      ],
+    },
+  }
+}
+
 export async function refreshRmiRadar({ requestedAtMs, query }) {
   const generatedAt = new Date(requestedAtMs).toISOString()
   const [page, previous] = await Promise.all([
@@ -383,6 +793,10 @@ export async function refreshRmiRadar({ requestedAtMs, query }) {
       }, query)
       return {
         observedAt,
+        providerKey: 'rmi-public-animation',
+        providerName: 'RMI public precipitation radar',
+        bounds: RMI_RADAR_BOUNDS,
+        attribution: 'Royal Meteorological Institute of Belgium',
         incident: rmiRadarIncidentCategory(radar, imageIndex),
         image,
       }
@@ -406,9 +820,10 @@ export async function refreshRmiRadar({ requestedAtMs, query }) {
     schedulerGranularityMinutes: 5,
     bounds: RMI_RADAR_BOUNDS,
     legend: RMI_RAIN_LABELS,
+    earliestObservedAt: frames[0]?.observedAt ?? null,
     latestObservedAt,
     frames,
-    retentionPolicy: 'incident lifetime in PostgreSQL',
+    retentionPolicy: 'all public animation frames received since collection began are retained in PostgreSQL',
   }
   const stored = await saveDataset({ key: 'rmi-radar', payload }, query)
   return {

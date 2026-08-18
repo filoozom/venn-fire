@@ -63,6 +63,7 @@ assert.equal(configured.application_name, 'fire-test')
 assert(PUBLIC_DATASET_KEYS.includes('aircraft'))
 assert(PUBLIC_DATASET_KEYS.includes('firms'))
 assert(PUBLIC_DATASET_KEYS.includes('rmi-radar'))
+assert(PUBLIC_DATASET_KEYS.includes('dwd-radar-history'))
 assert(PUBLIC_DATASET_KEYS.includes('nasa-gibs'))
 assert(PUBLIC_DATASET_KEYS.includes('cams'))
 assert(PUBLIC_DATASET_KEYS.includes('sentinel1'))
@@ -147,6 +148,29 @@ assert.equal(publicEnvironmental.frames[0].valueArtifactKey, undefined)
 assert.equal(publicEnvironmental.frames[0].image.artifactKey, undefined)
 assert.equal(publicEnvironmental.frames[0].image.sha256, undefined)
 assert.equal(publicEnvironmental.frames[0].image.databaseUrl, '/api/source-image?id=opaque')
+
+const publicDwdRadar = publicDatasetPayload('dwd-radar-history', {
+  archives: [{
+    date: '2026-08-14',
+    providerUrl: 'https://opendata.dwd.de/YW-260814.tar.gz',
+    archiveFrameCount: 288,
+    retainedFrameCount: 155,
+    rawArtifact: { artifactKey: 'private-archive-artifact' },
+  }],
+  frames: [{
+    observedAt: '2026-08-14T11:05:00.000Z',
+    image: {
+      artifactKey: 'private-radar-image',
+      sha256: 'private-hash',
+      databaseUrl: '/api/source-image?id=dwd-radar',
+      contentType: 'image/png',
+    },
+  }],
+})
+assert.equal(publicDwdRadar.archives[0].rawArtifact, undefined)
+assert.equal(publicDwdRadar.frames[0].image.artifactKey, undefined)
+assert.equal(publicDwdRadar.frames[0].image.sha256, undefined)
+assert.equal(publicDwdRadar.frames[0].image.databaseUrl, '/api/source-image?id=dwd-radar')
 
 const publicSentinel1 = publicDatasetPayload('sentinel1', {
   scenes: [{

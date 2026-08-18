@@ -523,6 +523,51 @@ export function effisProductIsCarriedForward(product, timestampMs) {
   return Boolean(product && product.productDate < localDateOf(timestampMs))
 }
 
+export function mergePrecipitationRadar(rmiRadar = { frames: [] }, dwdRadarHistory = { frames: [] }) {
+  const framesByTime = new Map()
+  for (const frame of dwdRadarHistory.frames ?? []) {
+    if (!Number.isFinite(Date.parse(frame?.observedAt))) continue
+    framesByTime.set(frame.observedAt, {
+      ...frame,
+      providerKey: frame.providerKey ?? 'dwd-radolan-yw',
+      providerName: frame.providerName ?? 'DWD RADOLAN YW',
+      bounds: frame.bounds ?? dwdRadarHistory.bounds,
+      attribution: frame.attribution ?? 'Deutscher Wetterdienst (DWD) Open Data',
+    })
+  }
+  // The Belgian frame is the more local product. When both providers have the
+  // same timestamp it wins, while the DWD archive still remains retained in its
+  // own database dataset and raw daily artifact.
+  for (const frame of rmiRadar.frames ?? []) {
+    if (!Number.isFinite(Date.parse(frame?.observedAt))) continue
+    framesByTime.set(frame.observedAt, {
+      ...frame,
+      providerKey: frame.providerKey ?? 'rmi-public-animation',
+      providerName: frame.providerName ?? 'RMI public precipitation radar',
+      bounds: frame.bounds ?? rmiRadar.bounds,
+      attribution: frame.attribution ?? 'Royal Meteorological Institute of Belgium',
+    })
+  }
+  const frames = [...framesByTime.values()]
+    .sort((left, right) => Date.parse(left.observedAt) - Date.parse(right.observedAt))
+  return {
+    ...rmiRadar,
+    frames,
+    earliestObservedAt: frames[0]?.observedAt ?? null,
+    latestObservedAt: frames.at(-1)?.observedAt ?? null,
+    sources: [dwdRadarHistory.source, rmiRadar.source].filter(Boolean),
+    historicalBackfill: {
+      archiveCount: dwdRadarHistory.archives?.length ?? 0,
+      completedDates: dwdRadarHistory.completedDates ?? [],
+      pendingDates: dwdRadarHistory.pendingDates ?? [],
+      frameCount: dwdRadarHistory.frames?.length ?? 0,
+      earliestObservedAt: dwdRadarHistory.earliestObservedAt ?? null,
+      latestObservedAt: dwdRadarHistory.latestObservedAt ?? null,
+      retentionPolicy: dwdRadarHistory.retentionPolicy ?? null,
+    },
+  }
+}
+
 export function runtimeDataFromResponse(response) {
   if (!response?.ok) throw new Error(response?.error || 'Database response is unavailable')
   const datasets = response.datasets ?? {}
@@ -539,7 +584,9 @@ export function runtimeDataFromResponse(response) {
   const localAuthorityUpdates = optionalPayload(datasets, 'local-authority-updates', { notices: [], events: [] })
   const cams = optionalPayload(datasets, 'cams', { frames: [], products: [] })
   const nasaGibs = optionalPayload(datasets, 'nasa-gibs', { images: [], layers: [] })
-  const rmiRadar = optionalPayload(datasets, 'rmi-radar', { frames: [] })
+  const rmiRadarLive = optionalPayload(datasets, 'rmi-radar', { frames: [] })
+  const dwdRadarHistory = optionalPayload(datasets, 'dwd-radar-history', { frames: [] })
+  const rmiRadar = mergePrecipitationRadar(rmiRadarLive, dwdRadarHistory)
   const sentinel1 = optionalPayload(datasets, 'sentinel1', { scenes: [], matchedPairs: [], changeAnalyses: [] })
   const sentinel2 = optionalPayload(datasets, 'sentinel2', { scenes: [] })
   const sentinel3Frp = optionalPayload(datasets, 'sentinel3-frp', { scenes: [], detections: [] })

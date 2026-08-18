@@ -2,6 +2,7 @@ import { loadArtifact, setNoStoreHeaders } from '../server/database.mjs'
 
 const ALLOWED_PREFIXES = new Map([
   ['cams-image:', 'cams'],
+  ['dwd-radar-image:', 'dwd-radar-history'],
   ['nasa-gibs-image:', 'nasa-gibs'],
   ['rmi-radar-image:', 'rmi-radar'],
   ['sentinel1-thumbnail:', 'sentinel1'],

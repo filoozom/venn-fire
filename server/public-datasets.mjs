@@ -2,6 +2,7 @@ import { isExcludedIncidentAircraft } from './aircraft-policy.mjs'
 
 export const OPTIONAL_PUBLIC_DATASET_KEYS = Object.freeze([
   'cams',
+  'dwd-radar-history',
   'nasa-gibs',
   'rmi-radar',
   'sentinel1',
@@ -152,6 +153,23 @@ function compactRmiRadar(payload) {
   }
 }
 
+function compactDwdRadarHistory(payload) {
+  return {
+    ...payload,
+    archives: (payload.archives ?? []).map((archive) => definedFields(archive, [
+      'date',
+      'providerUrl',
+      'archiveFrameCount',
+      'retainedFrameCount',
+      'ingestedAt',
+    ])),
+    frames: (payload.frames ?? []).map((frame) => ({
+      ...frame,
+      image: compactStoredImage(frame.image),
+    })),
+  }
+}
+
 function compactNasaGibs(payload) {
   return {
     ...payload,
@@ -187,6 +205,7 @@ export function publicDatasetPayload(key, payload) {
   if (!payload || typeof payload !== 'object') return payload
   if (key === 'aircraft') return compactAircraft(payload)
   if (key === 'cams') return compactCams(payload)
+  if (key === 'dwd-radar-history') return compactDwdRadarHistory(payload)
   if (key === 'firms') return compactFirms(payload)
   if (key === 'nasa-gibs') return compactNasaGibs(payload)
   if (key === 'rmi-radar') return compactRmiRadar(payload)

@@ -129,6 +129,7 @@ const SOURCE_DIRECTORY_COPY = {
   'public-alerts': { label: 'BE-Alert public alerts', coverage: 'Public emergency alerts retained after they expire from the live feed.' },
   rmi: { label: 'RMI Mont Rigi observations', coverage: 'Ten-minute observations from Mont Rigi; newest values may await quality validation.' },
   'rmi-radar': { label: 'RMI precipitation radar', coverage: 'Official public precipitation-radar frames, retained and aligned to their observation times.' },
+  'dwd-radar-history': { label: 'DWD precipitation-radar archive', coverage: 'Official 1 km precipitation amounts at five-minute granularity, retained from the start of the incident as each completed day is published.' },
   dwd: { label: 'DWD nearby wind stations', coverage: 'Ten-minute wind observations from nearby German stations.' },
   firms: { label: 'NASA FIRMS detections', coverage: 'Thermal detections from VIIRS, MODIS and Meteosat.' },
   'nasa-gibs': { label: 'NASA GIBS visual imagery', coverage: 'Daily VIIRS true-colour and short-wave-infrared visual context.' },
@@ -204,9 +205,9 @@ function layerOptionsFor(
   },
   {
     key: ENVIRONMENT_LAYER_KEYS.rmiRadar,
-    label: 'RMI precipitation radar',
+    label: 'Precipitation radar',
     detail: environmental.rmiRadarFrame
-      ? `${environmental.rmiRadarFrame.observedAt.slice(11, 16)} UTC · incident pixel: ${environmental.rmiRadarFrame.incident?.label ?? 'unavailable'}`
+      ? `${environmental.rmiRadarFrame.observedAt.slice(11, 16)} UTC · ${environmental.rmiRadarFrame.providerName ?? 'radar'} · incident: ${environmental.rmiRadarFrame.incident?.label ?? 'unavailable'}`
       : 'No radar observation available at selected time',
     icon: Droplets,
     color: '#356fae',
@@ -335,6 +336,18 @@ function formatDecimal(value, maximumFractionDigits = 1) {
   const number = Number(value)
   if (!Number.isFinite(number)) return '—'
   return number.toLocaleString('en-GB', { maximumFractionDigits })
+}
+
+function radarProviderLabel(frame) {
+  return frame?.providerName ?? (frame?.providerKey === 'dwd-radolan-yw' ? 'DWD RADOLAN YW' : 'RMI precipitation radar')
+}
+
+function radarStatusLabel(frame) {
+  if (!frame) return 'AWAITING FRAME'
+  if (frame.incident?.valueMm != null && Number.isFinite(Number(frame.incident.valueMm))) {
+    return `${formatDecimal(frame.incident.valueMm, 2)} MM / 5 MIN`
+  }
+  return String(frame.incident?.label ?? 'AVAILABLE').toUpperCase()
 }
 
 function formatDistance(metres) {
@@ -568,7 +581,7 @@ function sourceTone(sourceKey) {
   if (sourceKey === 'effis' || sourceKey === 'ems' || sourceKey === 'sentinel1'
     || sourceKey === 'sentinel2' || sourceKey === 'sentinel3-frp' || sourceKey === 'cams') return 'effis'
   if (sourceKey === 'rmi-radar') return 'rmi'
-  if (sourceKey.includes('meteo') || sourceKey === 'dwd' || sourceKey === 'rmi') return 'weather'
+  if (sourceKey.includes('meteo') || sourceKey === 'dwd' || sourceKey === 'dwd-radar-history' || sourceKey === 'rmi') return 'weather'
   if (sourceKey === 'reports' || sourceKey === 'vedia') return 'report'
   if (sourceKey === 'local-authority-updates' || sourceKey === 'public-alerts') return 'official'
   return 'adsb'
@@ -600,6 +613,7 @@ function DataModal({
   const postFireQuicklook = sentinel2.firstPostFireScene?.quicklook?.stored ? sentinel2.firstPostFireScene : null
   const latestSentinelAnalysis = (sentinel2.analyses ?? []).filter((analysis) => analysis.status === 'ready').at(-1)
   const latestRmiRadar = (rmiRadar.frames ?? []).at(-1)
+  const radarHistory = rmiRadar.historicalBackfill ?? { frameCount: 0, pendingDates: [] }
   const latestGibsFalseColor = (nasaGibs.images ?? []).filter((entry) => entry.layerKey === 'false-color').at(-1)
   const latestGibsTrueColor = (nasaGibs.images ?? []).filter((entry) => entry.layerKey === 'true-color').at(-1)
   const latestSentinel3Scene = (sentinel3Frp.scenes ?? []).filter((scene) => scene.thumbnail?.stored).at(-1)
@@ -739,12 +753,12 @@ function DataModal({
 
                 <div className="connection-card connection-card--sentinel connection-card--environmental">
                   {latestRmiRadar?.image?.databaseUrl ? (
-                    <img className="sentinel-preview environmental-preview environmental-preview--radar" src={latestRmiRadar.image.databaseUrl} alt={`RMI precipitation radar observed ${latestRmiRadar.observedAt}`} />
+                    <img className="sentinel-preview environmental-preview environmental-preview--radar" src={latestRmiRadar.image.databaseUrl} alt={`Precipitation radar observed ${latestRmiRadar.observedAt}`} />
                   ) : <span className="connection-icon connection-icon--weather"><Droplets size={20} /></span>}
                   <span className="connection-copy">
-                    <span className="connection-title"><strong>RMI precipitation radar</strong><span className="status-pill status-pill--connected">{latestRmiRadar ? latestRmiRadar.incident?.label?.toUpperCase() : 'AWAITING FRAME'}</span></span>
-                    <p>{latestRmiRadar ? `The newest retained radar frame is ${absoluteObservationTimeLabel(Date.parse(latestRmiRadar.observedAt))}; its incident pixel is classified as ${latestRmiRadar.incident?.label ?? 'unavailable'}.` : 'No public radar frame has been retained yet.'}</p>
-                    <span className="connection-meta">Official RMI public animation · checked every 5 min · observation images currently arrive every 10 min</span>
+                    <span className="connection-title"><strong>Precipitation radar</strong><span className="status-pill status-pill--connected">{radarStatusLabel(latestRmiRadar)}</span></span>
+                    <p>{latestRmiRadar ? `The newest retained frame is ${absoluteObservationTimeLabel(Date.parse(latestRmiRadar.observedAt))} from ${radarProviderLabel(latestRmiRadar)}; the incident reading is ${latestRmiRadar.incident?.label ?? 'unavailable'}.` : 'No public radar frame has been retained yet.'}</p>
+                    <span className="connection-meta">RMI live animation retained on arrival · {radarHistory.frameCount.toLocaleString('en-GB')} DWD five-minute frames backfilled{radarHistory.pendingDates?.length ? ` · awaiting completed archive: ${radarHistory.pendingDates.join(', ')}` : ''} · all frames stored in PostgreSQL</span>
                   </span>
                 </div>
 
@@ -819,7 +833,7 @@ function DataModal({
                 <article><span>02</span><div><strong>Reported area</strong><p>The line is a timestamped step series. A figure becomes visible when published; when its stated effective time differs, both times are retained and shown. Between reports it means “last reported,” not measured growth.</p></div></article>
                 <article><span>03</span><div><strong>EFFIS activity envelope</strong><p>EFFIS groups a day of VIIRS activity into a broad shape. Its calculated area can include ground between detections, so it is neither the reported affected area nor a field-confirmed perimeter.</p></div></article>
                 <article><span>04</span><div><strong>Aircraft observations</strong><p>Routes use exact receiver fixes. Missing coverage stays missing, and routes fade away after 24 hours. An aircraft seen near the incident is not automatically a firefighting aircraft; only repeated, near-fire GRZLY manoeuvres can influence the Best estimate.</p></div></article>
-                <article><span>05</span><div><strong>Environmental context</strong><p>RMI radar shows precipitation and is visible by default; GIBS provides visual imagery; CAMS is an hourly ~10 km model forecast, not a local sensor. Its wildfire PM10 field is experimental and its colour ramp saturates at 500 µg/m³. Sentinel-3 catalogue passes and Sentinel-1 preview pairs remain context unless coordinate-level measurements pass the map and estimate rules.</p></div></article>
+                <article><span>05</span><div><strong>Environmental context</strong><p>Precipitation radar combines retained RMI live frames with five-minute DWD RADOLAN history and is visible by default; GIBS provides visual imagery; CAMS is an hourly ~10 km model forecast, not a local sensor. Its wildfire PM10 field is experimental and its colour ramp saturates at 500 µg/m³. Sentinel-3 catalogue passes and Sentinel-1 preview pairs remain context unless coordinate-level measurements pass the map and estimate rules.</p></div></article>
                 <article><span>06</span><div><strong>Situation reports</strong><p>Published estimates appear from their stated time and link to the original source. BRF figures remain labelled as local reporting rather than official measurements.</p></div></article>
               </div>
               <div className="safety-note"><ShieldAlert size={17} /><span>This viewer is informational and must not be used for evacuation or preservation-of-life decisions. Follow BE-Alert and emergency services.</span></div>
@@ -1276,9 +1290,9 @@ function FireViewer({ runtime, databaseError }) {
       id: `rmi-radar-${currentRmiRadar.observedAt}`,
       kind: 'rmi-radar',
       url: currentRmiRadar.image.databaseUrl,
-      bounds: runtime.rmiRadar.bounds,
+      bounds: currentRmiRadar.bounds ?? runtime.rmiRadar.bounds,
       opacity: 0.74,
-      attribution: 'Royal Meteorological Institute of Belgium',
+      attribution: currentRmiRadar.attribution ?? 'Royal Meteorological Institute of Belgium',
     }] : []),
   ], [layers, currentGibsFalseColor, currentGibsTrueColor, currentCamsWildfirePm10, currentCamsPm2p5, currentRmiRadar, runtime.nasaGibs.bounds, runtime.cams.bounds, runtime.cams.attribution, runtime.rmiRadar.bounds])
 
@@ -1449,7 +1463,7 @@ function FireViewer({ runtime, databaseError }) {
               <SourceMark tone="nasa" /><span><strong>FIRMS</strong><small>{`${firmsData.detections.length} exact detections · ${visibleFirmsDetections.length} shown · newest heat ${firmsData.latestAcquiredAt ? observationTimeLabel(Date.parse(firmsData.latestAcquiredAt), frame.timestampMs) : 'unavailable'}${firmsSourceRun?.completedAt ? ` · feed checked ${observationTimeLabel(Date.parse(firmsSourceRun.completedAt), frame.timestampMs)}` : ''}`}</small></span><em className={`health-dot ${firmsState.status === 'live' ? '' : 'health-dot--amber'}`} />
             </button>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
-              <SourceMark tone="rmi" /><span><strong>RMI precipitation radar</strong><small>{currentRmiRadar ? `${observationTimeLabel(Date.parse(currentRmiRadar.observedAt), frame.timestampMs)} · incident pixel ${currentRmiRadar.incident?.label ?? 'unavailable'} · visible by default` : 'no radar observation at selected time'}</small></span><em className={`health-dot ${currentRmiRadar ? '' : 'health-dot--amber'}`} />
+              <SourceMark tone="rmi" /><span><strong>Precipitation radar</strong><small>{currentRmiRadar ? `${observationTimeLabel(Date.parse(currentRmiRadar.observedAt), frame.timestampMs)} · ${radarProviderLabel(currentRmiRadar)} · incident ${currentRmiRadar.incident?.label ?? 'unavailable'} · visible by default` : 'no radar observation at selected time'}</small></span><em className={`health-dot ${currentRmiRadar ? '' : 'health-dot--amber'}`} />
             </button>
             <button className="source-health-row" onClick={() => setDataOpen(true)} type="button">
               <SourceMark tone="effis" /><span><strong>EFFIS activity envelope</strong><small>{currentEffisArea ? `${currentEffisArea.productDate}${effisCarriedForward ? ' carried forward' : ''} · contains fire activity but may include unaffected ground` : 'not yet available at selected time'}</small></span><em className="health-dot health-dot--amber" />

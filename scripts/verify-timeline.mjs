@@ -107,9 +107,9 @@ if (unrelatedTrafficControls !== 0) {
   throw new Error(`Unrelated traffic is still exposed by ${unrelatedTrafficControls} UI control(s)`)
 }
 
-const radarLayerToggle = page.locator('.layer-row').filter({ hasText: 'RMI precipitation radar' })
+const radarLayerToggle = page.locator('.layer-row').filter({ hasText: 'Precipitation radar' })
 if (await radarLayerToggle.getAttribute('aria-pressed') !== 'true') {
-  throw new Error('RMI precipitation radar is not visible by default')
+  throw new Error('Precipitation radar is not visible by default')
 }
 const firmsFreshness = await page.locator('.source-health-row').filter({ hasText: 'FIRMS' }).innerText()
 if (!firmsFreshness.includes('newest heat') || !firmsFreshness.includes('feed checked')) {

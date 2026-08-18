@@ -66,6 +66,7 @@ const expectedSources = [
   'public-alerts',
   'rmi',
   'rmi-radar',
+  'dwd-radar-history',
   'dwd',
   'firms',
   'nasa-gibs',
@@ -148,6 +149,7 @@ assert.equal(REFRESH_SOURCES.find((source) => source.key === 'aircraft-route-his
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'firms').intervalMinutes, 15)
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'sentinel2').intervalMinutes, 5)
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'rmi-radar').intervalMinutes, 5)
+assert.equal(REFRESH_SOURCES.find((source) => source.key === 'dwd-radar-history').intervalMinutes, 5)
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'nasa-gibs').intervalMinutes, 30)
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'sentinel3-frp').intervalMinutes, 30)
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'sentinel1').intervalMinutes, 60)
