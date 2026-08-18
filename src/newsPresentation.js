@@ -11,7 +11,7 @@ const translations = {
     bestEstimate: 'Unsere Beste Schätzung',
     bestEstimateSource: 'Aus Beobachtungen abgeleitete Kontur',
     documentTitle: 'Zeitverlauf des Vennbrands | Venn Fire Watch',
-    meanWind: 'Mittlerer beobachteter Wind',
+    meanWind: 'Beobachteter Wind',
     noConcurrentReadings: 'Keine zwei zeitgleichen Messungen',
     timeline: 'Zeitverlauf des Einsatzes',
     twoNearestStations: 'Zwei nächstgelegene Messstationen',
@@ -23,7 +23,7 @@ const translations = {
     bestEstimate: 'Our best estimate',
     bestEstimateSource: 'Derived observation outline',
     documentTitle: 'High Fens wildfire timeline | Venn Fire Watch',
-    meanWind: 'Mean observed wind',
+    meanWind: 'Observed wind',
     noConcurrentReadings: 'No two concurrent observations',
     timeline: 'Incident timeline',
     twoNearestStations: 'Two nearest weather stations',
@@ -51,13 +51,14 @@ function dashboardMarkup() {
   return `
     <div class="news-summary">
       <article class="news-stat news-stat--wind">
+        <i class="news-wind-arrow is-unavailable" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 20V4M6.5 9.5 12 4l5.5 5.5" /></svg>
+        </i>
         <span>${copy.meanWind}</span>
         <strong class="news-wind-value">
-          <i class="news-wind-arrow is-unavailable" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="M12 20V4M6.5 9.5 12 4l5.5 5.5" /></svg>
-          </i>
-          <i class="news-wind-copy"><b>—</b><em>${copy.twoNearestStations}</em></i>
+          <i class="news-wind-copy"><b>—</b></i>
         </strong>
+        <small class="news-wind-detail">${copy.twoNearestStations}</small>
       </article>
       <article class="news-stat">
         <span>${copy.announcedArea}</span>
@@ -103,7 +104,7 @@ function updateWind(dashboard) {
   const readings = stationReadings()
   const arrow = dashboard.querySelector('.news-wind-arrow')
   const direction = dashboard.querySelector('.news-wind-copy b')
-  const detail = dashboard.querySelector('.news-wind-copy em')
+  const detail = dashboard.querySelector('.news-wind-detail')
   if (readings.length !== 2) {
     arrow.classList.add('is-unavailable')
     arrow.style.setProperty('--wind-rotation', '0deg')

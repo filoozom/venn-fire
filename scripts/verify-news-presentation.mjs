@@ -22,10 +22,11 @@ try {
   })
 
   const state = await page.evaluate(() => {
-    const bounds = (selector) => {
-      const rectangle = document.querySelector(selector)?.getBoundingClientRect()
+    const elementBounds = (element) => {
+      const rectangle = element?.getBoundingClientRect()
       return rectangle ? { x: rectangle.x, y: rectangle.y, width: rectangle.width, height: rectangle.height } : null
     }
+    const bounds = (selector) => elementBounds(document.querySelector(selector))
     return {
       viewport: { width: window.innerWidth, height: window.innerHeight },
       map: bounds('.map-region'),
@@ -33,9 +34,15 @@ try {
       summaryTextAlign: getComputedStyle(document.querySelector('#news-presentation-dashboard .news-stat')).textAlign,
       headerDisplay: getComputedStyle(document.querySelector('.app-header')).display,
       feedItems: document.querySelectorAll('#news-presentation-dashboard .news-update').length,
-      wind: document.querySelector('#news-presentation-dashboard .news-wind-copy')?.textContent,
+      wind: document.querySelector('#news-presentation-dashboard .news-stat--wind')?.textContent?.replace(/\s+/g, ' ').trim(),
       windArrow: bounds('#news-presentation-dashboard .news-wind-arrow'),
       windCopy: bounds('#news-presentation-dashboard .news-wind-copy'),
+      summaryCards: [...document.querySelectorAll('#news-presentation-dashboard .news-stat')].map(elementBounds),
+      summaryRows: [...document.querySelectorAll('#news-presentation-dashboard .news-stat')].map((card) => ({
+        title: elementBounds(card.querySelector(':scope > span')),
+        primary: elementBounds(card.querySelector(':scope > strong')),
+        secondary: elementBounds(card.querySelector(':scope > small')),
+      })),
       dashboardText: document.querySelector('#news-presentation-dashboard')?.textContent?.replace(/\s+/g, ' ').trim(),
       announced: document.querySelector('#news-presentation-dashboard .news-area-announced')?.textContent,
       estimated: document.querySelector('#news-presentation-dashboard .news-area-estimated')?.textContent,
@@ -72,7 +79,7 @@ try {
     || !/aus \d+°/u.test(state.wind) || state.announced === '—' || state.estimated === '—') {
     throw new Error(`News summary is incomplete: ${JSON.stringify(state)}`)
   }
-  if (state.dashboard.x !== 34 || state.summaryTextAlign !== 'center'
+  if (state.dashboard.x !== 34 || state.dashboard.width !== 840 || state.summaryTextAlign !== 'center'
     || state.language !== 'de' || state.timelineTitle !== 'Zeitverlauf des Einsatzes'
     || !/Unsere Beste Schätzung/u.test(state.dashboardText)
     || /Vektormittel aus zwei Messstationen/u.test(state.dashboardText)) {
@@ -81,8 +88,21 @@ try {
   const windArrowCenter = state.windArrow?.y + state.windArrow?.height / 2
   const windCopyCenter = state.windCopy?.y + state.windCopy?.height / 2
   if (!Number.isFinite(windArrowCenter) || !Number.isFinite(windCopyCenter)
-    || Math.abs(windArrowCenter - windCopyCenter) > 1) {
+    || Math.abs(windArrowCenter - windCopyCenter) > 1
+    || Math.abs(state.windArrow.y - state.summaryRows[0].title.y) > 0.5
+    || Math.abs((state.windArrow.y + state.windArrow.height)
+      - (state.summaryRows[0].secondary.y + state.summaryRows[0].secondary.height)) > 0.5) {
     throw new Error(`Wind arrow is not vertically aligned: ${JSON.stringify(state)}`)
+  }
+  const referenceRows = state.summaryRows[0]
+  const rowsAligned = state.summaryRows.length === 3
+    && ['title', 'primary', 'secondary'].every((row) => state.summaryRows.every((card) => (
+      Math.abs(card[row].y - referenceRows[row].y) <= 0.5
+      && Math.abs(card[row].height - referenceRows[row].height) <= 0.5
+    )))
+    && state.summaryCards.every((card) => Math.abs(card.width - state.summaryCards[0].width) <= 0.5)
+  if (!rowsAligned) {
+    throw new Error(`News summary rows are not aligned: ${JSON.stringify(state)}`)
   }
   if (state.gridMarkers !== 0 || state.waterLabels.length < 2 || state.waterLabels.some((label) => !label.visible)) {
     throw new Error(`Map grid/water context is incorrect: ${JSON.stringify(state)}`)
@@ -93,6 +113,43 @@ try {
   if (state.timelineValue !== state.timelineMax) {
     throw new Error(`News timeline did not open at the latest frame: ${JSON.stringify(state)}`)
   }
+
+  const flightFrames = await page.locator('.event-markers .is-flight').evaluateAll((markers, maximum) => (
+    markers.map((marker) => Math.round(Number.parseFloat(marker.style.left) * maximum / 100))
+  ), state.timelineMax)
+  let aircraftMarker = null
+  for (const frame of flightFrames) {
+    await page.locator('.timeline-range').evaluate((range, value) => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+      setter.call(range, String(value))
+      range.dispatchEvent(new Event('input', { bubbles: true }))
+      range.dispatchEvent(new Event('change', { bubbles: true }))
+    }, frame)
+    await page.waitForTimeout(100)
+    if (await page.locator('.aircraft-map-marker').count()) {
+      aircraftMarker = await page.evaluate(() => {
+        const bounds = (selector) => {
+          const rectangle = document.querySelector(selector)?.getBoundingClientRect()
+          return rectangle ? { width: rectangle.width, height: rectangle.height } : null
+        }
+        return {
+          symbol: bounds('.aircraft-map-marker > span'),
+          label: bounds('.aircraft-map-marker > b'),
+        }
+      })
+      break
+    }
+  }
+  if (!aircraftMarker || aircraftMarker.symbol.width < 45 || aircraftMarker.label.height < 19) {
+    throw new Error(`Broadcast aircraft marker is too small: ${JSON.stringify({ flightFrames, aircraftMarker })}`)
+  }
+  await page.screenshot({ path: '/tmp/venn-fire-news-flight-verified.png', fullPage: false })
+  await page.locator('.timeline-range').evaluate((range) => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    setter.call(range, range.max)
+    range.dispatchEvent(new Event('input', { bubbles: true }))
+    range.dispatchEvent(new Event('change', { bubbles: true }))
+  })
 
   await page.locator('.play-button').click()
   await page.waitForFunction(() => Number(document.querySelector('.timeline-range')?.value) < 3)

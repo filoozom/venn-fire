@@ -424,13 +424,13 @@ const NEWS_PRESENTATION_CSS = `
 
   html[data-video-presentation="news"] .timeline-title > span {
     color: #365248 !important;
-    font-size: 10px !important;
+    font-size: 12px !important;
     letter-spacing: 0.11em !important;
   }
 
   html[data-video-presentation="news"] .timeline-title strong {
     color: #52685f !important;
-    font-size: 10px !important;
+    font-size: 11px !important;
   }
 
   html[data-video-presentation="news"] .timeline-legend,
@@ -468,7 +468,7 @@ const NEWS_PRESENTATION_CSS = `
   html[data-video-presentation="news"] .timeline-ticks {
     top: 51px !important;
     color: #65766f !important;
-    font-size: 9px !important;
+    font-size: 11px !important;
   }
 
   #video-news-dashboard {
@@ -476,7 +476,7 @@ const NEWS_PRESENTATION_CSS = `
     z-index: 1600;
     top: 30px;
     left: 34px;
-    width: 720px;
+    width: 840px;
     color: #18372d;
     font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     pointer-events: none;
@@ -484,7 +484,7 @@ const NEWS_PRESENTATION_CSS = `
 
   #video-news-dashboard .news-summary {
     display: grid;
-    grid-template-columns: 1.25fr 1fr 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     min-height: 82px;
     overflow: hidden;
     color: #fff;
@@ -496,9 +496,10 @@ const NEWS_PRESENTATION_CSS = `
   }
 
   #video-news-dashboard .news-stat {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
+    display: grid;
+    grid-template-rows: 10px 31px 10px;
+    align-content: center;
+    row-gap: 3px;
     min-width: 0;
     padding: 12px 15px;
     border-left: 1px solid rgba(255, 255, 255, 0.16);
@@ -506,13 +507,26 @@ const NEWS_PRESENTATION_CSS = `
   }
 
   #video-news-dashboard .news-stat:first-child {
-    border-left: 0;
+    border-left-color: transparent;
+  }
+
+  #video-news-dashboard .news-stat--wind {
+    grid-template-columns: 57px minmax(0, 1fr);
+    column-gap: 10px;
+  }
+
+  #video-news-dashboard .news-stat--wind > span,
+  #video-news-dashboard .news-stat--wind > strong,
+  #video-news-dashboard .news-stat--wind > small {
+    grid-column: 2;
   }
 
   #video-news-dashboard .news-stat > span {
+    align-self: center;
     color: #f2c788;
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 900;
+    line-height: 10px;
     letter-spacing: 0.12em;
     text-transform: uppercase;
   }
@@ -522,7 +536,8 @@ const NEWS_PRESENTATION_CSS = `
     align-items: baseline;
     justify-content: center;
     gap: 5px;
-    margin-top: 3px;
+    height: 31px;
+    margin: 0;
     font-family: Georgia, "Times New Roman", serif;
     font-size: 29px;
     font-weight: 500;
@@ -541,12 +556,13 @@ const NEWS_PRESENTATION_CSS = `
   }
 
   #video-news-dashboard .news-stat > small {
-    min-height: 11px;
-    margin-top: 5px;
+    align-self: center;
+    min-height: 0;
+    margin: 0;
     overflow: hidden;
     color: rgba(255, 255, 255, 0.68);
-    font-size: 8px;
-    line-height: 1.25;
+    font-size: 9px;
+    line-height: 10px;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -558,10 +574,13 @@ const NEWS_PRESENTATION_CSS = `
   }
 
   #video-news-dashboard .news-wind-arrow {
+    grid-row: 1 / -1;
+    grid-column: 1;
+    align-self: stretch;
     display: grid;
     place-items: center;
-    width: 31px;
-    height: 31px;
+    width: 57px;
+    height: auto;
     color: #91dbc9;
     border: 1px solid rgba(145, 219, 201, 0.38);
     border-radius: 50%;
@@ -572,8 +591,8 @@ const NEWS_PRESENTATION_CSS = `
   }
 
   #video-news-dashboard .news-wind-arrow svg {
-    width: 19px;
-    height: 19px;
+    width: 29px;
+    height: 29px;
     fill: none;
     stroke: currentColor;
     stroke-width: 1.8;
@@ -584,26 +603,56 @@ const NEWS_PRESENTATION_CSS = `
   }
 
   #video-news-dashboard .news-wind-copy {
-    display: flex;
-    flex-direction: column;
+    display: block;
     font-style: normal;
   }
 
   #video-news-dashboard .news-wind-copy b {
     color: #fff;
-    font-size: 24px;
+    font-size: 29px;
     font-weight: 850;
-    line-height: 0.95;
+    line-height: 1;
   }
 
-  #video-news-dashboard .news-wind-copy em {
-    margin-top: 3px;
-    color: rgba(255, 255, 255, 0.66);
-    font-family: Inter, ui-sans-serif, sans-serif;
-    font-size: 8px;
-    font-style: normal;
-    font-weight: 750;
-    letter-spacing: 0.02em;
+  html[data-video-presentation="news"] .map-place-label > span,
+  html[data-video-presentation="news"] .border-label > span {
+    transform: scale(1.4);
+    transform-origin: left center;
+  }
+
+  html[data-video-presentation="news"] .aircraft-map-marker > span {
+    transform: scale(1.45);
+    transform-origin: center;
+  }
+
+  html[data-video-presentation="news"] .aircraft-map-marker > b {
+    top: 7px;
+    left: 42px;
+    transform: scale(1.35);
+    transform-origin: left center;
+  }
+
+  html[data-video-presentation="news"] .wind-source-marker > span,
+  html[data-video-presentation="news"] .photo-evidence-marker > span,
+  html[data-video-presentation="news"] .water-drop-marker > span {
+    transform: scale(1.35);
+    transform-origin: center;
+  }
+
+  html[data-video-presentation="news"] .fire-outline {
+    stroke-width: 3.4;
+  }
+
+  html[data-video-presentation="news"] .leaflet-overlay-pane path[stroke-dasharray] {
+    stroke-width: 3;
+  }
+
+  html[data-video-presentation="news"] .leaflet-tooltip {
+    font-size: 13px !important;
+  }
+
+  html[data-video-presentation="news"] .leaflet-tooltip strong {
+    font-size: 13.5px;
   }
 
   html[data-video-presentation="news"] .leaflet-control-attribution {
@@ -639,13 +688,14 @@ async function applyPresentation(page, config) {
       dashboard.innerHTML = `
         <div class="news-summary">
           <article class="news-stat news-stat--wind">
-            <span>Mean observed wind</span>
+            <i class="news-wind-arrow is-unavailable" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 20V4M6.5 9.5 12 4l5.5 5.5" /></svg>
+            </i>
+            <span>Observed wind</span>
             <strong class="news-wind-value">
-              <i class="news-wind-arrow is-unavailable" aria-hidden="true">
-                <svg viewBox="0 0 24 24"><path d="M12 20V4M6.5 9.5 12 4l5.5 5.5" /></svg>
-              </i>
-              <i class="news-wind-copy"><b>—</b><em>two nearest stations</em></i>
+              <i class="news-wind-copy"><b>—</b></i>
             </strong>
+            <small class="news-wind-detail">two nearest stations</small>
           </article>
           <article class="news-stat">
             <span>Announced area</span>
@@ -723,7 +773,7 @@ async function updateNewsPresentation(page, config) {
 
     const windArrow = dashboard.querySelector('.news-wind-arrow')
     const windCardinal = dashboard.querySelector('.news-wind-copy b')
-    const windDetail = dashboard.querySelector('.news-wind-copy em')
+    const windDetail = dashboard.querySelector('.news-wind-detail')
     if (stationReadings.length === 2) {
       const sumEast = stationReadings.reduce((sum, reading) => (
         sum + reading.speed * Math.sin(reading.direction * Math.PI / 180)
