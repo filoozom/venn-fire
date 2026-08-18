@@ -34,6 +34,8 @@ try {
       headerDisplay: getComputedStyle(document.querySelector('.app-header')).display,
       feedItems: document.querySelectorAll('#news-presentation-dashboard .news-update').length,
       wind: document.querySelector('#news-presentation-dashboard .news-wind-copy')?.textContent,
+      windArrow: bounds('#news-presentation-dashboard .news-wind-arrow'),
+      windCopy: bounds('#news-presentation-dashboard .news-wind-copy'),
       dashboardText: document.querySelector('#news-presentation-dashboard')?.textContent?.replace(/\s+/g, ' ').trim(),
       announced: document.querySelector('#news-presentation-dashboard .news-area-announced')?.textContent,
       estimated: document.querySelector('#news-presentation-dashboard .news-area-estimated')?.textContent,
@@ -75,6 +77,12 @@ try {
     || !/Unsere Beste Schätzung/u.test(state.dashboardText)
     || /Vektormittel aus zwei Messstationen/u.test(state.dashboardText)) {
     throw new Error(`News summary is not aligned/localized: ${JSON.stringify(state)}`)
+  }
+  const windArrowCenter = state.windArrow?.y + state.windArrow?.height / 2
+  const windCopyCenter = state.windCopy?.y + state.windCopy?.height / 2
+  if (!Number.isFinite(windArrowCenter) || !Number.isFinite(windCopyCenter)
+    || Math.abs(windArrowCenter - windCopyCenter) > 1) {
+    throw new Error(`Wind arrow is not vertically aligned: ${JSON.stringify(state)}`)
   }
   if (state.gridMarkers !== 0 || state.waterLabels.length < 2 || state.waterLabels.some((label) => !label.visible)) {
     throw new Error(`Map grid/water context is incorrect: ${JSON.stringify(state)}`)

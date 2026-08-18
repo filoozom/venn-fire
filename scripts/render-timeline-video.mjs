@@ -552,6 +552,7 @@ const NEWS_PRESENTATION_CSS = `
   }
 
   #video-news-dashboard .news-wind-value {
+    align-items: center !important;
     gap: 9px !important;
     justify-content: center;
   }
@@ -607,7 +608,7 @@ const NEWS_PRESENTATION_CSS = `
 
   html[data-video-presentation="news"] .leaflet-control-attribution {
     max-width: 760px !important;
-    margin: 0 34px 132px 0 !important;
+    margin: 0 84px 82px 0 !important;
     padding: 2px 6px !important;
     overflow: hidden !important;
     color: #607069 !important;
