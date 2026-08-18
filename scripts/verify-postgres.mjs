@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import { postgresEnvironmentKey, postgresPoolOptions, postgresUrl } from '../server/postgres.mjs'
 import { PUBLIC_DATASET_KEYS, publicDatasetPayload } from '../server/public-datasets.mjs'
@@ -44,8 +47,24 @@ assert.equal(selfHosted.enableChannelBinding, true)
 
 assert.throws(
   () => postgresUrl({ PG_CA_PEM: 'certificate-only' }),
-  /PGHOST is required/,
+  /PGHOST .*is required/,
 )
+
+// Credentials may also arrive as Docker secret files, which is how the
+// self-hosted deployment supplies them.
+const secretDirectory = mkdtempSync(join(tmpdir(), 'venn-fire-pg-'))
+writeFileSync(join(secretDirectory, 'password'), 'file-secret\n')
+writeFileSync(join(secretDirectory, 'ca.pem'), '-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----\n')
+const fileEnvironment = {
+  PGHOST: 'postgres',
+  PGPASSWORD_FILE: join(secretDirectory, 'password'),
+  PG_CA_PEM_FILE: join(secretDirectory, 'ca.pem'),
+}
+const fromFiles = postgresPoolOptions(postgresUrl(fileEnvironment), fileEnvironment)
+assert.equal(fromFiles.password, 'file-secret')
+assert(fromFiles.ssl.ca.includes('\nTEST\n'))
+assert.equal(fromFiles.ssl.rejectUnauthorized, true)
+rmSync(secretDirectory, { recursive: true, force: true })
 
 const configured = postgresPoolOptions('postgresql://example.test/fire', {
   DATABASE_POOL_MAX: '2',
