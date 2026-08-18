@@ -75,7 +75,9 @@ warning card and detailed timeline controls. It expands the map to the full
 1920 × 1080 canvas, focuses on the fire, and retains a clean timeline plus a
 large day/time card. Its broadcast overlay shows announced and derived area,
 the speed-weighted wind-vector mean from the two nearest current weather
-stations (the model grid is excluded), and the latest sourced incident updates:
+stations. The Open-Meteo model-grid marker and station-name footer are excluded;
+the nearby Eupen and Gileppe water reservoirs remain visible as route context.
+The incident-update feed is intentionally omitted:
 
 ```bash
 pnpm video:timeline -- \
@@ -85,10 +87,8 @@ pnpm video:timeline -- \
 
 All website-default data layers remain unchanged. Use `mapFocus` or
 `--map-focus` to select the full incident extent instead, and `mapZoomSteps` or
-`--map-zoom-steps` for additional zoom after the initial fit. The rolling feed
-shows five entries by default; change it with `newsFeedItems` or
-`--news-feed-items`. Every update enters the feed at its timeline timestamp,
-and the header reports the complete number visible by that time.
+`--map-zoom-steps` for additional zoom after the initial fit. German is the
+default broadcast language; use `language: "en"` or `--language en` for English.
 
 The news layout removes only Leaflet's optional branding prefix. Required map,
 radar and data-provider attribution remains visible in a compact strip aligned
@@ -97,13 +97,12 @@ above the timeline.
 The same presentation is available as a live database-backed browser view:
 
 ```text
-https://venn-fire.vercel.app/?presentation=news
+https://venn-fire.vercel.app/?presentation=news&lang=de
 ```
 
 The range remains draggable and the compact play button restarts from the
-incident beginning when the page is at the latest frame. Append `&updates=8`
-to show up to eight rolling feed entries; the default is five and the supported
-range is one to ten.
+incident beginning when the page is at the latest frame. Change `lang=de` to
+`lang=en` for the English version; the normal website is unaffected.
 
 Preview the final selected frame without starting FFmpeg or encoding a video:
 

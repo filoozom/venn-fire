@@ -20,9 +20,9 @@
   "freezeData": true,
   "baseMap": "default",
   "presentation": "viewer",
+  "language": "de",
   "mapFocus": "default",
   "mapZoomSteps": null,
-  "newsFeedItems": 5,
   "layers": {
     "Precipitation radar": true,
     "NASA VIIRS false colour": false

@@ -56,6 +56,7 @@ import { archiveProviderResponses } from './source-artifacts.mjs'
 const INCIDENT = { latitude: 50.54762, longitude: 6.05757 }
 const INCIDENT_START = '2026-08-14T11:00:00.000Z'
 const AIRCRAFT_ROUTE_HISTORY_RECOVERY_KEY = 'aircraft-route-history-recovery'
+const INCIDENT_WATER_CONTEXT_ENTITIES = ['Q165395', 'Q17373262']
 
 function finiteNumber(value) {
   const number = Number(value)
@@ -102,6 +103,61 @@ function mergeRows(previous, incoming, key, compare) {
 
 async function previousPayload(key, query, fallback = {}) {
   return (await loadDataset(key, query))?.payload ?? fallback
+}
+
+export function mapLabelFromWikidata(entityId, response) {
+  const entity = response?.entities?.[entityId]
+  const coordinate = entity?.claims?.P625?.[0]?.mainsnak?.datavalue?.value
+  const latitude = finiteNumber(coordinate?.latitude)
+  const longitude = finiteNumber(coordinate?.longitude)
+  const names = {
+    de: entity?.labels?.de?.value || entity?.labels?.en?.value,
+    en: entity?.labels?.en?.value || entity?.labels?.de?.value,
+  }
+  if (!entity || latitude == null || longitude == null || !names.de || !names.en) {
+    throw new Error(`Wikidata entity ${entityId} has no usable coordinate or German/English label`)
+  }
+  return {
+    id: `wikidata-${entityId.toLowerCase()}`,
+    kind: 'water',
+    name: names.en,
+    names,
+    position: [latitude, longitude],
+    context: 'nearby-reservoir',
+    sourceUrl: `https://www.wikidata.org/wiki/${entityId}`,
+  }
+}
+
+async function refreshIncidentMapContext({ requestedAtMs, query }) {
+  const generatedAt = new Date(requestedAtMs).toISOString()
+  const previous = await previousPayload('incident-config', query)
+  if (!Array.isArray(previous.incidentCenter)) {
+    throw new Error('Incident configuration is unavailable')
+  }
+  const mapLabels = await Promise.all(INCIDENT_WATER_CONTEXT_ENTITIES.map(async (entityId) => (
+    mapLabelFromWikidata(entityId, await fetchJson(
+      `https://www.wikidata.org/wiki/Special:EntityData/${entityId}.json`,
+      { headers: { 'User-Agent': 'VennFireWatch/1.0 (https://venn-fire.vercel.app/)' } },
+    ))
+  )))
+  const managedIds = new Set(mapLabels.map((label) => label.id))
+  const retainedLabels = (previous.mapLabels ?? []).filter((label) => !managedIds.has(label.id))
+  const stored = await saveDataset({
+    key: 'incident-config',
+    payload: {
+      ...previous,
+      mapLabels: [...retainedLabels, ...mapLabels],
+    },
+    sourceUpdatedAt: generatedAt,
+  }, query)
+  return {
+    itemCount: mapLabels.length,
+    metadata: {
+      changed: stored.changed,
+      entityIds: INCIDENT_WATER_CONTEXT_ENTITIES,
+      context: 'Nearby reservoirs are map context only; no aircraft water pickup is asserted.',
+    },
+  }
 }
 
 async function refreshAircraft({ requestedAtMs, query, bucketAt }) {
@@ -1374,6 +1430,11 @@ async function refreshSentinel2({ requestedAtMs, query }) {
 }
 
 export const REFRESH_SOURCES = [
+  {
+    key: 'incident-map-context', label: 'Nearby reservoir map context', intervalMinutes: 1440, run: refreshIncidentMapContext,
+    providerUrl: 'https://www.wikidata.org/',
+    coverage: 'German/English names and coordinates for the nearby Eupen and Gileppe reservoirs; map context only, not evidence of a water pickup.',
+  },
   {
     key: 'aircraft', label: 'Live incident aircraft', intervalMinutes: 5, run: refreshAircraft,
     providerUrl: 'https://airplanes.live/api-guide/',

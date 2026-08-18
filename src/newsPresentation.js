@@ -3,6 +3,36 @@ import './news-presentation.css'
 const parameters = new URLSearchParams(window.location.search)
 const enabled = ['news', 'broadcast'].includes(parameters.get('presentation'))
   || parameters.get('view') === 'news'
+const language = parameters.get('lang') === 'en' ? 'en' : 'de'
+const translations = {
+  de: {
+    announcedArea: 'Gemeldete Fläche',
+    announcedAreaSource: 'Offizielle öffentliche Meldungen',
+    bestEstimate: 'Beste Schätzung',
+    bestEstimateSource: 'Aus Beobachtungen abgeleitete Kontur',
+    documentTitle: 'Zeitverlauf des Vennbrands | Venn Fire Watch',
+    meanWind: 'Mittlerer beobachteter Wind',
+    noConcurrentReadings: 'Keine zwei zeitgleichen Messungen',
+    timeline: 'Zeitverlauf des Einsatzes',
+    twoNearestStations: 'Zwei nächstgelegene Messstationen',
+    twoStationMean: 'Vektormittel aus zwei Messstationen',
+    vectorMean: 'Vektormittel',
+  },
+  en: {
+    announcedArea: 'Announced area',
+    announcedAreaSource: 'Official public reports',
+    bestEstimate: 'Best estimate',
+    bestEstimateSource: 'Derived observation outline',
+    documentTitle: 'High Fens wildfire timeline | Venn Fire Watch',
+    meanWind: 'Mean observed wind',
+    noConcurrentReadings: 'No two concurrent observations',
+    timeline: 'Incident timeline',
+    twoNearestStations: 'Two nearest weather stations',
+    twoStationMean: 'Vector mean from two weather stations',
+    vectorMean: 'vector mean',
+  },
+}
+const copy = translations[language]
 
 function normalizedText(element) {
   return element?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
@@ -13,45 +43,36 @@ function normalizedDegrees(value) {
 }
 
 function cardinal(degrees) {
-  const labels = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
+  const labels = language === 'de'
+    ? ['N', 'NNO', 'NO', 'ONO', 'O', 'OSO', 'SO', 'SSO', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
+    : ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
   return labels[Math.round(normalizedDegrees(degrees) / 22.5) % labels.length]
-}
-
-function newsFeedLimit() {
-  const requested = parameters.get('updates')
-  if (requested == null) return 5
-  const value = Number(requested)
-  return Number.isInteger(value) ? Math.max(1, Math.min(10, value)) : 5
 }
 
 function dashboardMarkup() {
   return `
     <div class="news-summary">
       <article class="news-stat news-stat--wind">
-        <span>Mean observed wind</span>
+        <span>${copy.meanWind}</span>
         <strong class="news-wind-value">
           <i class="news-wind-arrow is-unavailable" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="M12 20V4M6.5 9.5 12 4l5.5 5.5" /></svg>
           </i>
-          <i class="news-wind-copy"><b>—</b><em>two nearest stations</em></i>
+          <i class="news-wind-copy"><b>—</b><em>${copy.twoNearestStations}</em></i>
         </strong>
-        <small class="news-wind-sources">Awaiting concurrent observations</small>
+        <small>${copy.twoStationMean}</small>
       </article>
       <article class="news-stat">
-        <span>Announced area</span>
+        <span>${copy.announcedArea}</span>
         <strong><b class="news-area-announced">—</b><small class="news-area-announced-unit"></small></strong>
-        <small>Official public reports</small>
+        <small>${copy.announcedAreaSource}</small>
       </article>
       <article class="news-stat">
-        <span>Best estimate</span>
+        <span>${copy.bestEstimate}</span>
         <strong><b class="news-area-estimated">—</b><small class="news-area-estimated-unit"></small></strong>
-        <small>Derived observation outline</small>
+        <small>${copy.bestEstimateSource}</small>
       </article>
     </div>
-    <section class="news-feed">
-      <header class="news-feed-head"><span>Incident updates</span><small>0 sourced</small></header>
-      <div class="news-feed-list"><p class="news-update-empty">No sourced update yet</p></div>
-    </section>
   `
 }
 
@@ -86,13 +107,11 @@ function updateWind(dashboard) {
   const arrow = dashboard.querySelector('.news-wind-arrow')
   const direction = dashboard.querySelector('.news-wind-copy b')
   const detail = dashboard.querySelector('.news-wind-copy em')
-  const sources = dashboard.querySelector('.news-wind-sources')
   if (readings.length !== 2) {
     arrow.classList.add('is-unavailable')
     arrow.style.setProperty('--wind-rotation', '0deg')
     direction.textContent = '—'
-    detail.textContent = 'two nearest stations'
-    sources.textContent = readings.length ? `Only ${readings[0].name} is current` : 'Awaiting concurrent observations'
+    detail.textContent = copy.noConcurrentReadings
     return
   }
 
@@ -107,38 +126,40 @@ function updateWind(dashboard) {
   arrow.classList.remove('is-unavailable')
   arrow.style.setProperty('--wind-rotation', `${normalizedDegrees(meanDirection + 180)}deg`)
   direction.textContent = cardinal(meanDirection)
-  detail.textContent = `from ${Math.round(meanDirection)}° · ${meanSpeed.toLocaleString('en-GB', { maximumFractionDigits: 1 })} km/h vector mean`
-  sources.textContent = readings.map((reading) => reading.name).join(' + ')
+  detail.textContent = language === 'de'
+    ? `aus ${Math.round(meanDirection)}° · ${meanSpeed.toLocaleString('de-BE', { maximumFractionDigits: 1 })} km/h ${copy.vectorMean}`
+    : `from ${Math.round(meanDirection)}° · ${meanSpeed.toLocaleString('en-GB', { maximumFractionDigits: 1 })} km/h ${copy.vectorMean}`
 }
 
-function updateFeed(dashboard) {
-  const events = [...document.querySelectorAll('.event-list .event-item')]
-  dashboard.querySelector('.news-feed-head small').textContent = `${events.length} sourced`
-  const feed = dashboard.querySelector('.news-feed-list')
-  feed.replaceChildren()
-  if (!events.length) {
-    const empty = document.createElement('p')
-    empty.className = 'news-update-empty'
-    empty.textContent = 'No sourced update yet'
-    feed.append(empty)
-    return
-  }
+function setText(element, value) {
+  if (element && element.textContent !== value) element.textContent = value
+}
 
-  for (const eventNode of events.slice(0, newsFeedLimit())) {
-    const copy = eventNode.querySelector('.event-row > span:nth-child(2)')
-    const update = document.createElement('article')
-    update.className = 'news-update'
-    const time = document.createElement('time')
-    time.textContent = `${normalizedText(eventNode.querySelector('.event-row time'))} CEST`
-    const body = document.createElement('span')
-    const title = document.createElement('strong')
-    title.textContent = normalizedText(copy?.querySelector('strong'))
-    const detail = document.createElement('small')
-    detail.textContent = normalizedText(copy?.querySelector('small'))
-    body.append(title, detail)
-    update.append(time, body)
-    feed.append(update)
+function germanDateLabel(value) {
+  return value
+    .replace(/\bMar\b/g, 'Mär')
+    .replace(/\bMay\b/g, 'Mai')
+    .replace(/\bOct\b/g, 'Okt')
+    .replace(/\bDec\b/g, 'Dez')
+}
+
+function updateLocalizedInterface() {
+  setText(document.querySelector('.timeline-title > span'), copy.timeline)
+  if (language !== 'de') return
+  for (const element of document.querySelectorAll('.map-date-chip span, .timeline-title strong, .timeline-now small')) {
+    setText(element, germanDateLabel(element.textContent))
   }
+}
+
+function setMapLayer(label, enabled) {
+  const normalized = (value) => value?.replace(/\s+/g, ' ').trim()
+  const row = [...document.querySelectorAll('.layer-row')].find((element) => (
+    normalized(element.querySelector('.layer-copy strong')?.textContent) === label
+  ))
+  if (!row) return false
+  const current = row.getAttribute('aria-pressed') === 'true'
+  if (current !== enabled) row.click()
+  return true
 }
 
 function cleanAttribution() {
@@ -165,7 +186,7 @@ function updateDashboard() {
   if (!dashboard) return
   updateAreas(dashboard)
   updateWind(dashboard)
-  updateFeed(dashboard)
+  updateLocalizedInterface()
   cleanAttribution()
 }
 
@@ -216,14 +237,18 @@ function startNewsPresentation() {
 
   window.dispatchEvent(new Event('resize'))
   window.setTimeout(() => {
-    document.querySelector('button[aria-label="Center on fire"]')?.click()
+    setMapLayer('Drossart model wind', false)
+    const waterFit = document.querySelector('button[aria-label="Show fire and water sources"]')
+    if (waterFit) waterFit.click()
+    else document.querySelector('button[aria-label="Center on fire"]')?.click()
     scheduleUpdate()
   }, 250)
   scheduleUpdate()
 }
 
 if (enabled) {
+  document.documentElement.lang = language
   document.documentElement.dataset.presentation = 'news'
-  document.title = 'High Fens wildfire timeline | Venn Fire Watch'
+  document.title = copy.documentTitle
   startNewsPresentation()
 }

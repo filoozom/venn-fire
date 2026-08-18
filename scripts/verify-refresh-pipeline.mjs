@@ -40,6 +40,7 @@ import {
 import {
   completedUtcDatesBeforeToday,
   firmsDetectionKey,
+  mapLabelFromWikidata,
   REFRESH_SOURCES,
   routeRecoveryTargets,
 } from '../server/refresh-sources.mjs'
@@ -54,6 +55,7 @@ import {
 } from '../server/refresh-scheduler.mjs'
 
 const expectedSources = [
+  'incident-map-context',
   'aircraft',
   'aircraft-artifacts',
   'aircraft-traces',
@@ -154,6 +156,23 @@ assert.equal(REFRESH_SOURCES.find((source) => source.key === 'nasa-gibs').interv
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'sentinel3-frp').intervalMinutes, 30)
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'sentinel1').intervalMinutes, 60)
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'cams').intervalMinutes, 60)
+assert.equal(REFRESH_SOURCES.find((source) => source.key === 'incident-map-context').intervalMinutes, 1440)
+assert.deepEqual(mapLabelFromWikidata('Q165395', {
+  entities: {
+    Q165395: {
+      labels: { de: { value: 'Wesertalsperre' }, en: { value: 'Lake Eupen' } },
+      claims: { P625: [{ mainsnak: { datavalue: { value: { latitude: 50.62055, longitude: 6.10037 } } } }] },
+    },
+  },
+}), {
+  id: 'wikidata-q165395',
+  kind: 'water',
+  name: 'Lake Eupen',
+  names: { de: 'Wesertalsperre', en: 'Lake Eupen' },
+  position: [50.62055, 6.10037],
+  context: 'nearby-reservoir',
+  sourceUrl: 'https://www.wikidata.org/wiki/Q165395',
+})
 assert.deepEqual(completedUtcDatesBeforeToday(Date.parse('2026-08-17T12:00:00.000Z')), [
   '2026-08-16',
   '2026-08-15',

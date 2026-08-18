@@ -1000,9 +1000,49 @@ button {
   font-style: italic;
 }
 
-.map-place-label--water span {
-  color: #317594;
-  font-size: 9px;
+.map-place-label--water .map-place-label__water {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: max-content;
+  padding: 5px 8px 5px 5px;
+  color: #1f627f;
+  background: rgba(247, 253, 255, 0.93);
+  border: 1px solid rgba(49, 117, 148, 0.42);
+  border-radius: 5px;
+  box-shadow: 0 4px 12px rgba(25, 68, 84, 0.18);
+  text-shadow: none;
+}
+
+.map-place-label--water svg {
+  width: 22px;
+  height: 22px;
+  padding: 3px;
+  fill: #3c91b6;
+  background: #dff3fb;
+  border-radius: 50%;
+}
+
+.map-place-label--water i {
+  display: flex;
+  flex-direction: column;
+  font-style: normal;
+  line-height: 1.05;
+}
+
+.map-place-label--water small {
+  color: #668491;
+  font-size: 6.5px;
+  font-weight: 900;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.map-place-label--water b {
+  margin-top: 2px;
+  color: #205a72;
+  font-size: 10px;
+  font-weight: 850;
 }
 
 .border-label {

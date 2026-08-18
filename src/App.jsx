@@ -924,6 +924,9 @@ function FireViewer({ runtime, databaseError }) {
   const [importedTracks, setImportedTracks] = useState([])
   const [measureMode, setMeasureMode] = useState(false)
   const [measurement, setMeasurement] = useState({ pointCount: 0, totalMetres: 0 })
+  const waterSourcePositions = useMemo(() => (runtime.mapLabels ?? [])
+    .filter((label) => label.kind === 'water' && Array.isArray(label.position) && label.position.length === 2)
+    .map((label) => label.position), [runtime.mapLabels])
   const firmsData = runtime.firms
   const firmsState = {
     status: databaseError ? 'stale' : 'live',
@@ -1603,6 +1606,19 @@ function FireViewer({ runtime, databaseError }) {
             <i />
             <button type="button" onClick={() => mapActions?.home()} aria-label="Show full incident area"><Maximize2 size={17} /></button>
             <button type="button" onClick={() => mapActions?.fire()} aria-label="Center on fire"><LocateFixed size={17} /></button>
+            {waterSourcePositions.length > 0 && (
+              <button
+                type="button"
+                onClick={() => mapActions?.fitPositions?.([
+                  runtime.incidentCenter,
+                  ...fireOutlineRings.flat(),
+                  ...waterSourcePositions,
+                ])}
+                aria-label="Show fire and water sources"
+              >
+                <Droplets size={17} />
+              </button>
+            )}
             <i />
             <button className={measureMode ? 'is-active' : ''} type="button" onClick={() => setMeasureMode((value) => !value)} aria-label={measureMode ? 'Stop measuring distance' : 'Measure distance'} aria-pressed={measureMode}><Ruler size={17} /></button>
           </div>

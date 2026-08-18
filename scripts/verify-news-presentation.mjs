@@ -1,7 +1,7 @@
 import { chromium } from '@playwright/test'
 
 const url = process.argv.slice(2).filter((argument) => argument !== '--')[0]
-  || 'http://127.0.0.1:5173/?presentation=news'
+  || 'http://127.0.0.1:5173/?presentation=news&lang=de'
 const browser = await chromium.launch({ headless: true })
 const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } })
 const pageErrors = []
@@ -21,13 +21,24 @@ try {
     return {
       viewport: { width: window.innerWidth, height: window.innerHeight },
       map: bounds('.map-region'),
+      dashboard: bounds('#news-presentation-dashboard'),
       headerDisplay: getComputedStyle(document.querySelector('.app-header')).display,
       feedItems: document.querySelectorAll('#news-presentation-dashboard .news-update').length,
-      feedCount: document.querySelector('#news-presentation-dashboard .news-feed-head small')?.textContent,
       wind: document.querySelector('#news-presentation-dashboard .news-wind-copy')?.textContent,
-      windSources: document.querySelector('#news-presentation-dashboard .news-wind-sources')?.textContent,
+      dashboardText: document.querySelector('#news-presentation-dashboard')?.textContent?.replace(/\s+/g, ' ').trim(),
       announced: document.querySelector('#news-presentation-dashboard .news-area-announced')?.textContent,
       estimated: document.querySelector('#news-presentation-dashboard .news-area-estimated')?.textContent,
+      gridMarkers: [...document.querySelectorAll('.wind-source-marker b')].filter((element) => element.textContent?.trim() === 'GRID').length,
+      waterLabels: [...document.querySelectorAll('.map-place-label--water')].map((element) => ({
+        text: element.textContent?.replace(/\s+/g, ' ').trim(),
+        visible: (() => {
+          const rectangle = element.getBoundingClientRect()
+          return rectangle.right > 0 && rectangle.bottom > 0
+            && rectangle.left < window.innerWidth && rectangle.top < window.innerHeight
+        })(),
+      })),
+      language: document.documentElement.lang,
+      timelineTitle: document.querySelector('.timeline-title > span')?.textContent,
       leafletBrandLinks: document.querySelectorAll('.leaflet-control-attribution a[href*="leafletjs.com"]').length,
       attribution: document.querySelector('.leaflet-control-attribution')?.textContent?.replace(/\s+/g, ' ').trim(),
       playDisplay: getComputedStyle(document.querySelector('.play-button')).display,
@@ -43,12 +54,20 @@ try {
   if (state.headerDisplay !== 'none' || state.playDisplay === 'none') {
     throw new Error(`News chrome/play state is incorrect: ${JSON.stringify(state)}`)
   }
-  if (state.feedItems !== 5 || !/^\d+ sourced$/u.test(state.feedCount)) {
-    throw new Error(`News update feed is incomplete: ${JSON.stringify(state)}`)
+  if (state.feedItems !== 0 || /Incident updates|Einsatzmeldungen/u.test(state.dashboardText)) {
+    throw new Error(`News update feed is still present: ${JSON.stringify(state)}`)
   }
-  if (!/Mont Rigi \+ Aachen-Orsbach/u.test(state.windSources)
-    || !/from \d+°/u.test(state.wind) || state.announced === '—' || state.estimated === '—') {
+  if (/Mont Rigi|Aachen-Orsbach/u.test(state.dashboardText)
+    || !/aus \d+°/u.test(state.wind) || state.announced === '—' || state.estimated === '—') {
     throw new Error(`News summary is incomplete: ${JSON.stringify(state)}`)
+  }
+  const dashboardCenter = state.dashboard.x + state.dashboard.width / 2
+  if (Math.abs(dashboardCenter - state.viewport.width / 2) > 1
+    || state.language !== 'de' || state.timelineTitle !== 'Zeitverlauf des Einsatzes') {
+    throw new Error(`News summary is not centred/localized: ${JSON.stringify(state)}`)
+  }
+  if (state.gridMarkers !== 0 || state.waterLabels.length < 2 || state.waterLabels.some((label) => !label.visible)) {
+    throw new Error(`Map grid/water context is incorrect: ${JSON.stringify(state)}`)
   }
   if (state.leafletBrandLinks !== 0 || !/OpenStreetMap/u.test(state.attribution) || /^\s*\|/u.test(state.attribution)) {
     throw new Error(`Attribution was removed or not cleaned correctly: ${JSON.stringify(state)}`)

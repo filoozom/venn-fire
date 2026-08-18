@@ -34,9 +34,9 @@ const DEFAULT_CONFIG = Object.freeze({
   freezeData: true,
   baseMap: null,
   presentation: 'viewer',
+  language: 'de',
   mapFocus: 'default',
   mapZoomSteps: null,
-  newsFeedItems: 5,
   layers: {},
   ffmpegPath: 'ffmpeg',
   codec: 'libx264',
@@ -74,9 +74,9 @@ Options:
   --page-timeout-ms <number>  Initial viewer/database timeout
   --base-map <default|terrain|satellite|topo>
   --presentation <viewer|news> Full viewer or clean news-style map
+  --language <de|en>          News-presentation language (default: de)
   --map-focus <default|incident|fire>
   --map-zoom-steps <number>   Extra zoom-in steps after focusing the map
-  --news-feed-items <number>  Visible rolling updates in news mode (default: 5)
   --layer "Label=on|off"       Override a layer by its exact visible label; repeatable
   --codec <name>              FFmpeg video codec (default: libx264)
   --preset <name>             FFmpeg codec preset (default: medium)
@@ -171,11 +171,11 @@ function validateConfig(config) {
     fail('baseMap must be default, terrain, satellite or topo')
   }
   if (!['viewer', 'news'].includes(config.presentation)) fail('presentation must be viewer or news')
+  if (!['de', 'en'].includes(config.language)) fail('language must be de or en')
   if (!['default', 'incident', 'fire'].includes(config.mapFocus)) fail('mapFocus must be default, incident or fire')
   if (config.mapZoomSteps != null) {
     normalized.mapZoomSteps = finiteNumber(config.mapZoomSteps, 'mapZoomSteps', { integer: true, min: 0, max: 8 })
   }
-  normalized.newsFeedItems = finiteNumber(config.newsFeedItems, 'newsFeedItems', { integer: true, min: 1, max: 10 })
   if (!config.layers || typeof config.layers !== 'object' || Array.isArray(config.layers)) fail('layers must be a JSON object')
   normalized.layers = Object.fromEntries(Object.entries(config.layers).map(([label, enabled]) => [
     label,
@@ -212,8 +212,8 @@ async function configurationFromArguments(arguments_) {
     ['--hold-frames', 'holdFrames'], ['--intro-seconds', 'introSeconds'], ['--outro-seconds', 'outroSeconds'],
     ['--start-frame', 'startFrame'], ['--end-frame', 'endFrame'], ['--start-time', 'startTime'],
     ['--end-time', 'endTime'], ['--settle-ms', 'settleMs'], ['--asset-timeout-ms', 'assetTimeoutMs'],
-    ['--page-timeout-ms', 'pageTimeoutMs'], ['--base-map', 'baseMap'], ['--presentation', 'presentation'],
-    ['--map-focus', 'mapFocus'], ['--map-zoom-steps', 'mapZoomSteps'], ['--news-feed-items', 'newsFeedItems'],
+    ['--page-timeout-ms', 'pageTimeoutMs'], ['--base-map', 'baseMap'], ['--presentation', 'presentation'], ['--language', 'language'],
+    ['--map-focus', 'mapFocus'], ['--map-zoom-steps', 'mapZoomSteps'],
     ['--codec', 'codec'],
     ['--preset', 'preset'], ['--crf', 'crf'], ['--ffmpeg', 'ffmpegPath'],
   ])
@@ -257,6 +257,15 @@ function datasetPayload(response, key) {
 
 function formatTimestamp(timestampMs) {
   return new Date(timestampMs).toISOString()
+}
+
+function presentationUrl(config) {
+  const url = new URL(config.url)
+  if (config.presentation === 'news') {
+    url.searchParams.set('presentation', 'news')
+    url.searchParams.set('lang', config.language)
+  }
+  return url.toString()
 }
 
 async function pathExists(path) {
@@ -466,16 +475,17 @@ const NEWS_PRESENTATION_CSS = `
     position: fixed;
     z-index: 1600;
     top: 30px;
-    left: 34px;
-    width: 650px;
+    left: 50%;
+    width: 720px;
     color: #18372d;
     font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     pointer-events: none;
+    transform: translateX(-50%);
   }
 
   #video-news-dashboard .news-summary {
     display: grid;
-    grid-template-columns: 1.35fr 0.9fr 0.9fr;
+    grid-template-columns: 1.25fr 1fr 1fr;
     min-height: 82px;
     overflow: hidden;
     color: #fff;
@@ -493,14 +503,14 @@ const NEWS_PRESENTATION_CSS = `
     min-width: 0;
     padding: 12px 15px;
     border-left: 1px solid rgba(255, 255, 255, 0.16);
+    text-align: center;
   }
 
   #video-news-dashboard .news-stat:first-child {
     border-left: 0;
   }
 
-  #video-news-dashboard .news-stat > span,
-  #video-news-dashboard .news-feed-head > span {
+  #video-news-dashboard .news-stat > span {
     color: #f2c788;
     font-size: 9px;
     font-weight: 900;
@@ -511,6 +521,7 @@ const NEWS_PRESENTATION_CSS = `
   #video-news-dashboard .news-stat > strong {
     display: flex;
     align-items: baseline;
+    justify-content: center;
     gap: 5px;
     margin-top: 3px;
     font-family: Georgia, "Times New Roman", serif;
@@ -543,6 +554,7 @@ const NEWS_PRESENTATION_CSS = `
 
   #video-news-dashboard .news-wind-value {
     gap: 9px !important;
+    justify-content: center;
   }
 
   #video-news-dashboard .news-wind-arrow {
@@ -594,94 +606,6 @@ const NEWS_PRESENTATION_CSS = `
     letter-spacing: 0.02em;
   }
 
-  #video-news-dashboard .news-feed {
-    width: 510px;
-    margin-top: 10px;
-    padding: 11px 13px 10px;
-    background: rgba(255, 255, 255, 0.94);
-    border: 1px solid rgba(255, 255, 255, 0.9);
-    border-radius: 5px;
-    box-shadow: 0 10px 28px rgba(19, 43, 34, 0.22);
-    backdrop-filter: blur(12px);
-  }
-
-  #video-news-dashboard .news-feed-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding-bottom: 7px;
-    border-bottom: 1px solid #e3e8e5;
-  }
-
-  #video-news-dashboard .news-feed-head > span {
-    color: #365248;
-  }
-
-  #video-news-dashboard .news-feed-head > small {
-    color: #7a8882;
-    font-size: 8px;
-    font-weight: 800;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-  }
-
-  #video-news-dashboard .news-feed-list {
-    display: flex;
-    flex-direction: column;
-  }
-
-  #video-news-dashboard .news-update {
-    display: grid;
-    grid-template-columns: 45px minmax(0, 1fr);
-    gap: 9px;
-    padding: 7px 1px 6px;
-    border-top: 1px solid #edf0ee;
-  }
-
-  #video-news-dashboard .news-update:first-child {
-    border-top: 0;
-  }
-
-  #video-news-dashboard .news-update time {
-    padding-top: 1px;
-    color: #b76242;
-    font-size: 9px;
-    font-weight: 900;
-    letter-spacing: 0.02em;
-  }
-
-  #video-news-dashboard .news-update > span {
-    display: flex;
-    min-width: 0;
-    flex-direction: column;
-  }
-
-  #video-news-dashboard .news-update strong {
-    overflow: hidden;
-    color: #27483c;
-    font-size: 10px;
-    line-height: 1.25;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  #video-news-dashboard .news-update small {
-    display: -webkit-box;
-    margin-top: 2px;
-    overflow: hidden;
-    color: #7d8984;
-    font-size: 8px;
-    line-height: 1.25;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-  }
-
-  #video-news-dashboard .news-update-empty {
-    padding: 12px 1px 4px;
-    color: #7d8984;
-    font-size: 9px;
-  }
-
   html[data-video-presentation="news"] .leaflet-control-attribution {
     max-width: 760px !important;
     margin: 0 34px 132px 0 !important;
@@ -703,6 +627,9 @@ const NEWS_PRESENTATION_CSS = `
 
 async function applyPresentation(page, config) {
   if (config.presentation === 'news') {
+    await page.waitForSelector('#news-presentation-dashboard', { timeout: config.pageTimeoutMs })
+  }
+  if (config.presentation === 'news' && !await page.locator('#news-presentation-dashboard').count()) {
     await page.evaluate(() => document.documentElement.setAttribute('data-video-presentation', 'news'))
     await page.addStyleTag({ content: NEWS_PRESENTATION_CSS })
     await page.evaluate(() => {
@@ -719,7 +646,7 @@ async function applyPresentation(page, config) {
               </i>
               <i class="news-wind-copy"><b>—</b><em>two nearest stations</em></i>
             </strong>
-            <small class="news-wind-sources">Awaiting concurrent observations</small>
+            <small>Vector mean from two weather stations</small>
           </article>
           <article class="news-stat">
             <span>Announced area</span>
@@ -732,10 +659,6 @@ async function applyPresentation(page, config) {
             <small>Derived observation outline</small>
           </article>
         </div>
-        <section class="news-feed">
-          <header class="news-feed-head"><span>Incident updates</span><small>0 sourced</small></header>
-          <div class="news-feed-list"><p class="news-update-empty">No sourced update yet</p></div>
-        </section>
       `
       document.body.append(dashboard)
       window.dispatchEvent(new Event('resize'))
@@ -743,7 +666,14 @@ async function applyPresentation(page, config) {
     await page.waitForTimeout(150)
   }
 
-  const focus = config.mapFocus === 'default' && config.presentation === 'news' ? 'fire' : config.mapFocus
+  if (config.mapFocus === 'default' && config.presentation === 'news') {
+    const waterFit = page.locator('button[aria-label="Show fire and water sources"]')
+    if (await waterFit.count()) await waterFit.evaluate((button) => button.click())
+    else await page.locator('button[aria-label="Center on fire"]').evaluate((button) => button.click())
+    await page.waitForTimeout(950)
+  }
+
+  const focus = config.mapFocus
   if (focus !== 'default') {
     const ariaLabel = focus === 'fire' ? 'Center on fire' : 'Show full incident area'
     await page.locator(`button[aria-label="${ariaLabel}"]`).evaluate((button) => button.click())
@@ -760,7 +690,7 @@ async function applyPresentation(page, config) {
 
 async function updateNewsPresentation(page, config) {
   if (config.presentation !== 'news') return
-  await page.evaluate(({ feedLimit }) => {
+  await page.evaluate(() => {
     const dashboard = document.querySelector('#video-news-dashboard')
     if (!dashboard) return
     const normalizedText = (element) => element?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
@@ -795,7 +725,6 @@ async function updateNewsPresentation(page, config) {
     const windArrow = dashboard.querySelector('.news-wind-arrow')
     const windCardinal = dashboard.querySelector('.news-wind-copy b')
     const windDetail = dashboard.querySelector('.news-wind-copy em')
-    const windSources = dashboard.querySelector('.news-wind-sources')
     if (stationReadings.length === 2) {
       const sumEast = stationReadings.reduce((sum, reading) => (
         sum + reading.speed * Math.sin(reading.direction * Math.PI / 180)
@@ -809,42 +738,11 @@ async function updateNewsPresentation(page, config) {
       windArrow.style.setProperty('--wind-rotation', `${normalizedDegrees(meanDirection + 180)}deg`)
       windCardinal.textContent = cardinal(meanDirection)
       windDetail.textContent = `from ${Math.round(meanDirection)}° · ${meanSpeed.toLocaleString('en-GB', { maximumFractionDigits: 1 })} km/h vector mean`
-      windSources.textContent = stationReadings.map((reading) => reading.name).join(' + ')
     } else {
       windArrow.classList.add('is-unavailable')
       windArrow.style.setProperty('--wind-rotation', '0deg')
       windCardinal.textContent = '—'
       windDetail.textContent = 'two nearest stations'
-      windSources.textContent = stationReadings.length
-        ? `Only ${stationReadings[0].name} is current`
-        : 'Awaiting concurrent observations'
-    }
-
-    const eventNodes = [...document.querySelectorAll('.event-list .event-item')]
-    dashboard.querySelector('.news-feed-head small').textContent = `${eventNodes.length} sourced`
-    const feed = dashboard.querySelector('.news-feed-list')
-    feed.replaceChildren()
-    if (!eventNodes.length) {
-      const empty = document.createElement('p')
-      empty.className = 'news-update-empty'
-      empty.textContent = 'No sourced update yet'
-      feed.append(empty)
-    } else {
-      for (const eventNode of eventNodes.slice(0, feedLimit)) {
-        const copy = eventNode.querySelector('.event-row > span:nth-child(2)')
-        const update = document.createElement('article')
-        update.className = 'news-update'
-        const time = document.createElement('time')
-        time.textContent = `${normalizedText(eventNode.querySelector('.event-row time'))} CEST`
-        const body = document.createElement('span')
-        const title = document.createElement('strong')
-        title.textContent = normalizedText(copy?.querySelector('strong'))
-        const detail = document.createElement('small')
-        detail.textContent = normalizedText(copy?.querySelector('small'))
-        body.append(title, detail)
-        update.append(time, body)
-        feed.append(update)
-      }
     }
 
     // Leaflet's BSD license does not require the on-map branding prefix. Keep
@@ -866,7 +764,7 @@ async function updateNewsPresentation(page, config) {
         break
       }
     }
-  }, { feedLimit: config.newsFeedItems })
+  })
 }
 
 async function selectTimelineFrame(page, index, config) {
@@ -1053,7 +951,7 @@ async function main() {
     const page = await context.newPage()
     page.on('pageerror', (error) => pageErrors.push(error.message))
     page.setDefaultTimeout(config.pageTimeoutMs)
-    await page.goto(config.url, { waitUntil: 'domcontentloaded', timeout: config.pageTimeoutMs })
+    await page.goto(presentationUrl(config), { waitUntil: 'domcontentloaded', timeout: config.pageTimeoutMs })
     await page.waitForSelector('.timeline-range')
     await page.waitForSelector('.app-shell:not(.app-shell--hydrating)')
     await page.evaluate(() => document.fonts?.ready)
@@ -1168,9 +1066,9 @@ async function main() {
       viewerConfiguration: {
         baseMap: config.baseMap ?? 'website default',
         presentation: config.presentation,
-        mapFocus: config.mapFocus === 'default' && config.presentation === 'news' ? 'fire' : config.mapFocus,
+        language: config.language,
+        mapFocus: config.mapFocus === 'default' && config.presentation === 'news' ? 'fire-and-water-sources' : config.mapFocus,
         mapZoomSteps: config.mapZoomSteps ?? 0,
-        newsFeedItems: config.newsFeedItems,
         newsWindSummary: 'Speed-weighted vector mean of the two nearest currently available station observations; model-grid wind excluded',
         layerOverrides: config.layers,
         waitForAircraft: config.waitForAircraft,

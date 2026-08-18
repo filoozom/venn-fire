@@ -314,12 +314,27 @@ export default function MapView({
     group.clearLayers()
 
     mapLabels.forEach((label) => {
+      if (!Array.isArray(label.position) || label.position.length !== 2) return
+      const language = document.documentElement.lang === 'de' ? 'de' : 'en'
+      const name = label.names?.[language] || label.name
+      if (!name) return
+      const isWater = label.kind === 'water'
+      const waterRole = language === 'de' ? 'Wasserreservoir' : 'Water reservoir'
       const icon = L.divIcon({
         className: `map-place-label map-place-label--${label.kind}`,
-        html: `<span>${label.name}</span>`,
-        iconAnchor: [0, 0],
+        html: isWater
+          ? `<span class="map-place-label__water"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8C9.9 6.2 5.8 10.2 5.8 14.4a6.2 6.2 0 0 0 12.4 0C18.2 10.2 14.1 6.2 12 2.8Z"/></svg><i><small>${waterRole}</small><b>${escapeHtml(name)}</b></i></span>`
+          : `<span>${escapeHtml(name)}</span>`,
+        iconSize: isWater ? [190, 42] : undefined,
+        iconAnchor: isWater ? [15, 21] : [0, 0],
       })
-      L.marker(label.position, { icon, interactive: false }).addTo(group)
+      const marker = L.marker(label.position, { icon, interactive: isWater }).addTo(group)
+      if (isWater) {
+        marker.bindTooltip(
+          `<strong>${escapeHtml(name)}</strong><br><small>${language === 'de' ? 'Nahegelegener Stausee als Flugrouten-Kontext; keine bestätigte Wasseraufnahme.' : 'Nearby reservoir shown as flight-route context; no water pickup is confirmed.'}</small>`,
+          { direction: 'top', offset: [0, -18] },
+        )
+      }
     })
 
   }, [mapLabels])
