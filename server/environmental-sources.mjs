@@ -16,6 +16,21 @@ export const INCIDENT_AOI_BOUNDS = Object.freeze([
   [INCIDENT_AOI.north, INCIDENT_AOI.east],
 ])
 
+// CAMS is a regional 0.1 degree model, not an incident-scale raster. Request a
+// wider window so smoke transport has geographic context and the edge of our
+// retained database image stays well outside the normal incident view. The UI
+// also feathers that retained image; neither treatment changes the model data.
+export const CAMS_AOI = Object.freeze({
+  south: 49.50,
+  west: 4.50,
+  north: 51.50,
+  east: 7.50,
+})
+export const CAMS_AOI_BOUNDS = Object.freeze([
+  [CAMS_AOI.south, CAMS_AOI.west],
+  [CAMS_AOI.north, CAMS_AOI.east],
+])
+
 const RMI_PAGE_URL = 'https://www.meteo.be/en/weather/observations/precipitation/lightning'
 const RMI_RADAR_BOUNDS = Object.freeze([
   [48.792390196464076, 0.736083984375],
@@ -65,12 +80,18 @@ const CAMS_PRODUCTS = Object.freeze([
     layer: 'composition_europe_pm_wf_forecast_surface',
     style: 'sh_pm_wf_web_surface_concentration',
     label: 'Wildfire-only PM10 forecast',
+    modelResolutionDegrees: 0.1,
+    styleMaximum: 500,
+    validation: 'experimental',
   },
   {
     key: 'pm2p5',
     layer: 'composition_europe_pm2p5_forecast_surface',
     style: 'sh_pm2p5_web_surface_concentration',
     label: 'PM2.5 forecast',
+    modelResolutionDegrees: 0.1,
+    styleMaximum: 500,
+    validation: 'regularly validated at regional scale',
   },
 ])
 
@@ -514,7 +535,7 @@ function camsMapUrl(product, validAt) {
     format: 'image/png',
     transparent: 'true',
     crs: 'EPSG:4326',
-    bbox: `${INCIDENT_AOI.south},${INCIDENT_AOI.west},${INCIDENT_AOI.north},${INCIDENT_AOI.east}`,
+    bbox: `${CAMS_AOI.south},${CAMS_AOI.west},${CAMS_AOI.north},${CAMS_AOI.east}`,
     width: 900,
     height: 650,
     time: validAt,
@@ -524,8 +545,8 @@ function camsMapUrl(product, validAt) {
 function camsFeatureUrl(product, validAt) {
   const width = 900
   const height = 650
-  const i = Math.round((INCIDENT_POINT.longitude - INCIDENT_AOI.west) / (INCIDENT_AOI.east - INCIDENT_AOI.west) * width)
-  const j = Math.round((INCIDENT_AOI.north - INCIDENT_POINT.latitude) / (INCIDENT_AOI.north - INCIDENT_AOI.south) * height)
+  const i = Math.round((INCIDENT_POINT.longitude - CAMS_AOI.west) / (CAMS_AOI.east - CAMS_AOI.west) * width)
+  const j = Math.round((CAMS_AOI.north - INCIDENT_POINT.latitude) / (CAMS_AOI.north - CAMS_AOI.south) * height)
   return wmsUrl(CAMS_WMS_URL, {
     token: 'public',
     service: 'WMS',
@@ -536,7 +557,7 @@ function camsFeatureUrl(product, validAt) {
     styles: product.style,
     info_format: 'text/plain',
     crs: 'EPSG:4326',
-    bbox: `${INCIDENT_AOI.south},${INCIDENT_AOI.west},${INCIDENT_AOI.north},${INCIDENT_AOI.east}`,
+    bbox: `${CAMS_AOI.south},${CAMS_AOI.west},${CAMS_AOI.north},${CAMS_AOI.east}`,
     width,
     height,
     i,
@@ -575,6 +596,12 @@ export async function refreshCams({ requestedAtMs, query }) {
     bytes: capabilities.bytes,
     compress: true,
   }, query)
+  // Older retained frames predate per-frame bounds. Preserve the crop they were
+  // actually rendered against before changing the dataset-wide default.
+  const previousFrames = (previous.frames ?? []).map((frame) => ({
+    ...frame,
+    bounds: frame.bounds ?? previous.bounds ?? INCIDENT_AOI_BOUNDS,
+  }))
   const incoming = await Promise.all(CAMS_PRODUCTS.map(async (product) => {
     const timeDimension = extractWmsLayerTime(capabilities.text, product.layer)
     const validAt = currentCamsTime(timeDimension, requestedAtMs)
@@ -603,13 +630,17 @@ export async function refreshCams({ requestedAtMs, query }) {
       label: product.label,
       validAt,
       retrievedAt: generatedAt,
+      bounds: CAMS_AOI_BOUNDS,
+      modelResolutionDegrees: product.modelResolutionDegrees,
+      styleMaximum: product.styleMaximum,
+      validation: product.validation,
       point: parseCamsFeatureInfo(feature.text),
       image,
       valueArtifactKey: valueArtifact.artifactKey,
     }
   }))
   const frames = mergeUnique(
-    previous.frames,
+    previousFrames,
     incoming,
     (frame) => `${frame.productKey}|${frame.validAt}|${frame.image.sha256}`,
     (left, right) => Date.parse(left.validAt) - Date.parse(right.validAt)
@@ -620,11 +651,11 @@ export async function refreshCams({ requestedAtMs, query }) {
     generatedAt,
     source: { name: 'Copernicus Atmosphere Monitoring Service via ECMWF public WMS', url: 'https://atmosphere.copernicus.eu/' },
     attribution: `Generated using Copernicus Atmosphere Monitoring Service Information ${new Date(requestedAtMs).getUTCFullYear()}`,
-    bounds: INCIDENT_AOI_BOUNDS,
+    bounds: CAMS_AOI_BOUNDS,
     products: CAMS_PRODUCTS,
     frames,
     latestValidAt: incoming[0]?.validAt ?? null,
-    interpretation: 'Modelled surface concentration and transport context; not a ground sensor and not direct evidence of the fire perimeter.',
+    interpretation: 'Hourly 0.1 degree regional-model forecast. It is not a ground sensor or fire-perimeter measurement; the wildfire-only PM10 product is experimental and the published colour style saturates at 500 µg/m³.',
     retentionPolicy: 'all distinct forecast images and incident-point values in PostgreSQL',
   }
   const stored = await saveDataset({ key: 'cams', payload }, query)

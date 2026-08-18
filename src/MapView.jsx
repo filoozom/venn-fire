@@ -6,6 +6,7 @@ import {
   fadingObservationPaths,
   visibleAircraftObservations,
 } from './aircraftTracks'
+import { firmsDetectionOpacityAt } from './firmsDetections'
 
 // Detections are shaded by NASA's published confidence rather than by satellite:
 // what matters when reading the map is how sure the observation is, not which
@@ -76,6 +77,13 @@ function formatDecimal(value, maximumFractionDigits = 1) {
   return number.toLocaleString('en-GB', { maximumFractionDigits })
 }
 
+function formatMapDistance(metres) {
+  if (!Number.isFinite(metres) || metres <= 0) return '0 m'
+  return metres < 1_000
+    ? `${Math.round(metres).toLocaleString('en-GB')} m`
+    : `${(metres / 1_000).toLocaleString('en-GB', { maximumFractionDigits: metres < 10_000 ? 2 : 1 })} km`
+}
+
 function windMapIcon({ label, wind, accent }) {
   return L.divIcon({
     className: 'wind-source-marker',
@@ -135,6 +143,8 @@ export default function MapView({
   importedTracks = [],
   firmsDetections = [],
   rasterOverlays = [],
+  measureMode = false,
+  onMeasurementChange,
   sentinelBurnGeometry = null,
   sentinel3Detections = [],
   fireOutlineRings = [],
@@ -146,6 +156,13 @@ export default function MapView({
   const tileRef = useRef(null)
   const overlayRef = useRef(null)
   const labelsRef = useRef(null)
+  const measurementLayerRef = useRef(null)
+  const measurementPointsRef = useRef([])
+  const measurementCallbackRef = useRef(onMeasurementChange)
+
+  useEffect(() => {
+    measurementCallbackRef.current = onMeasurementChange
+  }, [onMeasurementChange])
 
   useEffect(() => {
     if (!nodeRef.current || mapRef.current) return undefined
@@ -165,6 +182,7 @@ export default function MapView({
     mapRef.current = map
     overlayRef.current = L.layerGroup().addTo(map)
     labelsRef.current = L.layerGroup().addTo(map)
+    measurementLayerRef.current = L.layerGroup().addTo(map)
 
     const tile = L.tileLayer(basemaps[baseMode].url, basemaps[baseMode].options).addTo(map)
     tileRef.current = tile
@@ -188,11 +206,17 @@ export default function MapView({
         duration: 0.8,
       })
     }
+    const clearMeasurement = () => {
+      measurementPointsRef.current = []
+      measurementLayerRef.current?.clearLayers()
+      measurementCallbackRef.current?.({ pointCount: 0, totalMetres: 0 })
+    }
     onMapReady?.({
       zoomIn: () => map.zoomIn(0.75),
       zoomOut: () => map.zoomOut(0.75),
       home,
       fitPositions,
+      clearMeasurement,
       fire: () => map.flyToBounds(L.latLngBounds(effisArea?.rings?.[0] || INCIDENT_MAP_BOUNDS), {
         paddingTopLeft: [35, 95],
         paddingBottomRight: [35, 185],
@@ -206,6 +230,75 @@ export default function MapView({
       mapRef.current = null
     }
   }, [])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return undefined
+    const container = map.getContainer()
+    container.classList.toggle('is-measuring', measureMode)
+    if (!measureMode) return () => container.classList.remove('is-measuring')
+
+    const addMeasurementPoint = (event) => {
+      if (event.target.closest?.('.leaflet-control, .leaflet-popup')) return
+      const latlng = map.mouseEventToLatLng(event)
+      const group = measurementLayerRef.current
+      if (!group) return
+      const previous = measurementPointsRef.current.at(-1)
+      const segmentMetres = previous ? map.distance(previous.latlng, latlng) : 0
+      const totalMetres = (previous?.totalMetres ?? 0) + segmentMetres
+      const point = { latlng, totalMetres }
+      measurementPointsRef.current.push(point)
+
+      if (previous) {
+        L.polyline([previous.latlng, latlng], {
+          className: 'measurement-line measurement-line--casing',
+          color: '#ffffff',
+          weight: 6,
+          opacity: 0.92,
+          interactive: false,
+        }).addTo(group)
+        L.polyline([previous.latlng, latlng], {
+          className: 'measurement-line',
+          color: '#146e72',
+          weight: 3,
+          opacity: 0.96,
+          dashArray: '8 5',
+          interactive: false,
+        }).addTo(group)
+      }
+
+      const marker = L.circleMarker(latlng, {
+        className: 'measurement-point',
+        color: '#ffffff',
+        weight: 2,
+        fillColor: '#146e72',
+        fillOpacity: 1,
+        radius: 5,
+        interactive: false,
+      }).addTo(group)
+      marker.bindTooltip(previous
+        ? `${formatMapDistance(segmentMetres)} · total ${formatMapDistance(totalMetres)}`
+        : 'Measurement start', {
+        permanent: true,
+        direction: 'top',
+        className: 'measurement-tooltip',
+        offset: [0, -6],
+      })
+      measurementCallbackRef.current?.({
+        pointCount: measurementPointsRef.current.length,
+        totalMetres,
+      })
+    }
+
+    // Listen at the map container in the capture phase. Leaflet's canvas
+    // renderer can consume a map-level click when a rendered polygon sits under
+    // the pointer; measuring must still work over the fire outline itself.
+    container.addEventListener('click', addMeasurementPoint, true)
+    return () => {
+      container.removeEventListener('click', addMeasurementPoint, true)
+      container.classList.remove('is-measuring')
+    }
+  }, [measureMode])
 
   useEffect(() => {
     const map = mapRef.current
@@ -295,16 +388,16 @@ export default function MapView({
     // approximations because GOES_NRT does not publish physical dimensions.
     firmsDetections.forEach((detection) => {
       const style = FIRMS_CONFIDENCE_STYLE[detection.confidence.label] ?? FIRMS_CONFIDENCE_STYLE.unknown
-      const age = frameIndex - detection.frame
+      const recencyOpacity = firmsDetectionOpacityAt(detection, frame.timestampMs)
       const computedGeostationary = detection.footprintSource === 'computed-geostationary'
-      const historicalFillOpacity = Math.max(style.fillOpacity * 0.4, style.fillOpacity - age * 0.004)
+      const historicalFillOpacity = style.fillOpacity * recencyOpacity
       const fillOpacity = computedGeostationary ? Math.min(0.035, historicalFillOpacity) : historicalFillOpacity
       const layer = detection.displayMode === 'centroid'
         ? L.circleMarker(detection.position, {
             className: `firms-detection firms-detection--${detection.sensorKey} firms-detection--centroid`,
             color: style.color,
             weight: style.weight + 0.5,
-            opacity: style.opacity,
+            opacity: style.opacity * recencyOpacity,
             fillColor: style.color,
             fillOpacity,
             radius: 4 + Math.max(0, detection.confidence.rank ?? 0),
@@ -313,7 +406,7 @@ export default function MapView({
             className: `firms-detection firms-detection--${detection.sensorKey}${computedGeostationary ? ' firms-detection--computed' : ''}`,
             color: style.color,
             weight: style.weight,
-            opacity: style.opacity,
+            opacity: style.opacity * recencyOpacity,
             fillColor: style.color,
             fillOpacity,
             dashArray: computedGeostationary ? '6 5' : null,
@@ -334,7 +427,7 @@ export default function MapView({
         + pixelDetail
         + `${detection.corroboratingSensors > 1 ? `<br>${detection.corroboratingSensors} satellites saw this cell` : ''}`
         + `<br><small>NASA FIRMS · ${detection.acquiredAt.replace('T', ' ').slice(0, 16)} UTC</small>`
-        + `<br><small>${footprintDetail}</small>`,
+        + `<br><small>${footprintDetail}. Live-map opacity fades to zero over 24 hours; the database history remains.</small>`,
         { direction: 'top' },
       ).addTo(group)
     })

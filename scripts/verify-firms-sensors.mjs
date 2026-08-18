@@ -9,6 +9,7 @@ import {
   corroborateDetections,
   detectionFootprint,
   estimateFootprintArea,
+  firmsDetectionOpacityAt,
   firmsDetectionVisibleAt,
   footprintOutlineRings,
   geostationaryPixelKm,
@@ -143,7 +144,10 @@ const scanTime = Date.parse('2026-08-15T11:19:00.000Z')
 check('geostationary scan is hidden before acquisition', firmsDetectionVisibleAt(geo.detections[0], scanTime - 1), false)
 check('geostationary scan is visible during its 15-minute window', firmsDetectionVisibleAt(geo.detections[0], scanTime + 14 * 60_000), true)
 check('geostationary scan expires after 15 minutes', firmsDetectionVisibleAt(geo.detections[0], scanTime + 15 * 60_000), false)
-check('polar overpass remains as historical evidence', firmsDetectionVisibleAt(parsed.detections[0], scanTime + 24 * 60 * 60_000), true)
+const polarTime = Date.parse(parsed.detections[0].acquiredAt)
+check('polar overpass remains visible just under 24 hours', firmsDetectionVisibleAt(parsed.detections[0], polarTime + 24 * 60 * 60_000 - 1), true)
+check('polar overpass expires at 24 hours', firmsDetectionVisibleAt(parsed.detections[0], polarTime + 24 * 60 * 60_000), false)
+check('polar overpass fades to half opacity after 12 hours', firmsDetectionOpacityAt(parsed.detections[0], polarTime + 12 * 60 * 60_000), 0.5)
 
 // A 375 m pixel is 14.0625 ha, and the grid union reproduces it exactly.
 const single = estimateFootprintArea([parsed.detections[0]], { origin: parsed.detections[0] })

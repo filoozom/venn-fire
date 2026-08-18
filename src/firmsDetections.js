@@ -705,19 +705,28 @@ export function estimateFootprintArea(detections, {
  */
 const CONFIDENCE_RANKS = { low: 1, nominal: 2, high: 3 }
 export const GEOSTATIONARY_DISPLAY_WINDOW_MS = 15 * 60 * 1000
+export const POLAR_DETECTION_DISPLAY_WINDOW_MS = 24 * 60 * 60 * 1000
 
 /**
- * Polar detections remain as historical evidence after an overpass. A
- * geostationary detection is an instantaneous heat observation, so keeping it
- * forever would turn repeated coarse pixels into a false burned-area layer.
+ * All active-fire observations have a finite live-map lifetime. Polar pixels
+ * fade over 24 hours; geostationary pixels use their much shorter scan window.
+ * Rows remain in PostgreSQL and reappear at their historical timeline time.
  */
-export function firmsDetectionVisibleAt(detection, selectedTimestampMs) {
+export function firmsDetectionOpacityAt(detection, selectedTimestampMs) {
   const acquiredAtMs = Number.isFinite(detection.timestampMs)
     ? detection.timestampMs
     : Date.parse(detection.acquiredAt)
-  if (!Number.isFinite(acquiredAtMs) || acquiredAtMs > selectedTimestampMs) return false
-  return detection.sensorKey !== 'meteosat'
-    || selectedTimestampMs - acquiredAtMs < GEOSTATIONARY_DISPLAY_WINDOW_MS
+  if (!Number.isFinite(acquiredAtMs) || acquiredAtMs > selectedTimestampMs) return 0
+  const lifetimeMs = detection.sensorKey === 'meteosat'
+    ? GEOSTATIONARY_DISPLAY_WINDOW_MS
+    : POLAR_DETECTION_DISPLAY_WINDOW_MS
+  const ageMs = selectedTimestampMs - acquiredAtMs
+  if (ageMs >= lifetimeMs) return 0
+  return 1 - ageMs / lifetimeMs
+}
+
+export function firmsDetectionVisibleAt(detection, selectedTimestampMs) {
+  return firmsDetectionOpacityAt(detection, selectedTimestampMs) > 0
 }
 
 /**

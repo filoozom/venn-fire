@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import { gzipSync } from 'node:zlib'
 
 import {
+  CAMS_AOI_BOUNDS,
   encodeRgbaPng,
   extractWmsLayerTime,
   geometryContainsIncident,
@@ -53,6 +55,7 @@ Grid point longitude: 6.05
   unit: 'µg/m³',
   gridPoint: { latitude: 50.55, longitude: 6.05 },
 })
+assert.deepEqual(CAMS_AOI_BOUNDS, [[49.5, 4.5], [51.5, 7.5]])
 
 const incidentGeometry = {
   type: 'Polygon',
@@ -88,4 +91,17 @@ assert.equal(pairs[0].preSceneId, 'pre')
 assert.equal(pairs[0].postSceneId, 'post')
 assert.equal(pairs[0].separationDays, 12)
 
-console.log('Verified: RMI radar decoding, PNG output, CAMS parsing, and conservative Sentinel pairing.')
+const [appSource, mapSource, styles] = await Promise.all([
+  readFile(new URL('../src/App.jsx', import.meta.url), 'utf8'),
+  readFile(new URL('../src/MapView.jsx', import.meta.url), 'utf8'),
+  readFile(new URL('../src/styles.css', import.meta.url), 'utf8'),
+])
+assert.match(appSource, /\[ENVIRONMENT_LAYER_KEYS\.rmiRadar\]: true/u)
+assert.match(appSource, /aria-label=\{measureMode \? 'Stop measuring distance' : 'Measure distance'\}/u)
+assert.match(appSource, /currentCamsWildfirePm10\.bounds \?\? runtime\.cams\.bounds/u)
+assert.match(mapSource, /map\.distance\(previous\.latlng, latlng\)/u)
+assert.match(mapSource, /clearMeasurement/u)
+assert.match(styles, /environmental-raster--cams-wildfire-pm10/u)
+assert.match(styles, /mask-image: radial-gradient/u)
+
+console.log('Verified: RMI radar defaults, CAMS semantics/feathering, distance measurement, PNG output, and conservative Sentinel pairing.')

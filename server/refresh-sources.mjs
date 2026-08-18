@@ -1491,7 +1491,7 @@ export const REFRESH_SOURCES = [
   {
     key: 'cams', label: 'CAMS smoke and air quality', intervalMinutes: 60, run: refreshCams,
     providerUrl: 'https://atmosphere.copernicus.eu/',
-    coverage: 'Copernicus modelled wildfire-only PM10 and PM2.5 surface concentrations, including incident-point values and georeferenced forecast images.',
+    coverage: 'Hourly Copernicus 0.1° wildfire-only PM10 and PM2.5 model forecasts, including incident-grid values and georeferenced images; wildfire-only PM10 is experimental.',
   },
 ]
 

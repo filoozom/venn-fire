@@ -52,6 +52,36 @@ if (mobileAsyncShell.bodyWidth !== mobileAsyncShell.viewportWidth
 await shellPage.screenshot({ path: '/tmp/fire-async-shell-mobile.png', fullPage: true })
 await shellPage.waitForSelector('.timeline-range')
 await shellAircraftHydrated
+await shellPage.getByRole('button', { name: 'Measure distance' }).click()
+await shellPage.waitForSelector('.leaflet-container.is-measuring')
+const mobileMap = shellPage.locator('.leaflet-container')
+const mobileMapBox = await mobileMap.boundingBox()
+if (!mobileMapBox) throw new Error('Mobile map bounds are unavailable for the distance-measure regression')
+await mobileMap.click({ position: { x: mobileMapBox.width * 0.36, y: mobileMapBox.height * 0.56 } })
+await mobileMap.click({ position: { x: mobileMapBox.width * 0.64, y: mobileMapBox.height * 0.56 } })
+const mobileMeasurement = await shellPage.locator('.map-measure-card').evaluate((element) => {
+  const bounds = element.getBoundingClientRect()
+  return {
+    distance: element.querySelector('strong')?.textContent ?? '',
+    left: Math.round(bounds.left),
+    right: Math.round(bounds.right),
+    viewportWidth: window.innerWidth,
+    bodyWidth: document.body.scrollWidth,
+  }
+})
+mobileMeasurement.map = mobileMapBox
+mobileMeasurement.hitTargets = await shellPage.evaluate(({ mapBox }) => ([0.36, 0.64].map((fraction) => {
+  const element = document.elementFromPoint(mapBox.x + mapBox.width * fraction, mapBox.y + mapBox.height * 0.56)
+  return element ? `${element.tagName}.${element.className}` : null
+})), { mapBox: mobileMapBox })
+await shellPage.screenshot({ path: '/tmp/fire-measure-mobile.png', fullPage: true })
+if (!/^\d[\d,.]* (?:m|km)$/u.test(mobileMeasurement.distance)
+  || mobileMeasurement.left < 0 || mobileMeasurement.right > mobileMeasurement.viewportWidth
+  || mobileMeasurement.bodyWidth !== mobileMeasurement.viewportWidth) {
+  throw new Error(`Distance-measure tool overflowed on mobile: ${JSON.stringify(mobileMeasurement)}`)
+}
+await shellPage.locator('.map-measure-card').getByRole('button', { name: 'Clear' }).click()
+await shellPage.getByRole('button', { name: 'Stop measuring distance' }).click()
 await shellPage.close()
 
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
@@ -76,6 +106,29 @@ const unrelatedTrafficControls = await page.getByRole('button', { name: /^Traffi
 if (unrelatedTrafficControls !== 0) {
   throw new Error(`Unrelated traffic is still exposed by ${unrelatedTrafficControls} UI control(s)`)
 }
+
+const radarLayerToggle = page.locator('.layer-row').filter({ hasText: 'RMI precipitation radar' })
+if (await radarLayerToggle.getAttribute('aria-pressed') !== 'true') {
+  throw new Error('RMI precipitation radar is not visible by default')
+}
+const firmsFreshness = await page.locator('.source-health-row').filter({ hasText: 'FIRMS' }).innerText()
+if (!firmsFreshness.includes('newest heat') || !firmsFreshness.includes('feed checked')) {
+  throw new Error(`FIRMS source status does not distinguish observation time from polling time: ${firmsFreshness}`)
+}
+
+await page.getByRole('button', { name: 'Measure distance' }).click()
+await page.waitForSelector('.leaflet-container.is-measuring')
+const map = page.locator('.leaflet-container')
+const mapBox = await map.boundingBox()
+if (!mapBox) throw new Error('Map bounds are unavailable for the distance-measure regression')
+await map.click({ position: { x: mapBox.width * 0.43, y: mapBox.height * 0.38 } })
+await map.click({ position: { x: mapBox.width * 0.58, y: mapBox.height * 0.38 } })
+const measuredDistance = await page.locator('.map-measure-card strong').innerText()
+if (!/^\d[\d,.]* (?:m|km)$/u.test(measuredDistance)) {
+  throw new Error(`Distance-measure tool did not report a distance: ${measuredDistance}`)
+}
+await page.locator('.map-measure-card').getByRole('button', { name: 'Clear' }).click()
+await page.getByRole('button', { name: 'Stop measuring distance' }).click()
 
 // The separately loaded aircraft payload updates the viewer once. Wait for that
 // update before operating the modal so React cannot replace a tab button during
@@ -164,8 +217,8 @@ Object.entries(expected).forEach(([key, value]) => {
 })
 
 // A lone manoeuvre must not alter the fire outline. After a second nearby GRZLY
-// direction change, the conservative lobe must enter the same solid outline and
-// hectare figure—never appear as a separate aircraft layer.
+// direction change is supported by the current VIIRS/MODIS thermal edge, the
+// conservative lobe enters the same solid outline—never a separate layer.
 await selectTime('2026-08-15T18:55:00+02:00')
 const edgeNoteBeforeRepeat = await page.locator('.layer-note').first().innerText()
 await selectTime('2026-08-15T21:10:00+02:00')
@@ -302,6 +355,7 @@ await page.unrouteAll({ behavior: 'wait' })
 console.log(JSON.stringify({
   asyncShell,
   mobileAsyncShell,
+  mobileMeasurement,
   states,
   aircraftEdgeTimeline: { edgeNoteBeforeRepeat, edgeAfterRepeat, edgeNoteAfterRepeat },
   modisExtentTimeline: { modisBeforeTerra, modisAfterTerra, areaBeforeTerra, areaAfterTerra, estimateMethodKey },
@@ -309,6 +363,9 @@ console.log(JSON.stringify({
   effisOn14August,
   effisOn15August,
   unrelatedTrafficControls,
+  radarVisibleByDefault: true,
+  measuredDistance,
+  firmsFreshness,
   publicImplementationLimits,
   synchronizedSourceLinks,
   sourceDirectory,
