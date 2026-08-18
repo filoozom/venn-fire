@@ -201,6 +201,19 @@ async function reportedAreaAt(timestamp) {
   return page.locator('.snapshot-card--fire strong').first().innerText()
 }
 
+await selectTime('2026-08-15T14:05:00+02:00')
+await page.waitForFunction(() => document.querySelector('.layer-row')?.parentElement?.textContent.includes('DWD RADOLAN YW'))
+const historicalRadar = {
+  layer: await page.locator('.layer-row').filter({ hasText: 'Precipitation radar' }).innerText(),
+  sourceStatus: await page.locator('.source-health-row').filter({ hasText: 'Precipitation radar' }).innerText(),
+  databaseOverlayCount: await page.locator('img.leaflet-image-layer[src*="/api/source-image?id=ZHdkLXJhZGFyLWltYWdl"]').count(),
+}
+if (!historicalRadar.layer.includes('DWD RADOLAN YW')
+  || !historicalRadar.sourceStatus.includes('DWD RADOLAN YW')
+  || historicalRadar.databaseOverlayCount !== 1) {
+  throw new Error(`Historical DWD radar is not rendered from the database: ${JSON.stringify(historicalRadar)}`)
+}
+
 const states = {
   beforeFirstReport: await reportedAreaAt('2026-08-14T15:55:00+02:00'),
   firstOfficialReport: await reportedAreaAt('2026-08-14T16:00:00+02:00'),
@@ -376,6 +389,7 @@ console.log(JSON.stringify({
   effisOn15August,
   unrelatedTrafficControls,
   radarVisibleByDefault: true,
+  historicalRadar,
   measuredDistance,
   firmsFreshness,
   firmsInterpretationWarning,
