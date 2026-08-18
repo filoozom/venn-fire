@@ -1,4 +1,5 @@
-import { loadArtifact, setNoStoreHeaders } from '../server/database.mjs'
+import { loadArtifact } from '../server/database.mjs'
+import { respondNotModified, sendBytes, setImmutableCacheHeaders } from '../server/http-response.mjs'
 
 const ALLOWED_PREFIXES = new Map([
   ['cams-image:', 'cams'],
@@ -23,7 +24,10 @@ function requestedArtifact(id) {
 }
 
 export default async function handler(request, response) {
-  setNoStoreHeaders(response)
+  // The id encodes the artifact key including its content hash, so a given URL
+  // can only ever resolve to one image. It was being served no-store, which
+  // meant every view re-read it from Postgres and re-billed the transfer.
+  setImmutableCacheHeaders(response)
   response.setHeader('Access-Control-Allow-Origin', '*')
   response.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
   if (request.method === 'OPTIONS') return response.status(204).end()
@@ -31,21 +35,28 @@ export default async function handler(request, response) {
 
   const id = Array.isArray(request.query?.id) ? request.query.id[0] : request.query?.id
   const requested = requestedArtifact(id)
-  if (!requested) return response.status(400).json({ error: 'A valid source image id is required' })
+  if (!requested) {
+    response.setHeader('Cache-Control', 'no-store, max-age=0')
+    return response.status(400).json({ error: 'A valid source image id is required' })
+  }
 
   try {
     const artifact = await loadArtifact(requested.artifactKey)
     if (!artifact || artifact.sourceKey !== requested.sourceKey || artifact.contentEncoding !== 'identity'
       || !artifact.contentType.startsWith('image/')) {
+      response.setHeader('Cache-Control', 'no-store, max-age=0')
       return response.status(404).json({ error: 'Source image not found' })
     }
-    response.setHeader('Content-Type', artifact.contentType)
-    response.setHeader('Content-Length', String(artifact.originalSize))
-    response.setHeader('ETag', `"${artifact.sha256}"`)
-    response.setHeader('Content-Disposition', 'inline')
-    return response.status(200).end(Buffer.from(artifact.contentBase64, 'base64'))
+    const etag = `"${artifact.sha256}"`
+    if (respondNotModified(request, response, etag)) return undefined
+    return sendBytes(request, response, Buffer.from(artifact.contentBase64, 'base64'), {
+      contentType: artifact.contentType,
+      etag,
+      disposition: 'inline',
+    })
   } catch (error) {
     console.error('Source image read failed:', error?.message || error)
+    response.setHeader('Cache-Control', 'no-store, max-age=0')
     return response.status(503).json({ error: 'Database read failed' })
   }
 }

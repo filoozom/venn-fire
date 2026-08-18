@@ -41,12 +41,18 @@ try {
       summaryRows: [...document.querySelectorAll('#news-presentation-dashboard .news-stat')].map((card) => ({
         title: elementBounds(card.querySelector(':scope > span')),
         primary: elementBounds(card.querySelector(':scope > strong')),
-        secondary: elementBounds(card.querySelector(':scope > small')),
+        unit: elementBounds(card.querySelector(':scope > strong small')),
       })),
       dashboardText: document.querySelector('#news-presentation-dashboard')?.textContent?.replace(/\s+/g, ' ').trim(),
       announced: document.querySelector('#news-presentation-dashboard .news-area-announced')?.textContent,
       estimated: document.querySelector('#news-presentation-dashboard .news-area-estimated')?.textContent,
       gridMarkers: [...document.querySelectorAll('.wind-source-marker b')].filter((element) => element.textContent?.trim() === 'GRID').length,
+      timelineHeadDisplay: getComputedStyle(document.querySelector('.timeline-head')).display,
+      eventMarkerDisplay: getComputedStyle(document.querySelector('.event-markers')).display,
+      axisLabels: [...document.querySelectorAll('.timeline-ticks span')].map((element) => (
+        `${element.dataset.day} ${element.textContent}`.replace(/\s+/g, ' ').trim()
+      )),
+      clockText: document.querySelector('.map-date-chip')?.textContent?.replace(/\s+/g, ' ').trim(),
       waterLabels: [...document.querySelectorAll('.map-place-label--water')].map((element) => ({
         text: element.textContent?.replace(/\s+/g, ' ').trim(),
         visible: (() => {
@@ -75,28 +81,43 @@ try {
   if (state.feedItems !== 0 || /Incident updates|Einsatzmeldungen/u.test(state.dashboardText)) {
     throw new Error(`News update feed is still present: ${JSON.stringify(state)}`)
   }
-  if (/Mont Rigi|Aachen-Orsbach/u.test(state.dashboardText)
-    || !/aus \d+°/u.test(state.wind) || state.announced === '—' || state.estimated === '—') {
+  // The wind must be the RMI station observation alone. It previously showed a
+  // vector mean of the two nearest networks, which was not a figure any source
+  // publishes and could not be attributed on air.
+  // The wind must be the RMI station observation alone, direction and speed on
+  // one line. It previously showed a vector mean of the two nearest networks,
+  // which was not a figure any source publishes and could not be attributed.
+  if (!/^Wind \(RMI\) [NSEWO]{1,3} · \d+ km\/h$/u.test(state.wind)
+    || /Aachen-Orsbach|Kall-Sistig|Drossart|Vektormittel/u.test(state.dashboardText)
+    || state.announced === '—' || state.estimated === '—') {
     throw new Error(`News summary is incomplete: ${JSON.stringify(state)}`)
+  }
+  // Nothing on the timeline but the growth curve and the day/time axis.
+  if (state.timelineHeadDisplay !== 'none' || state.eventMarkerDisplay !== 'none'
+    || !state.axisLabels.every((label) => /^\d{1,2}\. [A-ZÄÖÜ][a-zäöüß]+ \d{2}:\d{2}$/u.test(label))) {
+    throw new Error(`News timeline is not reduced to its axis: ${JSON.stringify(state)}`)
+  }
+  if (state.clockText.includes('CEST')) {
+    throw new Error(`Clock still carries a timezone suffix: ${JSON.stringify(state)}`)
   }
   if (state.dashboard.x !== 34 || state.dashboard.width !== 840 || state.summaryTextAlign !== 'center'
     || state.language !== 'de' || state.timelineTitle !== 'Zeitverlauf des Einsatzes'
     || !/Unsere Beste Schätzung/u.test(state.dashboardText)
-    || /Vektormittel aus zwei Messstationen/u.test(state.dashboardText)) {
+    || /vector mean/u.test(state.dashboardText)) {
     throw new Error(`News summary is not aligned/localized: ${JSON.stringify(state)}`)
   }
   const windArrowCenter = state.windArrow?.y + state.windArrow?.height / 2
   const windCopyCenter = state.windCopy?.y + state.windCopy?.height / 2
   if (!Number.isFinite(windArrowCenter) || !Number.isFinite(windCopyCenter)
-    || Math.abs(windArrowCenter - windCopyCenter) > 1
+    || Math.abs(state.windArrow.width - state.windArrow.height) > 0.5
     || Math.abs(state.windArrow.y - state.summaryRows[0].title.y) > 0.5
     || Math.abs((state.windArrow.y + state.windArrow.height)
-      - (state.summaryRows[0].secondary.y + state.summaryRows[0].secondary.height)) > 0.5) {
+      - (state.summaryRows[0].primary.y + state.summaryRows[0].primary.height)) > 0.5) {
     throw new Error(`Wind arrow is not vertically aligned: ${JSON.stringify(state)}`)
   }
   const referenceRows = state.summaryRows[0]
   const rowsAligned = state.summaryRows.length === 3
-    && ['title', 'primary', 'secondary'].every((row) => state.summaryRows.every((card) => (
+    && ['title', 'primary'].every((row) => state.summaryRows.every((card) => (
       Math.abs(card[row].y - referenceRows[row].y) <= 0.5
       && Math.abs(card[row].height - referenceRows[row].height) <= 0.5
     )))

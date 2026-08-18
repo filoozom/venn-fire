@@ -19,6 +19,7 @@
     "verify:postgres": "node scripts/verify-postgres.mjs",
     "verify:live-reports": "node scripts/verify-live-reports.mjs",
     "verify:timeline": "node scripts/verify-timeline.mjs",
+    "verify:http-cache": "node scripts/verify-http-cache.mjs",
     "verify:news-presentation": "node scripts/verify-news-presentation.mjs",
     "video:timeline": "node scripts/render-timeline-video.mjs",
     "visual-check": "node scripts/visual-check.mjs",

@@ -2,7 +2,7 @@
 
 import { spawn } from 'node:child_process'
 import { constants as fsConstants } from 'node:fs'
-import { access, mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import process from 'node:process'
 
@@ -17,6 +17,7 @@ const DEFAULT_CONFIG = Object.freeze({
   metadataOutput: null,
   width: 1920,
   height: 1080,
+  captureScale: 2,
   fps: 30,
   frameStep: 1,
   holdFrames: 1,
@@ -40,8 +41,9 @@ const DEFAULT_CONFIG = Object.freeze({
   layers: {},
   ffmpegPath: 'ffmpeg',
   codec: 'libx264',
-  preset: 'medium',
-  crf: 20,
+  preset: 'slow',
+  bitrateMbps: 8,
+  minimumBitrateMbps: 5,
   overwrite: false,
   headless: true,
 })
@@ -60,6 +62,7 @@ Options:
   --metadata-output <file>    JSON sidecar path (default: <output>.json)
   --width <pixels>            Browser/video width (default: 1920)
   --height <pixels>           Browser/video height (default: 1080)
+  --capture-scale <number>    Browser pixel density before downsampling (default: 2)
   --fps <number>              Output frame rate (default: 30)
   --frame-step <number>       Capture every Nth five-minute frame
   --hold-frames <number>      Repeat every captured frame N times
@@ -73,14 +76,15 @@ Options:
   --asset-timeout-ms <number> Maximum wait for a timeline raster image
   --page-timeout-ms <number>  Initial viewer/database timeout
   --base-map <default|terrain|satellite|topo>
-  --presentation <viewer|news> Full viewer or clean news-style map
+  --presentation <viewer|news|short> Full viewer, 16:9 news, or 9:16 short
   --language <de|en>          News-presentation language (default: de)
   --map-focus <default|incident|fire>
   --map-zoom-steps <number>   Extra zoom-in steps after focusing the map
   --layer "Label=on|off"       Override a layer by its exact visible label; repeatable
   --codec <name>              FFmpeg video codec (default: libx264)
-  --preset <name>             FFmpeg codec preset (default: medium)
-  --crf <number>              FFmpeg quality value (default: 20)
+  --preset <name>             FFmpeg codec preset (default: slow)
+  --bitrate-mbps <number>     Constant target bitrate (default: 8)
+  --minimum-bitrate-mbps <n>  Fail below this output bitrate (default: 5)
   --ffmpeg <path>             FFmpeg executable (default: ffmpeg)
   --no-wait-for-aircraft      Do not wait for the async aircraft dataset
   --no-wait-for-assets        Do not wait for timeline raster images
@@ -92,12 +96,17 @@ Options:
 Examples:
   pnpm video:timeline -- --output output/timeline.mp4
   pnpm video:timeline -- --presentation news --output output/news-timeline.mp4
+  pnpm video:timeline -- --presentation short --width 1080 --height 1920 --output output/short-timeline.mp4
   pnpm video:timeline -- --config timeline-video.config.example.json
   pnpm video:timeline -- --layer "NASA VIIRS false colour=on" --frame-step 2
 `.trim()
 
 function fail(message) {
   throw new Error(message)
+}
+
+function isNewsPresentation(config) {
+  return config.presentation === 'news' || config.presentation === 'short'
 }
 
 function finiteNumber(value, name, { integer = false, min = -Infinity, max = Infinity } = {}) {
@@ -144,6 +153,7 @@ function validateConfig(config) {
     url: parsedUrl.href,
     width: finiteNumber(config.width, 'width', { integer: true, min: 320, max: 7680 }),
     height: finiteNumber(config.height, 'height', { integer: true, min: 240, max: 4320 }),
+    captureScale: finiteNumber(config.captureScale, 'captureScale', { min: 1, max: 4 }),
     fps: finiteNumber(config.fps, 'fps', { min: 0.1, max: 120 }),
     frameStep: finiteNumber(config.frameStep, 'frameStep', { integer: true, min: 1, max: 10_000 }),
     holdFrames: finiteNumber(config.holdFrames, 'holdFrames', { integer: true, min: 1, max: 10_000 }),
@@ -152,7 +162,8 @@ function validateConfig(config) {
     settleMs: finiteNumber(config.settleMs, 'settleMs', { integer: true, min: 0, max: 60_000 }),
     assetTimeoutMs: finiteNumber(config.assetTimeoutMs, 'assetTimeoutMs', { integer: true, min: 100, max: 300_000 }),
     pageTimeoutMs: finiteNumber(config.pageTimeoutMs, 'pageTimeoutMs', { integer: true, min: 1000, max: 600_000 }),
-    crf: finiteNumber(config.crf, 'crf', { min: 0, max: 63 }),
+    bitrateMbps: finiteNumber(config.bitrateMbps, 'bitrateMbps', { min: 5, max: 200 }),
+    minimumBitrateMbps: finiteNumber(config.minimumBitrateMbps, 'minimumBitrateMbps', { min: 5, max: 200 }),
     overwrite: booleanValue(config.overwrite, 'overwrite'),
     headless: booleanValue(config.headless, 'headless'),
     waitForAircraft: booleanValue(config.waitForAircraft, 'waitForAircraft'),
@@ -160,6 +171,9 @@ function validateConfig(config) {
     freezeData: booleanValue(config.freezeData, 'freezeData'),
   }
   if (normalized.width % 2 || normalized.height % 2) fail('width and height must be even for yuv420p video')
+  if (normalized.bitrateMbps < normalized.minimumBitrateMbps) {
+    fail(`bitrateMbps must be at least minimumBitrateMbps (${normalized.minimumBitrateMbps})`)
+  }
   if (!config.output || typeof config.output !== 'string') fail('output must be a file path')
   if (config.previewOutput != null && (typeof config.previewOutput !== 'string' || !config.previewOutput.trim())) {
     fail('previewOutput must be a PNG file path')
@@ -170,7 +184,7 @@ function validateConfig(config) {
   if (config.baseMap != null && !['default', 'terrain', 'satellite', 'topo'].includes(config.baseMap)) {
     fail('baseMap must be default, terrain, satellite or topo')
   }
-  if (!['viewer', 'news'].includes(config.presentation)) fail('presentation must be viewer or news')
+  if (!['viewer', 'news', 'short'].includes(config.presentation)) fail('presentation must be viewer, news or short')
   if (!['de', 'en'].includes(config.language)) fail('language must be de or en')
   if (!['default', 'incident', 'fire'].includes(config.mapFocus)) fail('mapFocus must be default, incident or fire')
   if (config.mapZoomSteps != null) {
@@ -208,14 +222,15 @@ async function configurationFromArguments(arguments_) {
   const optionFields = new Map([
     ['--url', 'url'], ['--output', 'output'], ['-o', 'output'], ['--preview-output', 'previewOutput'],
     ['--metadata-output', 'metadataOutput'],
-    ['--width', 'width'], ['--height', 'height'], ['--fps', 'fps'], ['--frame-step', 'frameStep'],
+    ['--width', 'width'], ['--height', 'height'], ['--capture-scale', 'captureScale'], ['--fps', 'fps'], ['--frame-step', 'frameStep'],
     ['--hold-frames', 'holdFrames'], ['--intro-seconds', 'introSeconds'], ['--outro-seconds', 'outroSeconds'],
     ['--start-frame', 'startFrame'], ['--end-frame', 'endFrame'], ['--start-time', 'startTime'],
     ['--end-time', 'endTime'], ['--settle-ms', 'settleMs'], ['--asset-timeout-ms', 'assetTimeoutMs'],
     ['--page-timeout-ms', 'pageTimeoutMs'], ['--base-map', 'baseMap'], ['--presentation', 'presentation'], ['--language', 'language'],
     ['--map-focus', 'mapFocus'], ['--map-zoom-steps', 'mapZoomSteps'],
     ['--codec', 'codec'],
-    ['--preset', 'preset'], ['--crf', 'crf'], ['--ffmpeg', 'ffmpegPath'],
+    ['--preset', 'preset'], ['--bitrate-mbps', 'bitrateMbps'],
+    ['--minimum-bitrate-mbps', 'minimumBitrateMbps'], ['--ffmpeg', 'ffmpegPath'],
   ])
 
   for (let index = 0; index < arguments_.length; index += 1) {
@@ -261,8 +276,8 @@ function formatTimestamp(timestampMs) {
 
 function presentationUrl(config) {
   const url = new URL(config.url)
-  if (config.presentation === 'news') {
-    url.searchParams.set('presentation', 'news')
+  if (isNewsPresentation(config)) {
+    url.searchParams.set('presentation', config.presentation)
     url.searchParams.set('lang', config.language)
   }
   return url.toString()
@@ -620,6 +635,28 @@ const NEWS_PRESENTATION_CSS = `
     transform-origin: left center;
   }
 
+  html[data-video-presentation="news"] .map-place-label--water > .map-place-label__water {
+    gap: 10px;
+    padding: 7px 11px 7px 7px;
+    border-radius: 7px;
+    transform: none;
+  }
+
+  html[data-video-presentation="news"] .map-place-label--water svg {
+    width: 31px;
+    height: 31px;
+    padding: 4px;
+  }
+
+  html[data-video-presentation="news"] .map-place-label--water small {
+    font-size: 9px;
+  }
+
+  html[data-video-presentation="news"] .map-place-label--water b {
+    margin-top: 3px;
+    font-size: 14px;
+  }
+
   html[data-video-presentation="news"] .aircraft-map-marker > span {
     transform: scale(1.45);
     transform-origin: center;
@@ -675,11 +712,14 @@ const NEWS_PRESENTATION_CSS = `
 `
 
 async function applyPresentation(page, config) {
-  if (config.presentation === 'news') {
+  if (isNewsPresentation(config)) {
     await page.waitForSelector('#news-presentation-dashboard', { timeout: config.pageTimeoutMs })
   }
-  if (config.presentation === 'news' && !await page.locator('#news-presentation-dashboard').count()) {
-    await page.evaluate(() => document.documentElement.setAttribute('data-video-presentation', 'news'))
+  if (isNewsPresentation(config) && !await page.locator('#news-presentation-dashboard').count()) {
+    await page.evaluate((shortFormat) => {
+      document.documentElement.setAttribute('data-video-presentation', 'news')
+      if (shortFormat) document.documentElement.setAttribute('data-news-format', 'short')
+    }, config.presentation === 'short')
     await page.addStyleTag({ content: NEWS_PRESENTATION_CSS })
     await page.evaluate(() => {
       const dashboard = document.createElement('section')
@@ -715,7 +755,7 @@ async function applyPresentation(page, config) {
     await page.waitForTimeout(150)
   }
 
-  if (config.mapFocus === 'default' && config.presentation === 'news') {
+  if (config.mapFocus === 'default' && isNewsPresentation(config)) {
     const waterFit = page.locator('button[aria-label="Show fire and water sources"]')
     if (await waterFit.count()) await waterFit.evaluate((button) => button.click())
     else await page.locator('button[aria-label="Center on fire"]').evaluate((button) => button.click())
@@ -738,7 +778,7 @@ async function applyPresentation(page, config) {
 }
 
 async function updateNewsPresentation(page, config) {
-  if (config.presentation !== 'news') return
+  if (!isNewsPresentation(config)) return
   await page.evaluate(() => {
     const dashboard = document.querySelector('#video-news-dashboard')
     if (!dashboard) return
@@ -861,6 +901,8 @@ function selectedTimelineFrames(config, timelineStartMs, sliderMax) {
 }
 
 function startEncoder(config, outputPath) {
+  const bitrate = `${config.bitrateMbps}M`
+  const bufferSize = `${config.bitrateMbps * 2}M`
   const arguments_ = [
     '-hide_banner',
     '-loglevel', 'warning',
@@ -872,8 +914,16 @@ function startEncoder(config, outputPath) {
     '-an',
     '-c:v', config.codec,
     '-preset', config.preset,
-    '-crf', String(config.crf),
-    '-vf', 'format=yuv420p',
+    ...(config.codec === 'libx264' ? ['-tune', 'stillimage'] : []),
+    '-b:v', bitrate,
+    '-minrate', bitrate,
+    '-maxrate', bitrate,
+    '-bufsize', bufferSize,
+    ...(config.codec === 'libx264' ? ['-x264-params', 'nal-hrd=cbr:force-cfr=1'] : []),
+    '-vf', `scale=${config.width}:${config.height}:flags=lanczos+accurate_rnd+full_chroma_int,format=yuv420p`,
+    '-colorspace', 'bt709',
+    '-color_primaries', 'bt709',
+    '-color_trc', 'bt709',
     '-movflags', '+faststart',
     '-metadata', 'title=Venn Fire Watch full incident timeline',
     outputPath,
@@ -967,7 +1017,7 @@ async function main() {
     browser = await chromium.launch({ headless: config.headless })
     const context = await browser.newContext({
       viewport: { width: config.width, height: config.height },
-      deviceScaleFactor: 1,
+      deviceScaleFactor: config.captureScale,
       serviceWorkers: 'block',
       colorScheme: 'light',
       reducedMotion: 'reduce',
@@ -1047,7 +1097,7 @@ async function main() {
       return
     }
     console.log(`Rendering ${frames.length} screenshots (${formatTimestamp(timelineStartMs + firstFrame * FIVE_MINUTES_MS)} to ${formatTimestamp(timelineStartMs + lastFrame * FIVE_MINUTES_MS)})`)
-    console.log(`Encoding ${encodedFrameCount} frames at ${config.width}x${config.height} / ${config.fps} fps -> ${outputPath}`)
+    console.log(`Encoding ${encodedFrameCount} frames captured at ${config.captureScale}x and downsampled to ${config.width}x${config.height} / ${config.fps} fps / ${config.bitrateMbps} Mbit/s -> ${outputPath}`)
 
     encoder = startEncoder(config, outputPath)
     let firstPng = null
@@ -1077,6 +1127,13 @@ async function main() {
 
     if (pageErrors.length) fail(`The page raised ${pageErrors.length} error(s): ${pageErrors.join(' | ')}`)
 
+    const durationSeconds = encodedFrameCount / config.fps
+    const outputStats = await stat(outputPath)
+    const measuredContainerBitrateMbps = (outputStats.size * 8) / durationSeconds / 1_000_000
+    if (measuredContainerBitrateMbps < config.minimumBitrateMbps) {
+      fail(`Encoded bitrate ${measuredContainerBitrateMbps.toFixed(2)} Mbit/s is below the required ${config.minimumBitrateMbps} Mbit/s floor`)
+    }
+
     const metadata = {
       schemaVersion: 1,
       createdAt: new Date().toISOString(),
@@ -1102,23 +1159,28 @@ async function main() {
         output: outputPath,
         width: config.width,
         height: config.height,
+        captureScale: config.captureScale,
+        captureWidth: Math.round(config.width * config.captureScale),
+        captureHeight: Math.round(config.height * config.captureScale),
         fps: config.fps,
         encodedFrameCount,
-        durationSeconds: encodedFrameCount / config.fps,
+        durationSeconds,
         holdFrames: config.holdFrames,
         introSeconds: config.introSeconds,
         outroSeconds: config.outroSeconds,
         codec: config.codec,
         preset: config.preset,
-        crf: config.crf,
+        targetBitrateMbps: config.bitrateMbps,
+        minimumBitrateMbps: config.minimumBitrateMbps,
+        measuredContainerBitrateMbps,
       },
       viewerConfiguration: {
         baseMap: config.baseMap ?? 'website default',
         presentation: config.presentation,
         language: config.language,
-        mapFocus: config.mapFocus === 'default' && config.presentation === 'news' ? 'fire-and-water-sources' : config.mapFocus,
+        mapFocus: config.mapFocus === 'default' && isNewsPresentation(config) ? 'fire-and-water-sources' : config.mapFocus,
         mapZoomSteps: config.mapZoomSteps ?? 0,
-        newsWindSummary: 'Speed-weighted vector mean of the two nearest currently available station observations; model-grid wind excluded',
+        newsWindSummary: 'Latest available Mont Rigi RMI station observation; model-grid wind excluded',
         layerOverrides: config.layers,
         waitForAircraft: config.waitForAircraft,
         waitForAssets: config.waitForAssets,

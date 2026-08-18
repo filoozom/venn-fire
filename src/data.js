@@ -1,3 +1,5 @@
+import { aircraftCountryFields } from './aircraftCountries.js'
+
 export const FIVE_MINUTES_MS = 5 * 60 * 1000
 export const AIRCRAFT_PATH_MAX_GAP_MS = 2 * 60 * 1000
 export const AIRCRAFT_PATH_MAX_SPEED_KT = 300
@@ -122,6 +124,7 @@ export function mergeIncidentFlights(configuredFlights = [], aircraftObservation
     ])
     return {
       ...flight,
+      ...aircraftCountryFields({ ...receiverRows.at(-1)?.source, ...flight }),
       observations,
       coverageWindows: observations.length
         ? receiverCoverageWindows(observations)
@@ -141,6 +144,7 @@ export function mergeIncidentFlights(configuredFlights = [], aircraftObservation
         icao24,
         callSign: latest.callSign || registration || icao24.toUpperCase(),
         registration,
+        ...aircraftCountryFields(latest),
         type: receiverDisplayType(latest),
         color: receiverFlightColor(icao24),
         label: [registration, description].filter(Boolean).join(' · '),

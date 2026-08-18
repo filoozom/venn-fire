@@ -52,6 +52,12 @@ const basemaps = {
   },
 }
 
+function basemapOptions(mode) {
+  const options = basemaps[mode].options
+  if (document.documentElement.dataset.presentation !== 'news' || window.devicePixelRatio <= 1) return options
+  return { ...options, detectRetina: true }
+}
+
 function windCardinal(deg) {
   const names = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
   const normalized = normalizeDegrees(deg)
@@ -104,9 +110,12 @@ function windTooltip({ name, wind, source, status, distanceKm = 0 }) {
 function aircraftIcon(flight, heading = 0) {
   const planePath = '<path d="M12 2l2 7 7 3v2l-7-1.5V18l2 2v1l-4-1-4 1v-1l2-2v-5.5L3 14v-2l7-3 2-7z" fill="currentColor"/>'
   const helicopterPath = '<path d="M3 7.5h18M12 7.5V5m-1-1h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M8.5 9h7.4c1.7 0 3.1 1.3 3.1 3v.5H8.5a3.5 3.5 0 010-7h2v3.5z" fill="currentColor"/><path d="M8 13.5l-2 3m9-3 2 3M4.5 17h13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>'
+  const countryFlag = flight.countryFlag
+    ? `<span class="aircraft-map-flag" role="img" aria-label="${escapeHtml(flight.countryName)} flag" title="${escapeHtml(flight.countryName)}">${escapeHtml(flight.countryFlag)}</span>`
+    : ''
   return L.divIcon({
     className: 'aircraft-map-marker',
-    html: `<span style="--flight-color:${flight.color};--aircraft-rotation:${heading}deg"><svg viewBox="0 0 24 24" aria-hidden="true">${flight.type === 'plane' ? planePath : helicopterPath}</svg></span><b>${escapeHtml(flight.callSign)}</b>`,
+    html: `<span style="--flight-color:${flight.color};--aircraft-rotation:${heading}deg"><svg viewBox="0 0 24 24" aria-hidden="true">${flight.type === 'plane' ? planePath : helicopterPath}</svg></span><b>${countryFlag}<span>${escapeHtml(flight.callSign)}</span></b>`,
     iconSize: [32, 32],
     iconAnchor: [16, 16],
   })
@@ -184,7 +193,7 @@ export default function MapView({
     labelsRef.current = L.layerGroup().addTo(map)
     measurementLayerRef.current = L.layerGroup().addTo(map)
 
-    const tile = L.tileLayer(basemaps[baseMode].url, basemaps[baseMode].options).addTo(map)
+    const tile = L.tileLayer(basemaps[baseMode].url, basemapOptions(baseMode)).addTo(map)
     tileRef.current = tile
 
     const home = () => map.fitBounds(INCIDENT_MAP_BOUNDS, INCIDENT_MAP_PADDING)
@@ -304,7 +313,7 @@ export default function MapView({
     const map = mapRef.current
     if (!map) return
     if (tileRef.current) map.removeLayer(tileRef.current)
-    tileRef.current = L.tileLayer(basemaps[baseMode].url, basemaps[baseMode].options).addTo(map)
+    tileRef.current = L.tileLayer(basemaps[baseMode].url, basemapOptions(baseMode)).addTo(map)
     tileRef.current.bringToBack()
   }, [baseMode])
 

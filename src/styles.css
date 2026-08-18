@@ -1112,16 +1112,30 @@ button {
   position: absolute;
   top: 7px;
   left: 36px;
-  padding: 2px 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
   color: #24483c;
   background: rgba(255, 255, 255, 0.92);
   border: 1px solid rgba(62, 91, 80, 0.22);
   border-radius: 4px;
   box-shadow: 0 2px 6px rgba(30, 48, 42, 0.16);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 850;
   line-height: 1;
   white-space: nowrap;
+}
+
+.aircraft-map-flag,
+.aircraft-country-flag {
+  font-family: "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+  font-style: normal;
+  line-height: 1;
+}
+
+.aircraft-map-flag {
+  font-size: 13px;
 }
 
 .photo-evidence-marker {
@@ -2212,7 +2226,15 @@ button {
 }
 
 .flight-head strong {
-  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+}
+
+.aircraft-country-flag {
+  font-size: 17px;
+  filter: drop-shadow(0 1px 1px rgba(29, 55, 46, 0.16));
 }
 
 .flight-head small {

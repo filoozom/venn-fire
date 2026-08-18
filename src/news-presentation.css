@@ -1,3 +1,16 @@
+/* Broadcast typography. Archivo replaces both Inter (never shipped, so the heavy
+   weights were synthesised) and Georgia (old-style figures, absent from Linux
+   playout machines). Tabular lining figures keep the numbers from jittering
+   sideways as they retick during playback. */
+html[data-presentation="news"],
+html[data-presentation="news"] .timeline-panel,
+html[data-presentation="news"] .map-date-chip,
+#news-presentation-dashboard {
+  font-family: "Archivo Broadcast", Inter, ui-sans-serif, system-ui, sans-serif !important;
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+
 html[data-presentation="news"] .app-header,
 html[data-presentation="news"] .left-sidebar,
 html[data-presentation="news"] .right-inspector,
@@ -31,6 +44,7 @@ html[data-presentation="news"] .map-topbar {
 }
 
 html[data-presentation="news"] .map-date-chip {
+  align-items: center !important;
   gap: 17px !important;
   padding: 13px 18px !important;
   color: #f2c788 !important;
@@ -47,38 +61,28 @@ html[data-presentation="news"] .map-date-chip svg {
 
 html[data-presentation="news"] .map-date-chip span {
   color: #f2c788 !important;
-  font-size: 17px !important;
-  font-weight: 900 !important;
-  letter-spacing: 0.13em !important;
+  font-size: 18px !important;
+  font-weight: 800 !important;
+  line-height: 34px !important;
+  letter-spacing: 0.01em !important;
 }
 
 html[data-presentation="news"] .map-date-chip strong {
-  min-width: 110px !important;
+  min-width: 92px !important;
   padding-left: 17px !important;
   color: #fff !important;
   border-left-color: rgba(255, 255, 255, 0.28) !important;
-  font-family: Georgia, "Times New Roman", serif !important;
-  font-size: 36px !important;
-  font-weight: 500 !important;
+  font-size: 34px !important;
+  font-weight: 800 !important;
   line-height: 1 !important;
   letter-spacing: -0.02em !important;
-}
-
-html[data-presentation="news"] .map-date-chip strong::after {
-  margin-left: 6px;
-  color: rgba(255, 255, 255, 0.68);
-  font-family: Inter, ui-sans-serif, sans-serif;
-  font-size: 8px;
-  font-weight: 800;
-  letter-spacing: 0.1em;
-  content: "CEST";
 }
 
 html[data-presentation="news"] .timeline-panel {
   right: 34px !important;
   bottom: 28px !important;
   left: 34px !important;
-  padding: 11px 18px 8px !important;
+  padding: 13px 18px 10px !important;
   background: rgba(255, 255, 255, 0.94) !important;
   border: 1px solid rgba(255, 255, 255, 0.9) !important;
   border-radius: 5px !important;
@@ -86,29 +90,14 @@ html[data-presentation="news"] .timeline-panel {
   backdrop-filter: blur(14px) !important;
 }
 
-html[data-presentation="news"] .timeline-head {
-  min-height: 19px !important;
-  padding: 0 1px 4px !important;
-  border-bottom: 0 !important;
-}
-
-html[data-presentation="news"] .timeline-title {
-  gap: 9px !important;
-}
-
-html[data-presentation="news"] .timeline-title > span {
-  color: #365248 !important;
-  font-size: 12px !important;
-  letter-spacing: 0.11em !important;
-}
-
-html[data-presentation="news"] .timeline-title strong {
-  color: #52685f !important;
-  font-size: 11px !important;
-}
-
+/* Nothing but the growth curve and the time axis. The panel head repeated the
+   clock chip, and the event markers put roughly seventy unlabelled dots on the
+   track, which at viewing distance read as a speckled band rather than as
+   events -- and the legend that named them is not on air to explain them. */
+html[data-presentation="news"] .timeline-head,
 html[data-presentation="news"] .timeline-legend,
 html[data-presentation="news"] .timeline-foot,
+html[data-presentation="news"] .event-markers,
 html[data-presentation="news"] .step-button,
 html[data-presentation="news"] .speed-button,
 html[data-presentation="news"] .timeline-now {
@@ -118,14 +107,14 @@ html[data-presentation="news"] .timeline-now {
 html[data-presentation="news"] .timeline-body {
   position: relative !important;
   display: block !important;
-  min-height: 71px !important;
+  min-height: 68px !important;
   padding: 0 !important;
 }
 
 html[data-presentation="news"] .play-button {
   position: absolute !important;
   z-index: 8 !important;
-  top: 17px !important;
+  top: 27px !important;
   left: 0 !important;
   display: grid !important;
   width: 34px !important;
@@ -133,27 +122,52 @@ html[data-presentation="news"] .play-button {
 }
 
 html[data-presentation="news"] .timeline-track-wrap {
-  height: 71px !important;
+  height: 68px !important;
   margin-left: 48px !important;
+  margin-right: 132px !important;
+}
+
+html[data-presentation="news"] .timeline-panel::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 18px;
+  width: 104px;
+  height: 31px;
+  background: url('/apyos-wordmark.svg') no-repeat center / contain;
+  transform: translateY(-50%);
 }
 
 html[data-presentation="news"] .mini-area-chart {
   top: 0 !important;
-  height: 39px !important;
-}
-
-html[data-presentation="news"] .event-markers {
-  top: 35px !important;
+  height: 44px !important;
 }
 
 html[data-presentation="news"] .timeline-range {
-  top: 36px !important;
+  top: 38px !important;
 }
 
 html[data-presentation="news"] .timeline-ticks {
-  top: 51px !important;
-  color: #65766f !important;
-  font-size: 11px !important;
+  top: 52px !important;
+  color: #55665f !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+}
+
+/* The axis labels are clock times only, but the timeline spans several days and
+   five equal steps land roughly an hour apart on the clock, so the bare times
+   read as one afternoon. The day comes from the tick's data attribute, which the
+   interactive app renders without displaying. */
+html[data-presentation="news"] .timeline-ticks span {
+  white-space: nowrap !important;
+}
+
+html[data-presentation="news"] .timeline-ticks span::before {
+  margin-right: 6px;
+  color: #24463a;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  content: attr(data-day);
 }
 
 #news-presentation-dashboard {
@@ -163,14 +177,13 @@ html[data-presentation="news"] .timeline-ticks {
   left: 34px;
   width: 840px;
   color: #18372d;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   pointer-events: none;
 }
 
 #news-presentation-dashboard .news-summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  min-height: 82px;
+  min-height: 84px;
   overflow: hidden;
   color: #fff;
   background: rgba(19, 48, 39, 0.94);
@@ -182,9 +195,9 @@ html[data-presentation="news"] .timeline-ticks {
 
 #news-presentation-dashboard .news-stat {
   display: grid;
-  grid-template-rows: 10px 31px 10px;
+  grid-template-rows: 13px 31px;
   align-content: center;
-  row-gap: 3px;
+  row-gap: 11px;
   min-width: 0;
   padding: 12px 15px;
   border-left: 1px solid rgba(255, 255, 255, 0.16);
@@ -196,23 +209,23 @@ html[data-presentation="news"] .timeline-ticks {
 }
 
 #news-presentation-dashboard .news-stat--wind {
-  grid-template-columns: 57px minmax(0, 1fr);
-  column-gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 13px;
 }
 
 #news-presentation-dashboard .news-stat--wind > span,
-#news-presentation-dashboard .news-stat--wind > strong,
-#news-presentation-dashboard .news-stat--wind > small {
+#news-presentation-dashboard .news-stat--wind > strong {
   grid-column: 2;
 }
 
 #news-presentation-dashboard .news-stat > span {
   align-self: center;
   color: #f2c788;
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 900;
-  line-height: 10px;
-  letter-spacing: 0.12em;
+  line-height: 13px;
+  letter-spacing: 0.09em;
+  white-space: nowrap;
   text-transform: uppercase;
 }
 
@@ -223,37 +236,23 @@ html[data-presentation="news"] .timeline-ticks {
   gap: 5px;
   height: 31px;
   margin: 0;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 29px;
-  font-weight: 500;
+  font-size: 28px;
+  font-weight: 800;
   line-height: 1;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.015em;
   white-space: nowrap;
 }
 
 #news-presentation-dashboard .news-stat > strong small {
   color: rgba(255, 255, 255, 0.66);
-  font-family: Inter, ui-sans-serif, sans-serif;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
-#news-presentation-dashboard .news-stat > small {
-  align-self: center;
-  min-height: 0;
-  margin: 0;
-  overflow: hidden;
-  color: rgba(255, 255, 255, 0.68);
-  font-size: 9px;
-  line-height: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 #news-presentation-dashboard .news-wind-value {
-  align-items: center !important;
+  align-items: baseline !important;
   gap: 9px !important;
   justify-content: center;
 }
@@ -264,8 +263,7 @@ html[data-presentation="news"] .timeline-ticks {
   align-self: stretch;
   display: grid;
   place-items: center;
-  width: 57px;
-  height: auto;
+  aspect-ratio: 1;
   color: #91dbc9;
   border: 1px solid rgba(145, 219, 201, 0.38);
   border-radius: 50%;
@@ -276,8 +274,8 @@ html[data-presentation="news"] .timeline-ticks {
 }
 
 #news-presentation-dashboard .news-wind-arrow svg {
-  width: 29px;
-  height: 29px;
+  width: 28px;
+  height: 28px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.8;
@@ -288,15 +286,37 @@ html[data-presentation="news"] .timeline-ticks {
 }
 
 #news-presentation-dashboard .news-wind-copy {
-  display: block;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 7px;
   font-style: normal;
 }
 
 #news-presentation-dashboard .news-wind-copy b {
   color: #fff;
-  font-size: 29px;
-  font-weight: 850;
+  font-size: 28px;
+  font-weight: 800;
   line-height: 1;
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+}
+
+#news-presentation-dashboard .news-wind-separator {
+  align-self: center;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1;
+}
+
+#news-presentation-dashboard .news-wind-unit {
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 /* Broadcast-only legibility: Leaflet positions the icon containers, so scale
@@ -305,6 +325,31 @@ html[data-presentation="news"] .map-place-label > span,
 html[data-presentation="news"] .border-label > span {
   transform: scale(1.4);
   transform-origin: left center;
+}
+
+/* Water badges used to be tiny 6.5/10 px elements enlarged as one bitmap-like
+   compositing layer. Draw the same broadcast size natively so glyphs, the SVG
+   droplet and the one-pixel border land on the capture grid before downsampling. */
+html[data-presentation="news"] .map-place-label--water > .map-place-label__water {
+  gap: 10px;
+  padding: 7px 11px 7px 7px;
+  border-radius: 7px;
+  transform: none;
+}
+
+html[data-presentation="news"] .map-place-label--water svg {
+  width: 31px;
+  height: 31px;
+  padding: 4px;
+}
+
+html[data-presentation="news"] .map-place-label--water small {
+  font-size: 9px;
+}
+
+html[data-presentation="news"] .map-place-label--water b {
+  margin-top: 3px;
+  font-size: 14px;
 }
 
 html[data-presentation="news"] .aircraft-map-marker > span {
@@ -376,4 +421,253 @@ html[data-presentation="news"] .leaflet-control-attribution a[href*="leafletjs.c
     bottom: 12px !important;
     left: 12px !important;
   }
+}
+
+/* 9:16 social/news short. The map stays full-bleed, while the information
+   hierarchy becomes a two-row card stack sized for a phone rather than a
+   narrow copy of the 16:9 lower-third. */
+html[data-news-format="short"] .map-topbar {
+  top: 26px !important;
+  right: 24px !important;
+  left: 24px !important;
+  width: auto !important;
+  justify-content: flex-end !important;
+}
+
+html[data-news-format="short"] .map-date-chip {
+  display: flex !important;
+  visibility: visible !important;
+  gap: 18px !important;
+  padding: 14px 19px !important;
+  opacity: 1 !important;
+  border-radius: 8px !important;
+}
+
+html[data-news-format="short"] .map-date-chip span {
+  display: block !important;
+  font-size: 22px !important;
+  line-height: 40px !important;
+}
+
+html[data-news-format="short"] .map-date-chip strong {
+  min-width: 110px !important;
+  padding-left: 18px !important;
+  font-size: 40px !important;
+}
+
+#news-presentation-brand {
+  display: none;
+}
+
+html[data-news-format="short"] #news-presentation-brand {
+  position: fixed;
+  z-index: 1600;
+  top: 26px;
+  left: 24px;
+  display: grid;
+  place-items: center;
+  width: 218px;
+  height: 68px;
+  background: rgba(19, 48, 39, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  box-shadow: 0 10px 32px rgba(15, 35, 28, 0.28);
+  pointer-events: none;
+  backdrop-filter: blur(12px);
+}
+
+html[data-news-format="short"] .news-presentation-brand-mark {
+  position: relative;
+  display: block;
+  width: 148px;
+  height: 43px;
+  transform: translateY(6px);
+}
+
+html[data-news-format="short"] .news-presentation-brand-mark img,
+html[data-news-format="short"] .news-presentation-brand-mark svg {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+html[data-news-format="short"] .news-presentation-brand-mark img {
+  filter: brightness(0) invert(1);
+}
+
+html[data-news-format="short"] .news-presentation-brand-mark svg {
+  fill: #dc143c;
+}
+
+html[data-news-format="short"] #news-presentation-dashboard {
+  top: 112px;
+  left: 24px;
+  width: calc(100vw - 48px);
+}
+
+html[data-news-format="short"] #news-presentation-dashboard .news-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  min-height: 92px;
+  overflow: hidden;
+  background: rgba(19, 48, 39, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  box-shadow: 0 10px 32px rgba(15, 35, 28, 0.28);
+  backdrop-filter: blur(12px);
+}
+
+html[data-news-format="short"] #news-presentation-dashboard .news-stat--announced {
+  display: none;
+}
+
+html[data-news-format="short"] #news-presentation-dashboard .news-stat {
+  grid-template-rows: 15px 34px;
+  row-gap: 8px;
+  min-height: 90px;
+  padding: 13px 11px;
+  background: transparent;
+  border: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+html[data-news-format="short"] #news-presentation-dashboard .news-stat--wind {
+  grid-column: auto;
+  grid-template-columns: 54px minmax(0, 1fr);
+  column-gap: 8px;
+  min-height: 90px;
+  padding: 13px 10px;
+}
+
+html[data-news-format="short"] #news-presentation-dashboard .news-stat > span {
+  font-size: 13px;
+  line-height: 15px;
+  letter-spacing: 0.055em;
+}
+
+html[data-news-format="short"] #news-presentation-dashboard .news-stat > strong {
+  height: 34px;
+  font-size: 30px;
+}
+
+html[data-news-format="short"] #news-presentation-dashboard .news-stat > strong small,
+html[data-news-format="short"] #news-presentation-dashboard .news-wind-unit {
+  font-size: 10px;
+}
+
+html[data-news-format="short"] #news-presentation-dashboard .news-wind-arrow svg {
+  width: 27px;
+  height: 27px;
+}
+
+html[data-news-format="short"] #news-presentation-dashboard .news-wind-copy b {
+  font-size: 30px;
+}
+
+html[data-news-format="short"] .timeline-panel {
+  right: 24px !important;
+  bottom: 24px !important;
+  left: 24px !important;
+  padding: 12px 16px 10px !important;
+  border-radius: 8px !important;
+}
+
+html[data-news-format="short"] .timeline-body {
+  min-height: 72px !important;
+}
+
+html[data-news-format="short"] .play-button {
+  display: none !important;
+}
+
+html[data-news-format="short"] .timeline-track-wrap {
+  height: 72px !important;
+  margin-right: 0 !important;
+  margin-left: 0 !important;
+}
+
+html[data-news-format="short"] .timeline-panel::after {
+  display: none;
+}
+
+html[data-news-format="short"] .mini-area-chart {
+  height: 44px !important;
+}
+
+html[data-news-format="short"] .timeline-range {
+  top: 38px !important;
+}
+
+html[data-news-format="short"] .timeline-ticks {
+  top: 52px !important;
+  font-size: 13px !important;
+}
+
+html[data-news-format="short"] .timeline-ticks span::before {
+  margin-right: 4px;
+  content: attr(data-short-day);
+}
+
+html[data-news-format="short"] .map-place-label > span,
+html[data-news-format="short"] .border-label > span {
+  transform: scale(1.65);
+}
+
+html[data-news-format="short"] .map-place-label--water > .map-place-label__water {
+  gap: 12px;
+  padding: 9px 14px 9px 9px;
+  border-radius: 9px;
+  transform: none;
+}
+
+html[data-news-format="short"] .map-place-label--water svg {
+  width: 38px;
+  height: 38px;
+  padding: 5px;
+}
+
+html[data-news-format="short"] .map-place-label--water small {
+  font-size: 11px;
+}
+
+html[data-news-format="short"] .map-place-label--water b {
+  margin-top: 4px;
+  font-size: 18px;
+}
+
+html[data-news-format="short"] .aircraft-map-marker > span {
+  transform: scale(1.7);
+}
+
+html[data-news-format="short"] .aircraft-map-marker > b {
+  left: 46px;
+  transform: scale(1.6);
+}
+
+html[data-news-format="short"] .wind-source-marker > span,
+html[data-news-format="short"] .photo-evidence-marker > span,
+html[data-news-format="short"] .water-drop-marker > span {
+  transform: scale(1.6);
+}
+
+html[data-news-format="short"] .fire-outline {
+  stroke-width: 4.2;
+}
+
+html[data-news-format="short"] .leaflet-tooltip,
+html[data-news-format="short"] .leaflet-tooltip strong {
+  font-size: 16px !important;
+}
+
+html[data-news-format="short"] .leaflet-control-attribution {
+  max-width: calc(100vw - 56px) !important;
+  margin: 0 28px 126px 0 !important;
+  padding: 3px 7px !important;
+  font-size: 10px !important;
 }

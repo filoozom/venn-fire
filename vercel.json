@@ -3,35 +3,51 @@
   "functions": {
     "api/data.js": {
       "maxDuration": 30,
-      "regions": ["fra1"]
+      "regions": [
+        "fra1"
+      ]
     },
     "api/firms-situation.js": {
       "maxDuration": 30,
-      "regions": ["fra1"]
+      "regions": [
+        "fra1"
+      ]
     },
     "api/live-reports.js": {
       "maxDuration": 30,
-      "regions": ["fra1"]
+      "regions": [
+        "fra1"
+      ]
     },
     "api/live-situation.js": {
       "maxDuration": 30,
-      "regions": ["fra1"]
+      "regions": [
+        "fra1"
+      ]
     },
     "api/sentinel-quicklook.js": {
       "maxDuration": 30,
-      "regions": ["fra1"]
+      "regions": [
+        "fra1"
+      ]
     },
     "api/source-image.js": {
       "maxDuration": 30,
-      "regions": ["fra1"]
+      "regions": [
+        "fra1"
+      ]
     },
     "api/refresh.js": {
       "maxDuration": 60,
-      "regions": ["fra1"]
+      "regions": [
+        "fra1"
+      ]
     },
     "api/refresh-queue.js": {
       "maxDuration": 60,
-      "regions": ["fra1"],
+      "regions": [
+        "fra1"
+      ],
       "experimentalTriggers": [
         {
           "type": "queue/v2beta",
@@ -50,12 +66,150 @@
   ],
   "headers": [
     {
-      "source": "/api/(.*)",
+      "source": "/api/refresh",
       "headers": [
-        { "key": "Cache-Control", "value": "no-store, max-age=0" },
-        { "key": "CDN-Cache-Control", "value": "no-store" },
-        { "key": "Vercel-CDN-Cache-Control", "value": "no-store" },
-        { "key": "Pragma", "value": "no-cache" }
+        {
+          "key": "Cache-Control",
+          "value": "no-store, max-age=0"
+        },
+        {
+          "key": "CDN-Cache-Control",
+          "value": "no-store"
+        },
+        {
+          "key": "Vercel-CDN-Cache-Control",
+          "value": "no-store"
+        },
+        {
+          "key": "Pragma",
+          "value": "no-cache"
+        }
+      ]
+    },
+    {
+      "source": "/api/refresh-queue",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, max-age=0"
+        },
+        {
+          "key": "CDN-Cache-Control",
+          "value": "no-store"
+        },
+        {
+          "key": "Vercel-CDN-Cache-Control",
+          "value": "no-store"
+        },
+        {
+          "key": "Pragma",
+          "value": "no-cache"
+        }
+      ]
+    },
+    {
+      "source": "/api/deployment",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, max-age=0"
+        },
+        {
+          "key": "CDN-Cache-Control",
+          "value": "no-store"
+        },
+        {
+          "key": "Vercel-CDN-Cache-Control",
+          "value": "no-store"
+        },
+        {
+          "key": "Pragma",
+          "value": "no-cache"
+        }
+      ]
+    },
+    {
+      "source": "/api/butgenbach-source",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, max-age=0"
+        },
+        {
+          "key": "CDN-Cache-Control",
+          "value": "no-store"
+        },
+        {
+          "key": "Vercel-CDN-Cache-Control",
+          "value": "no-store"
+        },
+        {
+          "key": "Pragma",
+          "value": "no-cache"
+        }
+      ]
+    },
+    {
+      "source": "/api/live-situation",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, max-age=0"
+        },
+        {
+          "key": "CDN-Cache-Control",
+          "value": "no-store"
+        },
+        {
+          "key": "Vercel-CDN-Cache-Control",
+          "value": "no-store"
+        },
+        {
+          "key": "Pragma",
+          "value": "no-cache"
+        }
+      ]
+    },
+    {
+      "source": "/api/live-reports",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, max-age=0"
+        },
+        {
+          "key": "CDN-Cache-Control",
+          "value": "no-store"
+        },
+        {
+          "key": "Vercel-CDN-Cache-Control",
+          "value": "no-store"
+        },
+        {
+          "key": "Pragma",
+          "value": "no-cache"
+        }
+      ]
+    },
+    {
+      "source": "/api/firms-situation",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, max-age=0"
+        },
+        {
+          "key": "CDN-Cache-Control",
+          "value": "no-store"
+        },
+        {
+          "key": "Vercel-CDN-Cache-Control",
+          "value": "no-store"
+        },
+        {
+          "key": "Pragma",
+          "value": "no-cache"
+        }
       ]
     }
   ]

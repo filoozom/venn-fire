@@ -1,33 +1,27 @@
 import './news-presentation.css'
 
 const parameters = new URLSearchParams(window.location.search)
-const enabled = ['news', 'broadcast'].includes(parameters.get('presentation'))
+const requestedPresentation = parameters.get('presentation')
+const shortFormat = ['short', 'shorts', 'vertical'].includes(requestedPresentation)
+const enabled = ['news', 'broadcast', 'short', 'shorts', 'vertical'].includes(requestedPresentation)
   || parameters.get('view') === 'news'
 const language = parameters.get('lang') === 'en' ? 'en' : 'de'
 const translations = {
   de: {
     announcedArea: 'Gemeldete Fläche',
-    announcedAreaSource: 'Offizielle öffentliche Meldungen',
     bestEstimate: 'Unsere Beste Schätzung',
-    bestEstimateSource: 'Aus Beobachtungen abgeleitete Kontur',
     documentTitle: 'Zeitverlauf des Vennbrands | Venn Fire Watch',
-    meanWind: 'Beobachteter Wind',
-    noConcurrentReadings: 'Keine zwei zeitgleichen Messungen',
+    // The subtitle used to carry the attribution. With it gone, the station
+    // moves into the label so the figure is still sourced on air.
+    observedWind: 'Wind (RMI)',
     timeline: 'Zeitverlauf des Einsatzes',
-    twoNearestStations: 'Zwei nächstgelegene Messstationen',
-    vectorMean: 'Vektormittel',
   },
   en: {
     announcedArea: 'Announced area',
-    announcedAreaSource: 'Official public reports',
     bestEstimate: 'Our best estimate',
-    bestEstimateSource: 'Derived observation outline',
     documentTitle: 'High Fens wildfire timeline | Venn Fire Watch',
-    meanWind: 'Observed wind',
-    noConcurrentReadings: 'No two concurrent observations',
+    observedWind: 'Wind (RMI)',
     timeline: 'Incident timeline',
-    twoNearestStations: 'Two nearest weather stations',
-    vectorMean: 'vector mean',
   },
 }
 const copy = translations[language]
@@ -54,21 +48,23 @@ function dashboardMarkup() {
         <i class="news-wind-arrow is-unavailable" aria-hidden="true">
           <svg viewBox="0 0 24 24"><path d="M12 20V4M6.5 9.5 12 4l5.5 5.5" /></svg>
         </i>
-        <span>${copy.meanWind}</span>
+        <span>${copy.observedWind}</span>
         <strong class="news-wind-value">
-          <i class="news-wind-copy"><b>—</b></i>
+          <i class="news-wind-copy">
+            <b>—</b>
+            <em class="news-wind-separator" hidden>·</em>
+            <b class="news-wind-speed"></b>
+            <small class="news-wind-unit"></small>
+          </i>
         </strong>
-        <small class="news-wind-detail">${copy.twoNearestStations}</small>
       </article>
-      <article class="news-stat">
+      <article class="news-stat news-stat--announced">
         <span>${copy.announcedArea}</span>
         <strong><b class="news-area-announced">—</b><small class="news-area-announced-unit"></small></strong>
-        <small>${copy.announcedAreaSource}</small>
       </article>
       <article class="news-stat">
-        <span>${copy.bestEstimate}</span>
+        <span>${shortFormat ? (language === 'de' ? 'Unsere Schätzung' : 'Our estimate') : copy.bestEstimate}</span>
         <strong><b class="news-area-estimated">—</b><small class="news-area-estimated-unit"></small></strong>
-        <small>${copy.bestEstimateSource}</small>
       </article>
     </div>
   `
@@ -87,65 +83,112 @@ function updateAreas(dashboard) {
   dashboard.querySelector('.news-area-estimated-unit').textContent = estimated === '—' ? '' : 'ha'
 }
 
-function stationReadings() {
-  return [...document.querySelectorAll('.wind-source-reading')].flatMap((row) => {
+// The broadcast graphic quotes one instrument: the RMI station reading, which is
+// the same measurement the map marker and the inspector show. A vector mean of
+// two networks was not a figure any source publishes, so it could not be
+// attributed on air.
+function rmiStationReading() {
+  for (const row of document.querySelectorAll('.wind-source-reading')) {
     const children = [...row.children]
-    const name = normalizedText(children[1]?.querySelector('strong'))
-    if (!name || name === 'Drossart grid') return []
+    if (!/\bRMI\b/.test(normalizedText(children[1]))) continue
     const rotation = Number.parseFloat(children[0]?.style.getPropertyValue('--wind-rotation'))
     const speedText = normalizedText([...(children[2]?.querySelectorAll('small') ?? [])].at(-1))
     const speed = Number.parseFloat(speedText.replace(',', '.'))
-    if (!Number.isFinite(rotation) || !Number.isFinite(speed)) return []
-    return [{ name, direction: normalizedDegrees(rotation - 180), speed }]
-  }).slice(0, 2)
+    if (!Number.isFinite(rotation) || !Number.isFinite(speed)) continue
+    // The interactive arrow points where the wind travels; the reported
+    // direction is where it comes from.
+    return { direction: normalizedDegrees(rotation - 180), speed }
+  }
+  return null
 }
 
 function updateWind(dashboard) {
-  const readings = stationReadings()
+  const reading = rmiStationReading()
   const arrow = dashboard.querySelector('.news-wind-arrow')
-  const direction = dashboard.querySelector('.news-wind-copy b')
-  const detail = dashboard.querySelector('.news-wind-detail')
-  if (readings.length !== 2) {
+  const direction = dashboard.querySelector('.news-wind-copy > b')
+  const separator = dashboard.querySelector('.news-wind-separator')
+  const speed = dashboard.querySelector('.news-wind-speed')
+  const unit = dashboard.querySelector('.news-wind-unit')
+  if (!reading) {
     arrow.classList.add('is-unavailable')
     arrow.style.setProperty('--wind-rotation', '0deg')
-    direction.textContent = '—'
-    detail.textContent = copy.noConcurrentReadings
+    setText(direction, '—')
+    separator.hidden = true
+    setText(speed, '')
+    setText(unit, '')
     return
   }
 
-  const sumEast = readings.reduce((sum, reading) => (
-    sum + reading.speed * Math.sin(reading.direction * Math.PI / 180)
-  ), 0)
-  const sumNorth = readings.reduce((sum, reading) => (
-    sum + reading.speed * Math.cos(reading.direction * Math.PI / 180)
-  ), 0)
-  const meanDirection = normalizedDegrees(Math.atan2(sumEast, sumNorth) * 180 / Math.PI)
-  const meanSpeed = Math.hypot(sumEast, sumNorth) / readings.length
   arrow.classList.remove('is-unavailable')
-  arrow.style.setProperty('--wind-rotation', `${normalizedDegrees(meanDirection + 180)}deg`)
-  direction.textContent = cardinal(meanDirection)
-  detail.textContent = language === 'de'
-    ? `aus ${Math.round(meanDirection)}° · ${meanSpeed.toLocaleString('de-BE', { maximumFractionDigits: 1 })} km/h ${copy.vectorMean}`
-    : `from ${Math.round(meanDirection)}° · ${meanSpeed.toLocaleString('en-GB', { maximumFractionDigits: 1 })} km/h ${copy.vectorMean}`
+  arrow.style.setProperty('--wind-rotation', `${normalizedDegrees(reading.direction + 180)}deg`)
+  setText(direction, cardinal(reading.direction))
+  separator.hidden = false
+  setText(speed, Math.round(reading.speed).toLocaleString(language === 'de' ? 'de-BE' : 'en-GB'))
+  setText(unit, 'km/h')
 }
 
 function setText(element, value) {
   if (element && element.textContent !== value) element.textContent = value
 }
 
+const germanMonths = {
+  JAN: 'Januar',
+  FEB: 'Februar',
+  MAR: 'März',
+  APR: 'April',
+  MAY: 'Mai',
+  JUN: 'Juni',
+  JUL: 'Juli',
+  AUG: 'August',
+  SEP: 'September',
+  OCT: 'Oktober',
+  NOV: 'November',
+  DEC: 'Dezember',
+}
+const compactMonthNumbers = {
+  JAN: '01',
+  FEB: '02',
+  MAR: '03',
+  APR: '04',
+  MAY: '05',
+  JUN: '06',
+  JUL: '07',
+  AUG: '08',
+  SEP: '09',
+  OCT: '10',
+  NOV: '11',
+  DEC: '12',
+}
+
+// German writes an ordinal dot after the day and spells the month out:
+// "18. August". The app formats day labels as uppercase English abbreviations
+// ("18 AUG"), and the replacements this used to do were title-case, so they
+// never matched and no month was in fact being localized. Idempotent: an
+// already-converted label no longer matches the pattern.
 function germanDateLabel(value) {
-  return value
-    .replace(/\bMar\b/g, 'Mär')
-    .replace(/\bMay\b/g, 'Mai')
-    .replace(/\bOct\b/g, 'Okt')
-    .replace(/\bDec\b/g, 'Dez')
+  return value.replace(/\b(\d{1,2}) ([A-Z]{3})\b/g, (match, day, month) => (
+    germanMonths[month] ? `${day}. ${germanMonths[month]}` : match
+  ))
+}
+
+function compactDateLabel(value) {
+  const match = value.match(/\b(\d{1,2}) ([A-Z]{3})\b/)
+  if (!match || !compactMonthNumbers[match[2]]) return value
+  return `${match[1].padStart(2, '0')}.${compactMonthNumbers[match[2]]}.`
 }
 
 function updateLocalizedInterface() {
   setText(document.querySelector('.timeline-title > span'), copy.timeline)
-  if (language !== 'de') return
-  for (const element of document.querySelectorAll('.map-date-chip span, .timeline-title strong, .timeline-now small')) {
-    setText(element, germanDateLabel(element.textContent))
+  if (language === 'de') {
+    for (const element of document.querySelectorAll('.map-date-chip span, .timeline-title strong, .timeline-now small')) {
+      setText(element, germanDateLabel(element.textContent))
+    }
+  }
+  for (const tick of document.querySelectorAll('.timeline-ticks span[data-day]')) {
+    const sourceDay = tick.dataset.day
+    if (shortFormat && !tick.dataset.shortDay) tick.dataset.shortDay = compactDateLabel(sourceDay)
+    const localized = language === 'de' ? germanDateLabel(sourceDay) : sourceDay
+    if (tick.dataset.day !== localized) tick.dataset.day = localized
   }
 }
 
@@ -214,6 +257,21 @@ function startNewsPresentation() {
   dashboard.innerHTML = dashboardMarkup()
   document.body.append(dashboard)
 
+  if (shortFormat) {
+    const brand = document.createElement('div')
+    brand.id = 'news-presentation-brand'
+    brand.setAttribute('aria-label', 'Apyos')
+    brand.innerHTML = `
+      <span class="news-presentation-brand-mark">
+        <img src="/apyos-wordmark.svg" alt="Apyos" />
+        <svg viewBox="0 0 733 212" aria-hidden="true">
+          <path d="M478.428 144.967c2.74-6.499 5.378-12.754 8.048-19.085 1.211.556 2.323 1.104 3.463 1.585 8.421 3.553 17.241 4.437 26.261 3.781 8.559-.622 16.585-2.982 23.683-7.93 9.836-6.857 16.239-16.247 19.765-27.621 2.889-9.318 3.405-18.872 2.411-28.532-1-9.724-3.967-18.761-9.561-26.848-5.548-8.019-12.658-14.111-21.874-17.572-.165-.062-.32-.147-.559-.259 2.636-6.252 5.258-12.472 7.939-18.833 1.126.43 2.226.805 3.289 1.264 20.368 8.785 33.534 24.009 40.019 45.08 3.079 10.006 3.856 20.315 3.336 30.743-.473 9.456-2.115 18.689-5.895 27.396-9.894 22.791-26.894 37.074-51.4 41.861-14.301 2.794-28.518 2.027-42.432-2.558-2.155-.711-4.248-1.612-6.493-2.472" />
+        </svg>
+      </span>
+    `
+    document.body.append(brand)
+  }
+
   let updateQueued = false
   const scheduleUpdate = () => {
     if (updateQueued) return
@@ -245,8 +303,12 @@ function startNewsPresentation() {
 }
 
 if (enabled) {
+  // Imported here rather than at the top of the module so the interactive app,
+  // which loads this file unconditionally, keeps its own font resolution.
+  import('./news-presentation-font.css')
   document.documentElement.lang = language
   document.documentElement.dataset.presentation = 'news'
+  document.documentElement.dataset.newsFormat = shortFormat ? 'short' : 'landscape'
   document.title = copy.documentTitle
   startNewsPresentation()
 }

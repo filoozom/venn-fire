@@ -551,7 +551,7 @@ function Timeline({ frames, timelineEvents, frameIndex, setFrameIndex, playing, 
             aria-label="Incident time"
           />
           <div className="timeline-ticks" aria-hidden="true">
-            {timelineTicks.map((tick, index) => <span key={`${tick.time}-${index}`}>{tick.shortTime}</span>)}
+            {timelineTicks.map((tick, index) => <span data-day={tick.dayLabel} key={`${tick.time}-${index}`}>{tick.shortTime}</span>)}
           </div>
           <div className="timeline-now" style={{ left: `${progress}%` }}>
             <strong>{frame.shortTime}</strong>
@@ -924,6 +924,7 @@ function FireViewer({ runtime, databaseError }) {
   const [importedTracks, setImportedTracks] = useState([])
   const [measureMode, setMeasureMode] = useState(false)
   const [measurement, setMeasurement] = useState({ pointCount: 0, totalMetres: 0 })
+  const shortPresentation = document.documentElement.dataset.newsFormat === 'short'
   const waterSourcePositions = useMemo(() => (runtime.mapLabels ?? [])
     .filter((label) => label.kind === 'water' && Array.isArray(label.position) && label.position.length === 2)
     .map((label) => label.position), [runtime.mapLabels])
@@ -1616,8 +1617,8 @@ function FireViewer({ runtime, databaseError }) {
                     ...waterSourcePositions,
                   ],
                   {
-                    paddingTopLeft: [60, 170],
-                    paddingBottomRight: [60, 185],
+                    paddingTopLeft: shortPresentation ? [54, 235] : [60, 170],
+                    paddingBottomRight: shortPresentation ? [54, 190] : [60, 185],
                     maxZoom: 13,
                   },
                 )}
@@ -1834,7 +1835,20 @@ function FireViewer({ runtime, databaseError }) {
                     <article key={flight.id} className={`flight-card ${isActive ? 'is-active' : ''} ${hasStarted ? '' : 'is-future'}`}>
                       <div className="flight-head">
                         <span className="flight-icon" style={{ '--flight-color': flight.color }}>{flight.type === 'plane' ? <Plane size={17} /> : <Helicopter size={17} />}</span>
-                        <div><strong>{flight.callSign}</strong><small>{flight.label}</small></div>
+                        <div>
+                          <strong>
+                            {flight.countryFlag ? (
+                              <span
+                                className="aircraft-country-flag"
+                                role="img"
+                                aria-label={`${flight.countryName} flag`}
+                                title={flight.countryName}
+                              >{flight.countryFlag}</span>
+                            ) : null}
+                            {flight.callSign}
+                          </strong>
+                          <small>{flight.label}</small>
+                        </div>
                         <span className={`flight-state ${isActive ? 'is-live' : ''}`}>{state.latest ? observationTimeLabel(state.latest.timestampMs, frame.timestampMs) : state.label}</span>
                       </div>
                       <div className="flight-stats"><span><small>24 H FIXES</small><strong>{observationCount ?? '—'}</strong></span><span><small>SELECTED DAY</small><strong>{selectedDayObservationCount ?? '—'}</strong></span><span><small>CLUSTERS</small><strong>{coverageCount ?? '—'}</strong></span><span><small>PHOTOS</small><strong>{photoCount || '—'}</strong></span></div>
@@ -1879,8 +1893,12 @@ function FireViewer({ runtime, databaseError }) {
 }
 
 async function fetchDatabaseResponse(scope) {
+  // no-cache, not no-store: the browser must be allowed to keep the previous
+  // body so it can offer its ETag and take a 304 when the five-minute poll
+  // finds nothing new. no-store forbids storing it, so every poll re-downloaded
+  // the whole dataset.
   const response = await fetch(`/api/data?scope=${encodeURIComponent(scope)}`, {
-    cache: 'no-store',
+    cache: 'no-cache',
     headers: { Accept: 'application/json' },
   })
   if (!response.ok) throw new Error(`Database endpoint returned ${response.status}`)

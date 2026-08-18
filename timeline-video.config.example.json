@@ -3,6 +3,7 @@
   "output": "output/venn-fire-full-timeline.mp4",
   "width": 1920,
   "height": 1080,
+  "captureScale": 2,
   "fps": 30,
   "frameStep": 1,
   "holdFrames": 1,
@@ -29,8 +30,9 @@
   },
   "ffmpegPath": "ffmpeg",
   "codec": "libx264",
-  "preset": "medium",
-  "crf": 20,
+  "preset": "slow",
+  "bitrateMbps": 8,
+  "minimumBitrateMbps": 5,
   "overwrite": false,
   "headless": true
 }

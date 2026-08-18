@@ -44,6 +44,7 @@ import {
   REFRESH_SOURCES,
   routeRecoveryTargets,
 } from '../server/refresh-sources.mjs'
+import { aircraftCountry, countryFlagEmoji } from '../src/aircraftCountries.js'
 import { aircraftObservationEvents, buildEvents, mergeIncidentFlights } from '../src/data.js'
 import {
   nextRefreshWakeAt,
@@ -437,6 +438,14 @@ const displayFlights = mergeIncidentFlights([{ id: 'g10', icao24: '44c1e5', call
 assert.equal(displayFlights.length, 3)
 assert.equal(displayFlights.find((flight) => flight.icao24 === '480999').type, 'helicopter')
 assert.equal(displayFlights.find((flight) => flight.icao24 === '480849').callSign, 'GRZLY81')
+assert.equal(displayFlights.find((flight) => flight.icao24 === '44c1e5').countryCode, 'BE')
+assert.equal(displayFlights.find((flight) => flight.icao24 === '480849').countryCode, 'NL')
+assert.equal(aircraftCountry({ icao24: '3df746', registration: 'D-HNWW' }).code, 'DE')
+assert.equal(aircraftCountry({ icao24: '479d10', registration: 'LN-OYP' }).code, 'NO')
+assert.equal(aircraftCountry({ icao24: '4ab50e', registration: 'SE-MHN' }).code, 'SE')
+assert.equal(aircraftCountry({ icao24: '4bffff', registration: 'SE-MAA' }).code, 'SE')
+assert.equal(aircraftCountry({ callSign: 'GRZLY82', registration: 'D-999' }).code, 'NL')
+assert.equal(countryFlagEmoji('NL'), '🇳🇱')
 const observationEvents = aircraftObservationEvents([
   { ...normalized[0], observedAt: '2026-08-17T08:01:00.000Z' },
   { ...normalized[0], observedAt: '2026-08-17T08:11:00.000Z' },
