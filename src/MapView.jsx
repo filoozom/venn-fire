@@ -215,6 +215,24 @@ export default function MapView({
         duration: 0.8,
       })
     }
+    const getCamera = () => {
+      const center = map.getCenter()
+      return { center: [center.lat, center.lng], zoom: map.getZoom() }
+    }
+    const setCamera = (camera) => {
+      const latitude = Number(camera?.center?.[0])
+      const longitude = Number(camera?.center?.[1])
+      const zoom = Number(camera?.zoom)
+      if (![latitude, longitude, zoom].every(Number.isFinite)) return false
+      const currentCenter = map.getCenter()
+      const unchanged = Math.abs(currentCenter.lat - latitude) < 1e-9
+        && Math.abs(currentCenter.lng - longitude) < 1e-9
+        && Math.abs(map.getZoom() - zoom) < 1e-9
+      if (unchanged) return false
+      map.stop()
+      map.setView([latitude, longitude], zoom, { animate: false })
+      return true
+    }
     const clearMeasurement = () => {
       measurementPointsRef.current = []
       measurementLayerRef.current?.clearLayers()
@@ -225,6 +243,16 @@ export default function MapView({
       zoomOut: () => map.zoomOut(0.75),
       home,
       fitPositions,
+      getCamera,
+      setCamera,
+      focusFire: (scale = 2) => {
+        const outlinePositions = fireOutlineRings.flat()
+        const bounds = outlinePositions.length
+          ? L.latLngBounds(outlinePositions)
+          : L.latLngBounds(effisArea?.rings?.[0] || INCIDENT_MAP_BOUNDS)
+        const zoomDelta = Math.log2(Math.max(1, Number(scale) || 1))
+        map.flyTo(bounds.getCenter(), Math.min(map.getMaxZoom(), map.getZoom() + zoomDelta), { duration: 0.8 })
+      },
       clearMeasurement,
       fire: () => map.flyToBounds(L.latLngBounds(effisArea?.rings?.[0] || INCIDENT_MAP_BOUNDS), {
         paddingTopLeft: [35, 95],

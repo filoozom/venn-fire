@@ -74,6 +74,8 @@ import {
   deriveModisSupportedExtent,
 } from './modisFireEstimate'
 
+const FREEZE_DATABASE_REFRESH = new URLSearchParams(window.location.search).get('freeze-data') === '1'
+
 // Each raw sensor is its own layer and each confidence level its own filter. The
 // Best estimate is separate: its single solid outline follows fixed,
 // documented satellite and repeat-supported aircraft selection rules.
@@ -912,8 +914,12 @@ function FireViewer({ runtime, databaseError }) {
   const frames = runtime.frames
   const displayEvents = runtime.events
   const framesLengthRef = useRef(frames.length)
+  const shortPresentation = document.documentElement.dataset.newsFormat === 'short'
   const [frameIndex, setFrameIndex] = useState(frames.length - 1)
-  const [layers, setLayers] = useState(() => initialLayerState(runtime))
+  const [layers, setLayers] = useState(() => ({
+    ...initialLayerState(runtime),
+    ...(shortPresentation ? { wind: false } : {}),
+  }))
   const [baseMode, setBaseMode] = useState('terrain')
   const [playing, setPlaying] = useState(false)
   const [playbackRate, setPlaybackRate] = useState(1)
@@ -924,11 +930,35 @@ function FireViewer({ runtime, databaseError }) {
   const [importedTracks, setImportedTracks] = useState([])
   const [measureMode, setMeasureMode] = useState(false)
   const [measurement, setMeasurement] = useState({ pointCount: 0, totalMetres: 0 })
-  const shortPresentation = document.documentElement.dataset.newsFormat === 'short'
   const waterSourcePositions = useMemo(() => (runtime.mapLabels ?? [])
     .filter((label) => label.kind === 'water' && Array.isArray(label.position) && label.position.length === 2)
     .map((label) => label.position), [runtime.mapLabels])
+  useEffect(() => {
+    const focusFire = (event) => mapActions?.focusFire?.(event.detail?.scale)
+    const controlCamera = (event) => {
+      if (event.detail?.action === 'get') event.detail.camera = mapActions?.getCamera?.() ?? null
+      if (event.detail?.action === 'set') event.detail.changed = mapActions?.setCamera?.(event.detail.camera) ?? false
+    }
+    window.addEventListener('venn-fire-focus-fire', focusFire)
+    window.addEventListener('venn-fire-map-camera', controlCamera)
+    return () => {
+      window.removeEventListener('venn-fire-focus-fire', focusFire)
+      window.removeEventListener('venn-fire-map-camera', controlCamera)
+    }
+  }, [mapActions])
   const firmsData = runtime.firms
+  // Every footprint projection needs a local origin. FIRMS supplies one, but a
+  // database that has not yet completed a full FIRMS cycle stores the dataset
+  // without it, and dereferencing it there took the whole viewer down with a
+  // blank page. The incident centre is the same reference point, so it stands in.
+  const footprintOrigin = useMemo(() => {
+    const reference = firmsData.locationReference
+    if (Number.isFinite(reference?.latitude) && Number.isFinite(reference?.longitude)) {
+      return { latitude: reference.latitude, longitude: reference.longitude }
+    }
+    const [latitude, longitude] = runtime.incidentCenter ?? []
+    return { latitude: Number(latitude), longitude: Number(longitude) }
+  }, [firmsData.locationReference, runtime.incidentCenter])
   const firmsState = {
     status: databaseError ? 'stale' : 'live',
     configured: true,
@@ -1085,8 +1115,12 @@ function FireViewer({ runtime, databaseError }) {
         : Math.min(currentIndex, frames.length - 1)
     ))
     framesLengthRef.current = frames.length
-    setLayers((current) => ({ ...initialLayerState(runtime), ...current }))
-  }, [frames.length, runtime])
+    setLayers((current) => ({
+      ...initialLayerState(runtime),
+      ...current,
+      ...(shortPresentation ? { wind: false } : {}),
+    }))
+  }, [frames.length, runtime, shortPresentation])
 
   useEffect(() => {
     if (!playing) return undefined
@@ -1254,10 +1288,10 @@ function FireViewer({ runtime, databaseError }) {
     coreDetections: bestEstimateCoreDetections,
     aircraftEdgeCandidates: [],
     frameTimestampMs: frame.timestampMs,
-    origin: firmsData.locationReference,
+    origin: footprintOrigin,
     gridCellM: MODIS_EXTENT_GRID_CELL_M,
     timeBucketMs: MODIS_EXTENT_TIME_BUCKET_MS,
-  }), [firmsDetectionsAtTime, bestEstimateCoreDetections, frame.timestampMs, firmsData.locationReference])
+  }), [firmsDetectionsAtTime, bestEstimateCoreDetections, frame.timestampMs, footprintOrigin])
   const aircraftReferenceCoreDetections = useMemo(
     () => [...bestEstimateCoreDetections, ...seedModisSupportedExtent.detections],
     [bestEstimateCoreDetections, seedModisSupportedExtent.detections],
@@ -1265,12 +1299,9 @@ function FireViewer({ runtime, databaseError }) {
   const aircraftReferenceOutlineRings = useMemo(
     () => footprintOutlineRings(aircraftReferenceCoreDetections, {
       gridCellM: 50,
-      origin: {
-        latitude: firmsData.locationReference.latitude,
-        longitude: firmsData.locationReference.longitude,
-      },
+      origin: footprintOrigin,
     }),
-    [aircraftReferenceCoreDetections, firmsData.locationReference],
+    [aircraftReferenceCoreDetections, footprintOrigin],
   )
 
   const aircraftEstimateFlights = useMemo(() => visibleDisplayFlights.map((flight) => ({
@@ -1284,20 +1315,20 @@ function FireViewer({ runtime, databaseError }) {
     detections: aircraftReferenceCoreDetections,
     outlineRings: aircraftReferenceOutlineRings,
     frameTimestampMs: frame.timestampMs,
-    origin: firmsData.locationReference,
+    origin: footprintOrigin,
     gridCellM: AIRCRAFT_EDGE_GRID_CELL_M,
     timeBucketMs: AIRCRAFT_EDGE_TIME_BUCKET_MS,
-  }), [aircraftEstimateFlights, aircraftReferenceCoreDetections, aircraftReferenceOutlineRings, frame.timestampMs, firmsData.locationReference])
+  }), [aircraftEstimateFlights, aircraftReferenceCoreDetections, aircraftReferenceOutlineRings, frame.timestampMs, footprintOrigin])
 
   const modisSupportedExtent = useMemo(() => deriveModisSupportedExtent({
     detections: firmsDetectionsAtTime,
     coreDetections: bestEstimateCoreDetections,
     aircraftEdgeCandidates: aircraftSupportedEdge.candidates,
     frameTimestampMs: frame.timestampMs,
-    origin: firmsData.locationReference,
+    origin: footprintOrigin,
     gridCellM: MODIS_EXTENT_GRID_CELL_M,
     timeBucketMs: MODIS_EXTENT_TIME_BUCKET_MS,
-  }), [firmsDetectionsAtTime, bestEstimateCoreDetections, aircraftSupportedEdge.candidates, frame.timestampMs, firmsData.locationReference])
+  }), [firmsDetectionsAtTime, bestEstimateCoreDetections, aircraftSupportedEdge.candidates, frame.timestampMs, footprintOrigin])
 
   // There is one estimate, not separate satellite and aircraft outlines.
   // Qualifying MODIS pixels and the conservative repeat-supported aircraft lobe
@@ -1311,14 +1342,11 @@ function FireViewer({ runtime, databaseError }) {
   const fireOutlineRings = useMemo(
     () => footprintOutlineRings(bestEstimateDetections, {
       gridCellM: 50,
-      origin: {
-        latitude: firmsData.locationReference.latitude,
-        longitude: firmsData.locationReference.longitude,
-      },
+      origin: footprintOrigin,
       supportPolygons: aircraftSupportPolygons,
       supportCells: sentinelSupportCells,
     }),
-    [bestEstimateDetections, aircraftSupportPolygons, sentinelSupportCells, firmsData.locationReference],
+    [bestEstimateDetections, aircraftSupportPolygons, sentinelSupportCells, footprintOrigin],
   )
   const visibleFirmsDetections = useMemo(() => firmsDetectionsAtTime.filter((detection) => (
     layers[FIRMS_LAYER_KEYS[detection.sensorKey]]
@@ -1372,13 +1400,10 @@ function FireViewer({ runtime, databaseError }) {
   // boundary, so the number and the map geometry cannot disagree.
   const bestEstimateArea = useMemo(() => estimateFootprintArea(bestEstimateDetections, {
     gridCellM: 50,
-    origin: {
-      latitude: firmsData.locationReference.latitude,
-      longitude: firmsData.locationReference.longitude,
-    },
+    origin: footprintOrigin,
     supportPolygons: aircraftSupportPolygons,
     supportCells: sentinelSupportCells,
-  }), [bestEstimateDetections, aircraftSupportPolygons, sentinelSupportCells, firmsData.locationReference])
+  }), [bestEstimateDetections, aircraftSupportPolygons, sentinelSupportCells, footprintOrigin])
   const bestEstimateAreaHa = bestEstimateArea.unionHa
   const aircraftSupportIncluded = bestEstimateArea.polygonSupportCellCount > 0
   const sentinelSupportIncluded = sentinelSupportCells.length > 0
@@ -1393,14 +1418,11 @@ function FireViewer({ runtime, databaseError }) {
         color: sensor.color,
         detectionCount: forSensor.length,
         areaHa: estimateFootprintArea(forSensor, {
-          origin: {
-            latitude: firmsData.locationReference.latitude,
-            longitude: firmsData.locationReference.longitude,
-          },
+          origin: footprintOrigin,
         }).unionHa,
       }
     })
-    .filter((estimate) => estimate.detectionCount > 0), [visibleFirmsDetections, layers, firmsData.locationReference])
+    .filter((estimate) => estimate.detectionCount > 0), [visibleFirmsDetections, layers, footprintOrigin])
 
   // A range across sensors, never an average or a total. Independent sensors
   // disagreeing is information, not noise to be smoothed away.
@@ -1440,6 +1462,7 @@ function FireViewer({ runtime, databaseError }) {
         <div className="incident-heading">
           <div className="incident-location"><MapPin size={14} /><span>HIGH FENS</span><i>/</i><b>BAELEN · JALHAY</b></div>
           <span className="reference-badge"><Sparkles size={11} /> OBSERVATION VIEW</span>
+          <a className="header-credit" href="https://apyos.com" target="_blank" rel="noreferrer"><img src="/apyos-wordmark.svg" alt="Apyos" width="69" height="20" decoding="async" /></a>
         </div>
 
         <div className="header-actions">
@@ -1935,6 +1958,7 @@ function AsyncViewerShell({ databaseError, onRetry }) {
         <div className="incident-heading">
           <div className="incident-location"><Database size={14} /><b>LIVE INCIDENT VIEW</b></div>
           <span className="reference-badge"><Sparkles size={11} /> OBSERVATION VIEW</span>
+          <a className="header-credit" href="https://apyos.com" target="_blank" rel="noreferrer"><img src="/apyos-wordmark.svg" alt="Apyos" width="69" height="20" decoding="async" /></a>
         </div>
 
         <div className="header-actions">
@@ -2061,10 +2085,12 @@ function App() {
     }
 
     refreshDatabaseView()
-    const timer = window.setInterval(refreshDatabaseView, FIVE_MINUTES_MS)
+    const timer = FREEZE_DATABASE_REFRESH
+      ? null
+      : window.setInterval(refreshDatabaseView, FIVE_MINUTES_MS)
     return () => {
       cancelled = true
-      window.clearInterval(timer)
+      if (timer != null) window.clearInterval(timer)
     }
   }, [retryCount])
 

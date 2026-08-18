@@ -1,5 +1,7 @@
 import { DuplicateMessageError, QueueClient } from '@vercel/queue'
 
+import { REFRESH_INTERVAL_MS, REFRESH_OFFSET_MS, nextRefreshWakeAt } from './refresh-cadence.mjs'
+
 import {
   databaseQuery,
   ensureDatabaseSchema,
@@ -8,9 +10,9 @@ import {
 } from './database.mjs'
 
 export const REFRESH_QUEUE_TOPIC = 'venn-fire-refresh'
-export const REFRESH_INTERVAL_MS = 5 * 60_000
-export const REFRESH_OFFSET_MS = 2 * 60_000
 export const REFRESH_SCHEDULER_DATASET = 'refresh-scheduler'
+// Re-exported so existing importers keep one path to the cadence.
+export { REFRESH_INTERVAL_MS, REFRESH_OFFSET_MS, nextRefreshWakeAt }
 
 // Push consumers are deployment-pinned by Vercel. Postgres records which
 // deployment owns the active chain so an older deployment stops at its next
@@ -18,11 +20,6 @@ export const REFRESH_SCHEDULER_DATASET = 'refresh-scheduler'
 const queue = new QueueClient({ region: 'fra1' })
 
 export const handleRefreshQueueCallback = queue.handleNodeCallback
-
-export function nextRefreshWakeAt(nowMs = Date.now()) {
-  const slot = Math.floor((nowMs - REFRESH_OFFSET_MS) / REFRESH_INTERVAL_MS) + 1
-  return slot * REFRESH_INTERVAL_MS + REFRESH_OFFSET_MS
-}
 
 export function refreshSchedulerDeployment(environment = process.env) {
   const deploymentId = environment.VERCEL_DEPLOYMENT_ID?.trim()

@@ -1,0 +1,11 @@
+.git
+.github
+.vercel
+node_modules
+dist
+output
+*.log
+.env
+.env.*
+docs
+timeline-video.config.json

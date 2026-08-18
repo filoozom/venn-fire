@@ -58,12 +58,6 @@
       ]
     }
   },
-  "crons": [
-    {
-      "path": "/api/refresh",
-      "schedule": "11 3 * * *"
-    }
-  ],
   "headers": [
     {
       "source": "/api/refresh",

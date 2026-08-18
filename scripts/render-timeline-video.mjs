@@ -38,6 +38,7 @@ const DEFAULT_CONFIG = Object.freeze({
   language: 'de',
   mapFocus: 'default',
   mapZoomSteps: null,
+  mapZoomFactor: null,
   layers: {},
   ffmpegPath: 'ffmpeg',
   codec: 'libx264',
@@ -80,6 +81,7 @@ Options:
   --language <de|en>          News-presentation language (default: de)
   --map-focus <default|incident|fire>
   --map-zoom-steps <number>   Extra zoom-in steps after focusing the map
+  --map-zoom-factor <number>  Exact incident-centred linear zoom factor
   --layer "Label=on|off"       Override a layer by its exact visible label; repeatable
   --codec <name>              FFmpeg video codec (default: libx264)
   --preset <name>             FFmpeg codec preset (default: slow)
@@ -190,6 +192,12 @@ function validateConfig(config) {
   if (config.mapZoomSteps != null) {
     normalized.mapZoomSteps = finiteNumber(config.mapZoomSteps, 'mapZoomSteps', { integer: true, min: 0, max: 8 })
   }
+  if (config.mapZoomFactor != null) {
+    normalized.mapZoomFactor = finiteNumber(config.mapZoomFactor, 'mapZoomFactor', { min: 1, max: 16 })
+  }
+  if (normalized.mapZoomSteps != null && normalized.mapZoomFactor != null) {
+    fail('Use mapZoomSteps or mapZoomFactor, not both')
+  }
   if (!config.layers || typeof config.layers !== 'object' || Array.isArray(config.layers)) fail('layers must be a JSON object')
   normalized.layers = Object.fromEntries(Object.entries(config.layers).map(([label, enabled]) => [
     label,
@@ -227,7 +235,7 @@ async function configurationFromArguments(arguments_) {
     ['--start-frame', 'startFrame'], ['--end-frame', 'endFrame'], ['--start-time', 'startTime'],
     ['--end-time', 'endTime'], ['--settle-ms', 'settleMs'], ['--asset-timeout-ms', 'assetTimeoutMs'],
     ['--page-timeout-ms', 'pageTimeoutMs'], ['--base-map', 'baseMap'], ['--presentation', 'presentation'], ['--language', 'language'],
-    ['--map-focus', 'mapFocus'], ['--map-zoom-steps', 'mapZoomSteps'],
+    ['--map-focus', 'mapFocus'], ['--map-zoom-steps', 'mapZoomSteps'], ['--map-zoom-factor', 'mapZoomFactor'],
     ['--codec', 'codec'],
     ['--preset', 'preset'], ['--bitrate-mbps', 'bitrateMbps'],
     ['--minimum-bitrate-mbps', 'minimumBitrateMbps'], ['--ffmpeg', 'ffmpegPath'],
@@ -276,6 +284,7 @@ function formatTimestamp(timestampMs) {
 
 function presentationUrl(config) {
   const url = new URL(config.url)
+  if (config.freezeData) url.searchParams.set('freeze-data', '1')
   if (isNewsPresentation(config)) {
     url.searchParams.set('presentation', config.presentation)
     url.searchParams.set('lang', config.language)
@@ -292,13 +301,8 @@ async function pathExists(path) {
   }
 }
 
-async function applyViewerConfiguration(page, config) {
-  if (config.baseMap && config.baseMap !== 'default') {
-    const labels = { terrain: 'Map', satellite: 'Satellite', topo: 'Topo' }
-    await page.getByRole('group', { name: 'Base map' }).getByRole('button', { name: labels[config.baseMap] }).click()
-  }
-
-  for (const [label, enabled] of Object.entries(config.layers)) {
+async function applyLayerOverrides(page, layers) {
+  for (const [label, enabled] of Object.entries(layers)) {
     const result = await page.evaluate(({ exactLabel, expected }) => {
       const normalized = (value) => value?.replace(/\s+/g, ' ').trim()
       const layerButton = [...document.querySelectorAll('.layer-row')].find((element) => (
@@ -328,6 +332,15 @@ async function applyViewerConfiguration(page, config) {
     }, { exactLabel: label, expected: enabled })
     if (!result.found) fail(`Layer "${label}" was not found. Available labels: ${result.available.join(', ')}`)
   }
+}
+
+async function applyViewerConfiguration(page, config) {
+  if (config.baseMap && config.baseMap !== 'default') {
+    const labels = { terrain: 'Map', satellite: 'Satellite', topo: 'Topo' }
+    await page.getByRole('group', { name: 'Base map' }).getByRole('button', { name: labels[config.baseMap] }).click()
+  }
+
+  await applyLayerOverrides(page, config.layers)
 
   await page.evaluate(() => {
     const sidebar = document.querySelector('.left-sidebar')
@@ -711,6 +724,23 @@ const NEWS_PRESENTATION_CSS = `
   }
 `
 
+async function readMapCamera(page) {
+  return page.evaluate(() => {
+    const detail = { action: 'get', camera: null }
+    window.dispatchEvent(new CustomEvent('venn-fire-map-camera', { detail }))
+    return detail.camera
+  })
+}
+
+async function restoreMapCamera(page, camera) {
+  if (!camera) return false
+  return page.evaluate((targetCamera) => {
+    const detail = { action: 'set', camera: targetCamera, changed: false }
+    window.dispatchEvent(new CustomEvent('venn-fire-map-camera', { detail }))
+    return detail.changed
+  }, camera)
+}
+
 async function applyPresentation(page, config) {
   if (isNewsPresentation(config)) {
     await page.waitForSelector('#news-presentation-dashboard', { timeout: config.pageTimeoutMs })
@@ -774,7 +804,14 @@ async function applyPresentation(page, config) {
     await page.locator('button[aria-label="Zoom in"]').evaluate((button) => button.click())
     await page.waitForTimeout(180)
   }
+  if (config.mapZoomFactor != null) {
+    await page.evaluate((scale) => {
+      window.dispatchEvent(new CustomEvent('venn-fire-focus-fire', { detail: { scale } }))
+    }, config.mapZoomFactor)
+    await page.waitForTimeout(950)
+  }
   await page.evaluate(() => new Promise((resolvePaint) => requestAnimationFrame(() => requestAnimationFrame(resolvePaint))))
+  return readMapCamera(page)
 }
 
 async function updateNewsPresentation(page, config) {
@@ -856,29 +893,74 @@ async function updateNewsPresentation(page, config) {
   })
 }
 
-async function selectTimelineFrame(page, index, config) {
-  await page.locator('.timeline-range').evaluate((input, value) => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
-    setter.call(input, String(value))
-    input.dispatchEvent(new Event('input', { bubbles: true }))
-    input.dispatchEvent(new Event('change', { bubbles: true }))
-  }, index)
-
-  await page.waitForFunction((expected) => Number(document.querySelector('.timeline-range')?.value) === expected, index, {
-    timeout: config.pageTimeoutMs,
-  })
+async function selectTimelineFrame(page, index, config, camera = null) {
+  const selectionTimeoutMs = Math.min(config.pageTimeoutMs, 5_000)
+  let selected = false
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    await page.locator('.timeline-range').evaluate((input, value) => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+      setter.call(input, String(value))
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+    }, index)
+    try {
+      await page.waitForFunction((expected) => Number(document.querySelector('.timeline-range')?.value) === expected, index, {
+        timeout: selectionTimeoutMs,
+      })
+      selected = true
+      break
+    } catch (error) {
+      if (attempt === 4) {
+        const state = await page.locator('.timeline-range').evaluate((input) => ({
+          value: input.value,
+          min: input.min,
+          max: input.max,
+        }))
+        fail(`Timeline frame ${index} did not stick after ${attempt} attempts (slider ${state.value}, range ${state.min}-${state.max}): ${error.message}`)
+      }
+      await page.waitForTimeout(100 * attempt)
+    }
+  }
+  if (!selected) fail(`Timeline frame ${index} could not be selected`)
   await page.evaluate(() => new Promise((resolvePaint) => requestAnimationFrame(() => requestAnimationFrame(resolvePaint))))
+  await applyLayerOverrides(page, config.layers)
+  const cameraChanged = await restoreMapCamera(page, camera)
+  if (cameraChanged) {
+    await page.evaluate(() => new Promise((resolvePaint) => requestAnimationFrame(() => requestAnimationFrame(resolvePaint))))
+  }
   if (config.settleMs) await page.waitForTimeout(config.settleMs)
 
   if (config.waitForAssets) {
-    await page.waitForFunction(() => {
-      const images = [...document.querySelectorAll('img.leaflet-image-layer')].filter((image) => {
-        const bounds = image.getBoundingClientRect()
-        const style = getComputedStyle(image)
-        return style.display !== 'none' && style.visibility !== 'hidden' && bounds.width > 0 && bounds.height > 0
-      })
-      return images.every((image) => image.complete && image.naturalWidth > 0)
-    }, null, { timeout: config.assetTimeoutMs })
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        await page.waitForFunction(() => {
+          const images = [...document.querySelectorAll('img.leaflet-image-layer')].filter((image) => {
+            const bounds = image.getBoundingClientRect()
+            const style = getComputedStyle(image)
+            return style.display !== 'none' && style.visibility !== 'hidden' && bounds.width > 0 && bounds.height > 0
+          })
+          return images.every((image) => image.complete && image.naturalWidth > 0)
+        }, null, { timeout: config.assetTimeoutMs })
+        break
+      } catch (error) {
+        const assets = await page.evaluate((reload) => [...document.querySelectorAll('img.leaflet-image-layer')].flatMap((image) => {
+          const bounds = image.getBoundingClientRect()
+          const style = getComputedStyle(image)
+          const visible = style.display !== 'none' && style.visibility !== 'hidden' && bounds.width > 0 && bounds.height > 0
+          if (!visible || (image.complete && image.naturalWidth > 0)) return []
+          const src = image.currentSrc || image.src
+          if (reload && src) {
+            image.removeAttribute('src')
+            image.src = src
+          }
+          return [{ src, complete: image.complete, naturalWidth: image.naturalWidth }]
+        }), attempt < 3)
+        if (attempt === 3) {
+          fail(`Timeline frame ${index} has ${assets.length} raster asset(s) that did not load after ${attempt} attempts: ${JSON.stringify(assets)} (${error.message})`)
+        }
+        await page.waitForTimeout(250 * attempt)
+      }
+    }
   }
   await updateNewsPresentation(page, config)
 }
@@ -1071,7 +1153,7 @@ async function main() {
       html, body, button, input, a { cursor: none !important; }
     ` })
     await applyViewerConfiguration(page, config)
-    await applyPresentation(page, config)
+    const renderCamera = await applyPresentation(page, config)
 
     const coreResponse = apiPayloads.get('core') ?? apiPayloads.get('all')
     const incident = datasetPayload(coreResponse, 'incident-config')
@@ -1089,7 +1171,7 @@ async function main() {
     console.log(`Frozen at ${coreResponse?.generatedAt ?? 'unknown'}; ${sliderMax + 1} source frames available`)
     if (previewPath) {
       console.log(`Capturing preview at ${formatTimestamp(timelineStartMs + lastFrame * FIVE_MINUTES_MS)} -> ${previewPath}`)
-      await selectTimelineFrame(page, lastFrame, config)
+      await selectTimelineFrame(page, lastFrame, config, renderCamera)
       await page.screenshot({ path: previewPath, type: 'png', animations: 'disabled', fullPage: false })
       if (pageErrors.length) fail(`The page raised ${pageErrors.length} error(s): ${pageErrors.join(' | ')}`)
       renderSucceeded = true
@@ -1105,7 +1187,7 @@ async function main() {
     let lastProgressAt = 0
     for (let offset = 0; offset < frames.length; offset += 1) {
       const frameIndex = frames[offset]
-      await selectTimelineFrame(page, frameIndex, config)
+      await selectTimelineFrame(page, frameIndex, config, renderCamera)
       const png = await page.screenshot({ type: 'png', animations: 'disabled', fullPage: false })
       if (!firstPng) {
         firstPng = png
@@ -1180,6 +1262,8 @@ async function main() {
         language: config.language,
         mapFocus: config.mapFocus === 'default' && isNewsPresentation(config) ? 'fire-and-water-sources' : config.mapFocus,
         mapZoomSteps: config.mapZoomSteps ?? 0,
+        mapZoomFactor: config.mapZoomFactor,
+        lockedMapCamera: renderCamera,
         newsWindSummary: 'Latest available Mont Rigi RMI station observation; model-grid wind excluded',
         layerOverrides: config.layers,
         waitForAircraft: config.waitForAircraft,

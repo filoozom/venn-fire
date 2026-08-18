@@ -14,27 +14,31 @@ importers:
       '@vercel/queue':
         specifier: 0.4.0
         version: 0.4.0
-      '@vitejs/plugin-react':
-        specifier: latest
-        version: 6.0.5(vite@8.2.1)
       fflate:
         specifier: ^0.8.3
         version: 0.8.3
       geotiff:
         specifier: ^3.0.5
         version: 3.0.5
-      leaflet:
-        specifier: ^1.9.4
-        version: 1.9.4
-      lucide-react:
-        specifier: latest
-        version: 1.31.0(react@19.2.8)
       pg:
         specifier: ^8.23.0
         version: 8.23.0
       proj4:
         specifier: ^2.21.0
         version: 2.21.0(geotiff@3.0.5)
+    devDependencies:
+      '@playwright/test':
+        specifier: latest
+        version: 1.62.1
+      '@vitejs/plugin-react':
+        specifier: latest
+        version: 6.0.5(vite@8.2.1)
+      leaflet:
+        specifier: ^1.9.4
+        version: 1.9.4
+      lucide-react:
+        specifier: latest
+        version: 1.31.0(react@19.2.8)
       react:
         specifier: latest
         version: 19.2.8
@@ -44,10 +48,6 @@ importers:
       vite:
         specifier: latest
         version: 8.2.1
-    devDependencies:
-      '@playwright/test':
-        specifier: latest
-        version: 1.62.1
 
 packages:
 

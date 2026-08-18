@@ -1,0 +1,58 @@
+# Deployment behind an existing Traefik, using a database that already exists.
+#
+# Unlike docker-compose.yml this defines no postgres service and creates no
+# volume: it is the app container only, pointed at DATABASE_URL. Nothing here
+# touches Traefik's own configuration -- the container just joins its network and
+# describes itself with labels.
+#
+#   docker compose -f docker-compose.traefik.yml up -d --build
+#
+# Verify before the first run:
+#   TRAEFIK_NETWORK   docker network ls
+#   TRAEFIK_ENTRYPOINT / TRAEFIK_CERT_RESOLVER
+#                     docker inspect <traefik> | grep -iE 'entrypoints|certresolver'
+
+name: venn-fire
+
+services:
+  app:
+    build:
+      context: .
+      target: runtime
+    image: venn-fire:local
+    restart: unless-stopped
+    environment:
+      # Points at the existing database. No schema is dropped or rewritten: the
+      # migrations are CREATE TABLE IF NOT EXISTS and are a no-op once the
+      # tables exist.
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-true}
+
+      # Leave this false while another deployment still refreshes the same
+      # database. Two writers on one database is the one way this deployment
+      # could disturb existing data.
+      REFRESH_ENABLED: ${REFRESH_ENABLED:-false}
+      REFRESH_ON_BOOT: ${REFRESH_ON_BOOT:-false}
+
+      FIRMS_MAP_KEY: ${FIRMS_MAP_KEY:-}
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-10}
+      TZ: ${TZ:-Europe/Brussels}
+    networks:
+      - traefik
+    # No ports: published. Traefik reaches the container on the shared network,
+    # so nothing is exposed on the host.
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ${TRAEFIK_NETWORK:-traefik}
+      traefik.http.routers.venn-fire.rule: Host(`${APP_HOST:-venn.apyos.com}`)
+      traefik.http.routers.venn-fire.entrypoints: ${TRAEFIK_ENTRYPOINT:-websecure}
+      traefik.http.routers.venn-fire.tls: "true"
+      traefik.http.routers.venn-fire.tls.certresolver: ${TRAEFIK_CERT_RESOLVER:-letsencrypt}
+      traefik.http.services.venn-fire.loadbalancer.server.port: "3000"
+      # The app already sets its own cache and compression headers per route;
+      # Traefik should not add or rewrite them.
+
+networks:
+  traefik:
+    external: true
+    name: ${TRAEFIK_NETWORK:-traefik}

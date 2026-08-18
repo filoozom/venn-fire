@@ -1,0 +1,46 @@
+name: venn-fire
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-venn-fire}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-venn-fire}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-venn-fire} -d ${POSTGRES_DB:-venn-fire}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    # Not published by default: only the app needs to reach it. Uncomment to
+    # inspect the database from the host.
+    # ports:
+    #   - "127.0.0.1:5432:5432"
+
+  app:
+    build:
+      context: .
+      target: runtime
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-venn-fire}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-venn-fire}
+      # The server creates and migrates its own schema on start.
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-true}
+      # Internal five-minute source refresh, replacing the Vercel queue chain.
+      REFRESH_ENABLED: ${REFRESH_ENABLED:-true}
+      REFRESH_ON_BOOT: ${REFRESH_ON_BOOT:-false}
+      # Optional upstream credentials. Sources needing a key are skipped without.
+      FIRMS_MAP_KEY: ${FIRMS_MAP_KEY:-}
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-10}
+      TZ: ${TZ:-Europe/Brussels}
+    ports:
+      - "${APP_PORT:-3000}:3000"
+
+volumes:
+  postgres-data:

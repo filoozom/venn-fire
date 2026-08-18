@@ -153,6 +153,8 @@ Required production variables:
 
 For a self-hosted cutover, schema bootstrap, full history/artifact copy and Vercel environment replacement are documented in [`docs/self-hosted-postgres.md`](docs/self-hosted-postgres.md). The source database must allow one final read; the copy cannot bypass a provider-level quota suspension.
 
+To run the whole stack off Vercel, `docker compose up -d --build` builds a container that serves the client, routes the read API through the same `api/` handlers and refreshes sources on the shared cadence in place of the queue chain. Setup, the required `incident-config` seeding step and the differences from the Vercel deployment are in [`docs/self-hosting-docker.md`](docs/self-hosting-docker.md).
+
 Internal source and integration limitations are maintained in [`docs/known-source-limits.md`](docs/known-source-limits.md), and the retained raster format and selection rule are documented in [`docs/sentinel2-analysis.md`](docs/sentinel2-analysis.md). Internal limitations are deliberately excluded from the public viewer and its API payloads.
 
 Do not add a CDN cache in front of `/api/data`, `/api/live-reports`, `/api/live-situation`, `/api/firms-situation` or `/api/refresh`.

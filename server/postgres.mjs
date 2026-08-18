@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+
 import pg from 'pg'
 import { attachDatabasePool } from '@vercel/functions'
 
@@ -27,21 +29,37 @@ export function postgresUrl(environment = process.env) {
     || ''
 }
 
+// Docker secrets arrive as files rather than environment values, which is the
+// convention the self-hosted compose already uses for the Postgres passwords.
+// Reading <KEY>_FILE lets a deployment keep its credentials and CA on disk
+// instead of copying them into the environment.
+const fileValues = new Map()
+
+function environmentValue(environment, key) {
+  const direct = environment[key]?.trim()
+  if (direct) return direct
+  const path = environment[`${key}_FILE`]?.trim()
+  if (!path) return ''
+  if (!fileValues.has(path)) fileValues.set(path, readFileSync(path, 'utf8').trim())
+  return fileValues.get(path)
+}
+
 function requiredEnvironmentValue(environment, key) {
-  const value = environment[key]?.trim()
-  if (!value) throw new Error(`${key} is required when PG_CA_PEM is configured`)
+  const value = environmentValue(environment, key)
+  if (!value) throw new Error(`${key} (or ${key}_FILE) is required when PG_CA_PEM is configured`)
   return value
 }
 
 function selfHostedValues(environment = process.env) {
-  if (!environment.PG_CA_PEM?.trim()) return null
+  const ca = environmentValue(environment, 'PG_CA_PEM')
+  if (!ca) return null
   return {
     host: requiredEnvironmentValue(environment, 'PGHOST'),
     port: positiveInteger(environment.PGPORT, SELF_HOSTED_DEFAULTS.port, 65_535),
     user: environment.PGUSER?.trim() || SELF_HOSTED_DEFAULTS.user,
     password: requiredEnvironmentValue(environment, 'PGPASSWORD'),
     database: environment.PGDATABASE?.trim() || SELF_HOSTED_DEFAULTS.database,
-    ca: environment.PG_CA_PEM.replace(/\\n/g, '\n').trim(),
+    ca: ca.replace(/\\n/g, '\n').trim(),
     servername: environment.PGSSL_SERVERNAME?.trim() || SELF_HOSTED_DEFAULTS.servername,
   }
 }
