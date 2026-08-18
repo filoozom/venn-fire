@@ -475,12 +475,11 @@ const NEWS_PRESENTATION_CSS = `
     position: fixed;
     z-index: 1600;
     top: 30px;
-    left: 50%;
+    left: 34px;
     width: 720px;
     color: #18372d;
     font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     pointer-events: none;
-    transform: translateX(-50%);
   }
 
   #video-news-dashboard .news-summary {
@@ -646,7 +645,6 @@ async function applyPresentation(page, config) {
               </i>
               <i class="news-wind-copy"><b>—</b><em>two nearest stations</em></i>
             </strong>
-            <small>Vector mean from two weather stations</small>
           </article>
           <article class="news-stat">
             <span>Announced area</span>

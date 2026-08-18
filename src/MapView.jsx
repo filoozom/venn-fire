@@ -188,7 +188,7 @@ export default function MapView({
     tileRef.current = tile
 
     const home = () => map.fitBounds(INCIDENT_MAP_BOUNDS, INCIDENT_MAP_PADDING)
-    const fitPositions = (positions = []) => {
+    const fitPositions = (positions = [], options = {}) => {
       const valid = positions.filter((position) => (
         Array.isArray(position)
         && Number.isFinite(Number(position[0]))
@@ -200,9 +200,9 @@ export default function MapView({
         return
       }
       map.flyToBounds(L.latLngBounds(valid), {
-        paddingTopLeft: [35, 95],
-        paddingBottomRight: [35, 185],
-        maxZoom: 14,
+        paddingTopLeft: options.paddingTopLeft ?? [35, 95],
+        paddingBottomRight: options.paddingBottomRight ?? [35, 185],
+        maxZoom: options.maxZoom ?? 14,
         duration: 0.8,
       })
     }

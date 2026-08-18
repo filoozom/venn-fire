@@ -1609,11 +1609,18 @@ function FireViewer({ runtime, databaseError }) {
             {waterSourcePositions.length > 0 && (
               <button
                 type="button"
-                onClick={() => mapActions?.fitPositions?.([
-                  runtime.incidentCenter,
-                  ...fireOutlineRings.flat(),
-                  ...waterSourcePositions,
-                ])}
+                onClick={() => mapActions?.fitPositions?.(
+                  [
+                    runtime.incidentCenter,
+                    ...fireOutlineRings.flat(),
+                    ...waterSourcePositions,
+                  ],
+                  {
+                    paddingTopLeft: [60, 170],
+                    paddingBottomRight: [60, 185],
+                    maxZoom: 13,
+                  },
+                )}
                 aria-label="Show fire and water sources"
               >
                 <Droplets size={17} />

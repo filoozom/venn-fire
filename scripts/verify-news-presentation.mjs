@@ -22,6 +22,7 @@ try {
       viewport: { width: window.innerWidth, height: window.innerHeight },
       map: bounds('.map-region'),
       dashboard: bounds('#news-presentation-dashboard'),
+      summaryTextAlign: getComputedStyle(document.querySelector('#news-presentation-dashboard .news-stat')).textAlign,
       headerDisplay: getComputedStyle(document.querySelector('.app-header')).display,
       feedItems: document.querySelectorAll('#news-presentation-dashboard .news-update').length,
       wind: document.querySelector('#news-presentation-dashboard .news-wind-copy')?.textContent,
@@ -61,10 +62,11 @@ try {
     || !/aus \d+°/u.test(state.wind) || state.announced === '—' || state.estimated === '—') {
     throw new Error(`News summary is incomplete: ${JSON.stringify(state)}`)
   }
-  const dashboardCenter = state.dashboard.x + state.dashboard.width / 2
-  if (Math.abs(dashboardCenter - state.viewport.width / 2) > 1
-    || state.language !== 'de' || state.timelineTitle !== 'Zeitverlauf des Einsatzes') {
-    throw new Error(`News summary is not centred/localized: ${JSON.stringify(state)}`)
+  if (state.dashboard.x !== 34 || state.summaryTextAlign !== 'center'
+    || state.language !== 'de' || state.timelineTitle !== 'Zeitverlauf des Einsatzes'
+    || !/Unsere Beste Schätzung/u.test(state.dashboardText)
+    || /Vektormittel aus zwei Messstationen/u.test(state.dashboardText)) {
+    throw new Error(`News summary is not aligned/localized: ${JSON.stringify(state)}`)
   }
   if (state.gridMarkers !== 0 || state.waterLabels.length < 2 || state.waterLabels.some((label) => !label.visible)) {
     throw new Error(`Map grid/water context is incorrect: ${JSON.stringify(state)}`)

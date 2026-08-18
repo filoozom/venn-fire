@@ -8,27 +8,25 @@ const translations = {
   de: {
     announcedArea: 'Gemeldete Fläche',
     announcedAreaSource: 'Offizielle öffentliche Meldungen',
-    bestEstimate: 'Beste Schätzung',
+    bestEstimate: 'Unsere Beste Schätzung',
     bestEstimateSource: 'Aus Beobachtungen abgeleitete Kontur',
     documentTitle: 'Zeitverlauf des Vennbrands | Venn Fire Watch',
     meanWind: 'Mittlerer beobachteter Wind',
     noConcurrentReadings: 'Keine zwei zeitgleichen Messungen',
     timeline: 'Zeitverlauf des Einsatzes',
     twoNearestStations: 'Zwei nächstgelegene Messstationen',
-    twoStationMean: 'Vektormittel aus zwei Messstationen',
     vectorMean: 'Vektormittel',
   },
   en: {
     announcedArea: 'Announced area',
     announcedAreaSource: 'Official public reports',
-    bestEstimate: 'Best estimate',
+    bestEstimate: 'Our best estimate',
     bestEstimateSource: 'Derived observation outline',
     documentTitle: 'High Fens wildfire timeline | Venn Fire Watch',
     meanWind: 'Mean observed wind',
     noConcurrentReadings: 'No two concurrent observations',
     timeline: 'Incident timeline',
     twoNearestStations: 'Two nearest weather stations',
-    twoStationMean: 'Vector mean from two weather stations',
     vectorMean: 'vector mean',
   },
 }
@@ -60,7 +58,6 @@ function dashboardMarkup() {
           </i>
           <i class="news-wind-copy"><b>—</b><em>${copy.twoNearestStations}</em></i>
         </strong>
-        <small>${copy.twoStationMean}</small>
       </article>
       <article class="news-stat">
         <span>${copy.announcedArea}</span>
