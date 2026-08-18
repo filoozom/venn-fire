@@ -2,5 +2,7 @@ node_modules/
 dist/
 .DS_Store
 *.log
+output/
+timeline-video.config.json
 .vercel
 .env*

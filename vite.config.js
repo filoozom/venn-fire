@@ -7,11 +7,21 @@ const developmentDataOrigin = (process.env.VENN_FIRE_DEV_DATA_ORIGIN || 'https:/
 export default defineConfig({
   plugins: [react()],
   // Vite does not run the Vercel functions. Proxy only the read-only database
-  // view in development so `pnpm dev` works without production credentials.
-  // No refresh, ingestion or other mutating route is proxied.
+  // and stored-image views in development so the normal and news presentations
+  // work without production credentials. No mutating route is proxied.
   server: {
     proxy: {
       '/api/data': {
+        target: developmentDataOrigin,
+        changeOrigin: true,
+        secure: true,
+      },
+      '/api/source-image': {
+        target: developmentDataOrigin,
+        changeOrigin: true,
+        secure: true,
+      },
+      '/api/sentinel-quicklook': {
         target: developmentDataOrigin,
         changeOrigin: true,
         secure: true,
