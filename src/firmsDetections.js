@@ -705,24 +705,21 @@ export function estimateFootprintArea(detections, {
  */
 const CONFIDENCE_RANKS = { low: 1, nominal: 2, high: 3 }
 export const GEOSTATIONARY_DISPLAY_WINDOW_MS = 15 * 60 * 1000
-export const POLAR_DETECTION_DISPLAY_WINDOW_MS = 24 * 60 * 60 * 1000
 
 /**
- * All active-fire observations have a finite live-map lifetime. Polar pixels
- * fade over 24 hours; geostationary pixels use their much shorter scan window.
- * Rows remain in PostgreSQL and reappear at their historical timeline time.
+ * Polar overpasses remain as timestamped satellite evidence. Meteosat is an
+ * instantaneous coarse scan, so it fades only inside its short display window
+ * and never accumulates into a false burned-area layer.
  */
 export function firmsDetectionOpacityAt(detection, selectedTimestampMs) {
   const acquiredAtMs = Number.isFinite(detection.timestampMs)
     ? detection.timestampMs
     : Date.parse(detection.acquiredAt)
   if (!Number.isFinite(acquiredAtMs) || acquiredAtMs > selectedTimestampMs) return 0
-  const lifetimeMs = detection.sensorKey === 'meteosat'
-    ? GEOSTATIONARY_DISPLAY_WINDOW_MS
-    : POLAR_DETECTION_DISPLAY_WINDOW_MS
+  if (detection.sensorKey !== 'meteosat') return 1
   const ageMs = selectedTimestampMs - acquiredAtMs
-  if (ageMs >= lifetimeMs) return 0
-  return 1 - ageMs / lifetimeMs
+  if (ageMs >= GEOSTATIONARY_DISPLAY_WINDOW_MS) return 0
+  return 1 - ageMs / GEOSTATIONARY_DISPLAY_WINDOW_MS
 }
 
 export function firmsDetectionVisibleAt(detection, selectedTimestampMs) {

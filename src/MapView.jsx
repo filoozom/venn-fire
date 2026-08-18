@@ -421,13 +421,16 @@ export default function MapView({
         : computedGeostationary
           ? `Approximate projection from native sampling and ${Number.isFinite(Number(detection.subSatelliteLongitude)) ? formatDegrees(detection.subSatelliteLongitude) : 'unknown'} service longitude; FIRMS publishes no pixel polygon`
           : 'Thermal anomaly, not a burned-area polygon'
+      const retentionDetail = detection.sensorKey === 'meteosat'
+        ? 'Instantaneous scan opacity fades to zero over 15 minutes'
+        : 'Retained as timestamped polar-satellite evidence'
       layer.bindTooltip(
         `<strong>${detection.confidence.label} confidence</strong><br>`
         + `${detection.sensorName}${detection.satellite ? ` · ${detection.satellite}` : ''} · ${formatDecimal(detection.frpMw)} MW FRP<br>`
         + pixelDetail
         + `${detection.corroboratingSensors > 1 ? `<br>${detection.corroboratingSensors} satellites saw this cell` : ''}`
         + `<br><small>NASA FIRMS · ${detection.acquiredAt.replace('T', ' ').slice(0, 16)} UTC</small>`
-        + `<br><small>${footprintDetail}. Live-map opacity fades to zero over 24 hours; the database history remains.</small>`,
+        + `<br><small>${footprintDetail}. ${retentionDetail}.</small>`,
         { direction: 'top' },
       ).addTo(group)
     })

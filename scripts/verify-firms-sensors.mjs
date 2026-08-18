@@ -145,9 +145,8 @@ check('geostationary scan is hidden before acquisition', firmsDetectionVisibleAt
 check('geostationary scan is visible during its 15-minute window', firmsDetectionVisibleAt(geo.detections[0], scanTime + 14 * 60_000), true)
 check('geostationary scan expires after 15 minutes', firmsDetectionVisibleAt(geo.detections[0], scanTime + 15 * 60_000), false)
 const polarTime = Date.parse(parsed.detections[0].acquiredAt)
-check('polar overpass remains visible just under 24 hours', firmsDetectionVisibleAt(parsed.detections[0], polarTime + 24 * 60 * 60_000 - 1), true)
-check('polar overpass expires at 24 hours', firmsDetectionVisibleAt(parsed.detections[0], polarTime + 24 * 60 * 60_000), false)
-check('polar overpass fades to half opacity after 12 hours', firmsDetectionOpacityAt(parsed.detections[0], polarTime + 12 * 60 * 60_000), 0.5)
+check('polar overpass remains visible after 24 hours', firmsDetectionVisibleAt(parsed.detections[0], polarTime + 24 * 60 * 60_000), true)
+check('polar overpass retains full opacity as satellite evidence', firmsDetectionOpacityAt(parsed.detections[0], polarTime + 72 * 60 * 60_000), 1)
 
 // A 375 m pixel is 14.0625 ha, and the grid union reproduces it exactly.
 const single = estimateFootprintArea([parsed.detections[0]], { origin: parsed.detections[0] })

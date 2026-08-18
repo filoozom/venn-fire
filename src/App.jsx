@@ -610,6 +610,7 @@ function DataModal({
   const latestCamsWildfire = (cams.frames ?? []).filter((entry) => entry.productKey === 'wildfire-pm10').at(-1)
   const latestCamsPm2p5 = (cams.frames ?? []).filter((entry) => entry.productKey === 'pm2p5').at(-1)
   const sourceRunByKey = new globalThis.Map(sourceRuns.map((run) => [run.sourceKey, run]))
+  const latestFirmsRun = sourceRunByKey.get('firms')
   const directorySources = activeSources
     .filter((source) => !NON_DIRECTORY_SOURCE_KEYS.has(source.key))
     .map((source) => ({ ...source, ...SOURCE_DIRECTORY_COPY[source.key] }))
@@ -695,8 +696,8 @@ function DataModal({
                 <div className="connection-icon"><Satellite size={20} /></div>
                 <div className="connection-copy">
                   <div className="connection-title"><strong>NASA FIRMS</strong><span className="status-pill status-pill--connected"><Check size={11} /> AUTO-UPDATED</span></div>
-                  <p>{firmsDetectionCount.toLocaleString('en-GB')} thermal detections from Suomi-NPP, NOAA-20, NOAA-21, Terra, Aqua and Meteosat are stored with their history.</p>
-                  <span className="connection-meta">Checked every 15 min · newest satellite observation {firmsState.latestAcquiredAt ? absoluteObservationTimeLabel(Date.parse(firmsState.latestAcquiredAt)) : 'unavailable'}</span>
+                  <p>{firmsDetectionCount.toLocaleString('en-GB')} thermal detections from Suomi-NPP, NOAA-20, NOAA-21, Terra, Aqua and Meteosat are stored with their history. The current request returned {firmsState.currentWindowDetectionCount ?? '—'} detections; no newer detection is not confirmation that the fire is extinguished.</p>
+                  <span className="connection-meta">Checked every 15 min{latestFirmsRun?.completedAt ? ` · feed checked ${absoluteObservationTimeLabel(Date.parse(latestFirmsRun.completedAt))}` : ''} · newest returned heat {firmsState.latestAcquiredAt ? absoluteObservationTimeLabel(Date.parse(firmsState.latestAcquiredAt)) : 'unavailable'}</span>
                 </div>
               </div>
 
@@ -814,7 +815,7 @@ function DataModal({
                 <p><strong>Different products answer different questions.</strong> Reported area, thermal detections, aircraft positions and weather remain separate. Only evidence that passes the stated rules contributes to the Best estimate.</p>
               </div>
               <div className="method-steps">
-                <article><span>01</span><div><strong>Best estimate</strong><p>The solid red outline combines the rolling 24-hour corroborated VIIRS heat core, supported pixels from the newest MODIS pass, cloud-clear Sentinel-2 change near the fire, and tightly filtered aircraft evidence. All accepted evidence uses the same 50 m grid. Expired heat pixels do not remain as a touched zone, and Meteosat never changes the estimate.</p></div></article>
+                <article><span>01</span><div><strong>Best estimate</strong><p>The solid red outline combines corroborated VIIRS heat observations available by the selected time, supported pixels from the newest MODIS pass, cloud-clear Sentinel-2 change near the fire, and tightly filtered aircraft evidence. All accepted evidence uses the same 50 m grid. The separate touched-zone layer remains removed, and Meteosat never changes the estimate.</p></div></article>
                 <article><span>02</span><div><strong>Reported area</strong><p>The line is a timestamped step series. A figure becomes visible when published; when its stated effective time differs, both times are retained and shown. Between reports it means “last reported,” not measured growth.</p></div></article>
                 <article><span>03</span><div><strong>EFFIS activity envelope</strong><p>EFFIS groups a day of VIIRS activity into a broad shape. Its calculated area can include ground between detections, so it is neither the reported affected area nor a field-confirmed perimeter.</p></div></article>
                 <article><span>04</span><div><strong>Aircraft observations</strong><p>Routes use exact receiver fixes. Missing coverage stays missing, and routes fade away after 24 hours. An aircraft seen near the incident is not automatically a firefighting aircraft; only repeated, near-fire GRZLY manoeuvres can influence the Best estimate.</p></div></article>
@@ -893,6 +894,7 @@ function FireViewer({ runtime, databaseError }) {
     configured: true,
     generatedAt: firmsData.generatedAt,
     latestAcquiredAt: firmsData.latestAcquiredAt,
+    currentWindowDetectionCount: firmsData.currentWindowDetectionCount,
   }
   const liveAircraftObservations = runtime.aircraft.observations ?? []
   const aircraftLoadStatus = runtime.aircraftLoadState?.status || 'ready'
@@ -1113,8 +1115,8 @@ function FireViewer({ runtime, databaseError }) {
   ], [frame])
 
   // Database-retained FIRMS detections, placed on the five-minute timeline by
-  // exact acquisition time. Live-map evidence fades and expires, while the
-  // original rows remain available when the historical timeline is selected.
+  // exact acquisition time. Polar overpasses remain visible as timestamped
+  // satellite evidence; only the instantaneous Meteosat scan expires.
   const firmsDetections = useMemo(() => firmsData.detections.map((detection) => {
     const sensor = FIRMS_SENSORS.find((entry) => entry.key === detection.sensorKey)
     return {
@@ -1157,10 +1159,10 @@ function FireViewer({ runtime, databaseError }) {
     [firmsDetectionsAtTime],
   )
 
-  // Seed the aircraft check with only current thermal evidence: the rolling
-  // VIIRS core plus supported pixels from the newest high-confidence MODIS pass.
+  // Seed the aircraft check with only thermal evidence available at the selected
+  // time: the VIIRS core plus supported pixels from the newest MODIS pass.
   // This keeps the GRZLY edge integration without leaking future satellite
-  // corroboration backward or restoring expired pixels as a touched zone.
+  // corroboration backward or restoring a separate touched-zone layer.
   const seedModisSupportedExtent = useMemo(() => deriveModisSupportedExtent({
     detections: firmsDetectionsAtTime,
     coreDetections: bestEstimateCoreDetections,
@@ -1377,7 +1379,7 @@ function FireViewer({ runtime, databaseError }) {
               {/* The best estimate sits beside the reported figure. EFFIS keeps its
                   own card below: at roughly five times the reported area it is an
                   envelope, and giving it headline position overstated the burn. */}
-              <div><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}</strong><span>best-estimate ha</span><small>{bestEstimateDetections.length ? `${bestEstimateCoreDetections.length} VIIRS core${modisSupportedExtent.detections.length ? ` + ${modisSupportedExtent.detections.length} ${modisSupportedExtent.satellites.join('/')} MODIS` : ''}${sentinelSupportIncluded ? ' + Sentinel-2 change' : ''}${aircraftSupportIncluded ? ` + ${aircraftSupportedEdge.callSigns.join('/')} aircraft evidence` : ''} · derived` : 'no qualifying heat in the rolling 24 h window'}</small></div>
+              <div><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}</strong><span>best-estimate ha</span><small>{bestEstimateDetections.length ? `${bestEstimateCoreDetections.length} VIIRS core${modisSupportedExtent.detections.length ? ` + ${modisSupportedExtent.detections.length} ${modisSupportedExtent.satellites.join('/')} MODIS` : ''}${sentinelSupportIncluded ? ' + Sentinel-2 change' : ''}${aircraftSupportIncluded ? ` + ${aircraftSupportedEdge.callSigns.join('/')} aircraft evidence` : ''} · derived` : 'no qualifying satellite evidence at this time'}</small></div>
             </div>
           </div>
 
@@ -1400,7 +1402,7 @@ function FireViewer({ runtime, databaseError }) {
             <p className="layer-note">
               {bestEstimateDetections.length
                 ? `One 50 m grid: ${bestEstimateCoreDetections.length} corroborated VIIRS detections${modisSupportedExtent.detections.length ? `, ${modisSupportedExtent.detections.length} high-confidence ${modisSupportedExtent.satellites.join('/')} MODIS pixels from the newest pass` : ''}${sentinelSupportIncluded ? `, ${currentSentinelAnalysis.supportCellCount.toLocaleString('en-GB')} clear Sentinel-2 change cells` : ''}${aircraftSupportIncluded ? `, and ${bestEstimateArea.polygonSupportCellCount} aircraft-supported cells from repeated ${aircraftSupportedEdge.callSigns.join(', ')} direction changes` : ''}. Evidence-based, not field-confirmed.${sentinelSupportIncluded ? ` Sentinel coverage: ${Math.round(currentSentinelAnalysis.clearFraction * 100)}%; obscured ground remains unknown.` : ''}${aircraftSupportIncluded ? ' Aircraft positions do not confirm a water drop.' : ''}`
-                : 'No heat detections inside the rolling 24-hour window currently meet the best-estimate rule. Historical evidence remains in the timeline and database.'}
+                : 'No satellite detections available by this time meet the best-estimate rule.'}
             </p>
           </div>
 
@@ -1568,7 +1570,7 @@ function FireViewer({ runtime, databaseError }) {
 
               <div className="snapshot-grid">
                 <article className="snapshot-card snapshot-card--fire"><span><Flame size={15} /> REPORTED AREA</span><strong>{reportedAreaText}<small>{frame.reportedHa == null ? '' : 'ha'}</small></strong><p>{frame.areaLabel}</p></article>
-                <article className="snapshot-card snapshot-card--estimate"><span><Flame size={15} /> BEST ESTIMATE</span><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}<small>{bestEstimateDetections.length ? 'ha' : ''}</small></strong><p>{bestEstimateDetections.length ? `${bestEstimateDetections.length} selected thermal detections · ${bestEstimateCoreDetections.length} VIIRS${modisSupportedExtent.detections.length ? ` + ${modisSupportedExtent.detections.length} ${modisSupportedExtent.satellites.join('/')} MODIS` : ''}${sentinelSupportIncluded ? ` · ${currentSentinelAnalysis.supportCellCount.toLocaleString('en-GB')} Sentinel-2 change cells` : ''}${aircraftSupportIncluded ? ` · ${bestEstimateArea.polygonSupportCellCount.toLocaleString('en-GB')} aircraft-supported cells` : ''}` : 'no qualifying heat in the rolling 24 h window'}</p></article>
+                <article className="snapshot-card snapshot-card--estimate"><span><Flame size={15} /> BEST ESTIMATE</span><strong>{bestEstimateDetections.length ? Math.round(bestEstimateAreaHa).toLocaleString('en-GB') : '—'}<small>{bestEstimateDetections.length ? 'ha' : ''}</small></strong><p>{bestEstimateDetections.length ? `${bestEstimateDetections.length} selected thermal detections · ${bestEstimateCoreDetections.length} VIIRS${modisSupportedExtent.detections.length ? ` + ${modisSupportedExtent.detections.length} ${modisSupportedExtent.satellites.join('/')} MODIS` : ''}${sentinelSupportIncluded ? ` · ${currentSentinelAnalysis.supportCellCount.toLocaleString('en-GB')} Sentinel-2 change cells` : ''}${aircraftSupportIncluded ? ` · ${bestEstimateArea.polygonSupportCellCount.toLocaleString('en-GB')} aircraft-supported cells` : ''}` : 'no qualifying satellite evidence at this time'}</p></article>
                 <article className="snapshot-card snapshot-card--effis"><span><Layers3 size={15} /> EFFIS ACTIVITY ENVELOPE</span><strong>{currentEffisArea ? Math.round(currentEffisArea.areaHa).toLocaleString('en-GB') : '—'}<small>{currentEffisArea ? 'ha' : ''}</small></strong><p>{currentEffisArea ? `${currentEffisArea.productDate}${effisCarriedForward ? ' carried forward until replacement' : ''} · may include ground between detections` : 'no EFFIS product available at selected time'}</p></article>
                 <article className="snapshot-card"><span><Satellite size={15} /> FIRMS DETECTIONS</span><strong>{visibleFirmsDetections.length.toLocaleString('en-GB')}</strong><p>retained up to selected time · shaded by reported confidence</p></article>
                 <article className="snapshot-card"><span><Helicopter size={15} /> AIRCRAFT</span><strong>{aircraftHistoryLoading ? '—' : flightsSeenOnSelectedDay.length}<small>{aircraftHistoryLoading ? 'loading' : 'seen today'}</small></strong><p>{aircraftHistoryLoading

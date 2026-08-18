@@ -115,6 +115,14 @@ const firmsFreshness = await page.locator('.source-health-row').filter({ hasText
 if (!firmsFreshness.includes('newest heat') || !firmsFreshness.includes('feed checked')) {
   throw new Error(`FIRMS source status does not distinguish observation time from polling time: ${firmsFreshness}`)
 }
+const latestBestEstimate = await page.locator('.snapshot-card--estimate strong').innerText()
+if (latestBestEstimate.trim() === '—') {
+  throw new Error('Latest Best estimate disappeared when the current FIRMS poll returned no new qualifying heat')
+}
+const latestSatelliteDetectionCount = Number((await page.locator('.snapshot-card').filter({ hasText: 'FIRMS DETECTIONS' }).locator('strong').innerText()).replaceAll(',', ''))
+if (!Number.isFinite(latestSatelliteDetectionCount) || latestSatelliteDetectionCount < 100) {
+  throw new Error(`Retained polar-satellite evidence disappeared from the latest map: ${latestSatelliteDetectionCount}`)
+}
 
 await page.getByRole('button', { name: 'Measure distance' }).click()
 await page.waitForSelector('.leaflet-container.is-measuring')
@@ -135,6 +143,10 @@ await page.getByRole('button', { name: 'Stop measuring distance' }).click()
 // Playwright's actionability checks.
 await page.getByText(/seen on selected day/).first().waitFor()
 await page.locator('.data-button').click()
+const firmsInterpretationWarning = await page.getByText(/no newer detection is not confirmation that the fire is extinguished/i).count()
+if (firmsInterpretationWarning !== 1) {
+  throw new Error('FIRMS overview does not explain that an empty current result cannot prove extinguishment')
+}
 const publicImplementationLimits = await page.getByText('Known limits that are not synchronized', { exact: true }).count()
   + await page.getByText(/No fire-service or crisis-centre GeoJSON perimeter feed\/export has been supplied/).count()
   + await page.getByText(/Walloon DATEX II|Field-confirmed perimeter|Sanitized incident operations|AWAITING ACCESS|Touched zone/i).count()
@@ -366,6 +378,9 @@ console.log(JSON.stringify({
   radarVisibleByDefault: true,
   measuredDistance,
   firmsFreshness,
+  firmsInterpretationWarning,
+  latestBestEstimate,
+  latestSatelliteDetectionCount,
   publicImplementationLimits,
   synchronizedSourceLinks,
   sourceDirectory,
