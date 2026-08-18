@@ -12,6 +12,14 @@ try {
   await page.waitForSelector('.app-shell:not(.app-shell--hydrating)')
   await page.waitForSelector('#news-presentation-dashboard')
   await page.waitForFunction(() => document.querySelector('.news-wind-copy b')?.textContent?.trim() !== '—')
+  await page.waitForFunction(() => {
+    const labels = [...document.querySelectorAll('.map-place-label--water')]
+    return labels.length >= 2 && labels.every((element) => {
+      const rectangle = element.getBoundingClientRect()
+      return rectangle.right > 0 && rectangle.bottom > 0
+        && rectangle.left < window.innerWidth && rectangle.top < window.innerHeight
+    })
+  })
 
   const state = await page.evaluate(() => {
     const bounds = (selector) => {
