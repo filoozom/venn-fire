@@ -56,7 +56,12 @@ import { archiveProviderResponses } from './source-artifacts.mjs'
 const INCIDENT = { latitude: 50.54762, longitude: 6.05757 }
 const INCIDENT_START = '2026-08-14T11:00:00.000Z'
 const AIRCRAFT_ROUTE_HISTORY_RECOVERY_KEY = 'aircraft-route-history-recovery'
-const INCIDENT_WATER_CONTEXT_ENTITIES = ['Q165395', 'Q17373262']
+export const INCIDENT_WATER_CONTEXT_ENTITIES = Object.freeze([
+  'Q165395', // Lake Eupen / Wesertalsperre
+  'Q17373262', // Gileppe reservoir
+  'Q320702', // Lake Robertville / Talsperre Robertville
+  'Q470432', // Lake Bütgenbach / Stausee Bütgenbach
+])
 
 function finiteNumber(value) {
   const number = Number(value)
@@ -1433,7 +1438,7 @@ export const REFRESH_SOURCES = [
   {
     key: 'incident-map-context', label: 'Nearby reservoir map context', intervalMinutes: 1440, run: refreshIncidentMapContext,
     providerUrl: 'https://www.wikidata.org/',
-    coverage: 'German/English names and coordinates for the nearby Eupen and Gileppe reservoirs; map context only, not evidence of a water pickup.',
+    coverage: 'German/English names and coordinates for the nearby Eupen, Gileppe, Robertville and Bütgenbach reservoirs; map context only, not evidence of a water pickup.',
   },
   {
     key: 'aircraft', label: 'Live incident aircraft', intervalMinutes: 5, run: refreshAircraft,

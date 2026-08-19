@@ -40,6 +40,7 @@ import {
 import {
   completedUtcDatesBeforeToday,
   firmsDetectionKey,
+  INCIDENT_WATER_CONTEXT_ENTITIES,
   mapLabelFromWikidata,
   REFRESH_SOURCES,
   routeRecoveryTargets,
@@ -158,6 +159,12 @@ assert.equal(REFRESH_SOURCES.find((source) => source.key === 'sentinel3-frp').in
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'sentinel1').intervalMinutes, 60)
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'cams').intervalMinutes, 60)
 assert.equal(REFRESH_SOURCES.find((source) => source.key === 'incident-map-context').intervalMinutes, 1440)
+assert.deepEqual(INCIDENT_WATER_CONTEXT_ENTITIES, [
+  'Q165395',
+  'Q17373262',
+  'Q320702',
+  'Q470432',
+])
 assert.deepEqual(mapLabelFromWikidata('Q165395', {
   entities: {
     Q165395: {
@@ -173,6 +180,38 @@ assert.deepEqual(mapLabelFromWikidata('Q165395', {
   position: [50.62055, 6.10037],
   context: 'nearby-reservoir',
   sourceUrl: 'https://www.wikidata.org/wiki/Q165395',
+})
+assert.deepEqual(mapLabelFromWikidata('Q320702', {
+  entities: {
+    Q320702: {
+      labels: { de: { value: 'Talsperre Robertville' }, en: { value: 'Lake Robertville' } },
+      claims: { P625: [{ mainsnak: { datavalue: { value: { latitude: 50.45, longitude: 6.1136111111111 } } } }] },
+    },
+  },
+}), {
+  id: 'wikidata-q320702',
+  kind: 'water',
+  name: 'Lake Robertville',
+  names: { de: 'Talsperre Robertville', en: 'Lake Robertville' },
+  position: [50.45, 6.1136111111111],
+  context: 'nearby-reservoir',
+  sourceUrl: 'https://www.wikidata.org/wiki/Q320702',
+})
+assert.deepEqual(mapLabelFromWikidata('Q470432', {
+  entities: {
+    Q470432: {
+      labels: { de: { value: 'Stausee Bütgenbach' }, en: { value: 'Lake Bütgenbach' } },
+      claims: { P625: [{ mainsnak: { datavalue: { value: { latitude: 50.4275, longitude: 6.2277777777778 } } } }] },
+    },
+  },
+}), {
+  id: 'wikidata-q470432',
+  kind: 'water',
+  name: 'Lake Bütgenbach',
+  names: { de: 'Stausee Bütgenbach', en: 'Lake Bütgenbach' },
+  position: [50.4275, 6.2277777777778],
+  context: 'nearby-reservoir',
+  sourceUrl: 'https://www.wikidata.org/wiki/Q470432',
 })
 assert.deepEqual(completedUtcDatesBeforeToday(Date.parse('2026-08-17T12:00:00.000Z')), [
   '2026-08-16',

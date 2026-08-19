@@ -76,7 +76,8 @@ warning card and detailed timeline controls. It expands the map to the full
 large day/time card. Its broadcast overlay shows announced and derived area,
 the speed-weighted wind-vector mean from the two nearest current weather
 stations. The Open-Meteo model-grid marker and station-name footer are excluded;
-the nearby Eupen and Gileppe water reservoirs remain visible as route context.
+the nearby Eupen, Gileppe, Robertville and Bütgenbach water reservoirs remain
+visible as route context.
 The incident-update feed is intentionally omitted:
 
 ```bash
