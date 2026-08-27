@@ -112,7 +112,7 @@ if (await radarLayerToggle.getAttribute('aria-pressed') !== 'true') {
   throw new Error('Precipitation radar is not visible by default')
 }
 const firmsFreshness = await page.locator('.source-health-row').filter({ hasText: 'FIRMS' }).innerText()
-if (!firmsFreshness.includes('newest heat') || !firmsFreshness.includes('feed checked')) {
+if (!firmsFreshness.includes('newest retained heat') || !firmsFreshness.includes('feed checked')) {
   throw new Error(`FIRMS source status does not distinguish observation time from polling time: ${firmsFreshness}`)
 }
 const latestBestEstimate = await page.locator('.snapshot-card--estimate strong').innerText()
@@ -120,8 +120,10 @@ if (latestBestEstimate.trim() === '—') {
   throw new Error('Latest Best estimate disappeared when the current FIRMS poll returned no new qualifying heat')
 }
 const latestSatelliteDetectionCount = Number((await page.locator('.snapshot-card').filter({ hasText: 'FIRMS DETECTIONS' }).locator('strong').innerText()).replaceAll(',', ''))
-if (!Number.isFinite(latestSatelliteDetectionCount) || latestSatelliteDetectionCount < 100) {
-  throw new Error(`Retained polar-satellite evidence disappeared from the latest map: ${latestSatelliteDetectionCount}`)
+const latestSatelliteFadeLabel = await page.locator('.snapshot-card').filter({ hasText: 'FIRMS DETECTIONS' }).locator('p').innerText()
+if (!Number.isFinite(latestSatelliteDetectionCount)
+  || !latestSatelliteFadeLabel.includes('24 h visual fade window')) {
+  throw new Error(`FIRMS map count does not expose its age window: ${latestSatelliteDetectionCount} / ${latestSatelliteFadeLabel}`)
 }
 
 await page.getByRole('button', { name: 'Measure distance' }).click()
@@ -241,9 +243,9 @@ Object.entries(expected).forEach(([key, value]) => {
   if (normalized !== value) throw new Error(`${key}: expected ${value}, got ${normalized}`)
 })
 
-// A lone manoeuvre must not alter the fire outline. After a second nearby GRZLY
-// direction change is supported by the current VIIRS/MODIS thermal edge, the
-// conservative lobe enters the same solid outline—never a separate layer.
+// A lone manoeuvre must not alter the fire estimate. After a second nearby
+// GRZLY direction change is supported by the VIIRS/MODIS thermal edge, the
+// conservative lobe enters the same age-split union—never a separate layer.
 await selectTime('2026-08-15T18:55:00+02:00')
 const edgeNoteBeforeRepeat = await page.locator('.layer-note').first().innerText()
 await selectTime('2026-08-15T21:10:00+02:00')
@@ -252,7 +254,8 @@ const edgeNoteAfterRepeat = await page.locator('.layer-note').first().innerText(
 if (edgeNoteBeforeRepeat.includes('aircraft-supported cells')) {
   throw new Error(`Aircraft support appeared before repeat support: ${edgeNoteBeforeRepeat}`)
 }
-if (!edgeAfterRepeat.includes('Single combined outline')
+if (!edgeAfterRepeat.includes('Burned estimate · under 30 days')
+  || !edgeAfterRepeat.includes('Active/recent evidence · under 24 hours')
   || edgeAfterRepeat.includes('Aircraft-supported edge')
   || !edgeNoteAfterRepeat.includes('aircraft-supported cells')
   || !edgeNoteAfterRepeat.includes('direction changes')) {
@@ -261,7 +264,7 @@ if (!edgeAfterRepeat.includes('Single combined outline')
 
 // The 19:13 UTC Terra pass becomes available at the 19:15 UTC frame. It must
 // replace, rather than accumulate with, the earlier Aqua support and extend the
-// one solid satellite outline and its matching area figure.
+// same retained evidence union and its matching area figure.
 await selectTime('2026-08-15T21:10:00+02:00')
 const modisBeforeTerra = await page.locator('.layer-note').first().innerText()
 const areaBeforeTerra = await page.locator('.snapshot-card--estimate strong').innerText()
@@ -271,7 +274,8 @@ const areaAfterTerra = await page.locator('.snapshot-card--estimate strong').inn
 const estimateMethodKey = await page.locator('.outline-method-key').innerText()
 if (!modisBeforeTerra.includes('high-confidence Aqua MODIS pixels')
   || !modisAfterTerra.includes('13 high-confidence Terra MODIS pixels')
-  || !estimateMethodKey.includes('Single combined outline')
+  || !estimateMethodKey.includes('Burned estimate · under 30 days')
+  || !estimateMethodKey.includes('Active/recent evidence · under 24 hours')
   || estimateMethodKey.includes('MODIS-supported extent')) {
   throw new Error(`MODIS support did not switch on the expected five-minute frame: ${modisBeforeTerra} / ${modisAfterTerra}`)
 }
@@ -395,6 +399,7 @@ console.log(JSON.stringify({
   firmsInterpretationWarning,
   latestBestEstimate,
   latestSatelliteDetectionCount,
+  latestSatelliteFadeLabel,
   publicImplementationLimits,
   synchronizedSourceLinks,
   sourceDirectory,

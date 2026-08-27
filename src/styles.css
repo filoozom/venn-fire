@@ -846,6 +846,72 @@ button {
   white-space: nowrap;
 }
 
+.reported-activity-banner {
+  position: absolute;
+  z-index: 606;
+  bottom: 178px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: min(630px, calc(100% - 32px));
+  padding: 10px 12px;
+  color: #fff8ed;
+  background: rgba(125, 51, 33, 0.94);
+  border: 1px solid rgba(255, 210, 166, 0.62);
+  border-radius: 9px;
+  box-shadow: 0 8px 24px rgba(59, 31, 22, 0.24);
+  transform: translateX(-50%);
+  backdrop-filter: blur(12px);
+}
+
+.reported-activity-banner.is-controlled {
+  background: rgba(116, 67, 32, 0.94);
+}
+
+.reported-activity-banner > svg {
+  flex: none;
+  color: #ffd29d;
+}
+
+.reported-activity-banner p {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+}
+
+.reported-activity-banner p span {
+  color: #ffd7a7;
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: 0.1em;
+}
+
+.reported-activity-banner p strong {
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.reported-activity-banner p small {
+  color: #f7dfc6;
+  font-size: 9.5px;
+  line-height: 1.25;
+}
+
+.reported-activity-banner a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  color: #fff4e6;
+  font-size: 9.5px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
 .map-controls {
   position: absolute;
   z-index: 610;
@@ -2555,6 +2621,12 @@ button {
   background: #e4f5ed;
 }
 
+.status-pill--partial {
+  color: #895e1f;
+  background: #fff4d8;
+  border-color: #ead09a;
+}
+
 .connection-copy p {
   margin: 5px 0 0;
   color: #75837d;
@@ -3133,6 +3205,22 @@ button.connection-card--upload {
     display: none;
   }
 
+  .reported-activity-banner {
+    bottom: 136px;
+    gap: 8px;
+    width: calc(100% - 16px);
+    padding: 8px 9px;
+  }
+
+  .reported-activity-banner p small,
+  .reported-activity-banner a {
+    display: none;
+  }
+
+  .reported-activity-banner p strong {
+    font-size: 10.5px;
+  }
+
   .map-controls {
     top: 104px;
   }
@@ -3269,9 +3357,21 @@ button.connection-card--upload {
 }
 
 .outline-method-key i {
-  width: 20px;
+  width: 18px;
   height: 0;
-  border-top: 2px solid #ff2f26;
+  border: 0;
+  border-top: 2px solid currentColor;
+  border-radius: 0;
+}
+
+.outline-method-key i.is-burned {
+  color: #111714;
+  background: transparent;
+}
+
+.outline-method-key i.is-active {
+  color: #ff2f26;
+  background: transparent;
 }
 
 .layer-note {
@@ -3531,7 +3631,12 @@ button.connection-card--upload {
   color: #f0865c;
 }
 
-/* Best-estimate fire boundary. */
+/* Best-estimate age-state outlines: retained burn scar and recent activity. */
+.burned-area-outline {
+  filter: drop-shadow(0 0 2px rgba(8, 12, 10, 0.35));
+}
+
+.active-fire-outline,
 .fire-outline {
   filter: drop-shadow(0 0 3px rgba(255, 47, 38, 0.45));
 }

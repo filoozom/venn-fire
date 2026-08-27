@@ -39,7 +39,7 @@ The following values illustrate what was present when this guide was written. Al
 | Headline weather | WSW from 246°, blowing toward 66°; 17.7 km/h, gusting 28.3 km/h; 14 °C; 97.2% relative humidity | Near-real-time Mont Rigi station data, marked preliminary. Direction is where the wind comes **from**; the viewer also states where it blows **toward**. |
 | Latest precipitation at the incident | RMI: none detected at the selected frame | A categorical radar observation, not proof that every point on the ground was dry. |
 | Sentinel-2 comparison | Pre-fire 14 August about 12:47 CEST; post-fire 16 August about 12:47 CEST; 21.9% clear; 187.92 ha raw qualifying change; 796 accepted 50 m cells, equal to 199 ha before overlap with other evidence | Only clear, qualifying positive spectral change is shown. The unobserved majority is unknown, not unburned. |
-| Sentinel-3 | 12 incident-intersecting passes; 0 local coordinate detections | Catalogue intersections and previews exist, but no coordinate-level local FRP rows were publicly usable. |
+| Sentinel-3 | 12 incident-intersecting passes; 0 local coordinate detections | Catalogue intersections and previews exist; coordinate-level FRP assets require authenticated Copernicus data access and were not connected. |
 | Sentinel-1 | 30 acquisitions; 2 comparable pairs; 0 calibrated change analyses | Catalogue and preview context only. It does not currently modify the estimate. |
 | Copernicus EMS | 0 incident matches | No matching activation was found in the synchronized catalogue. EMSR920 near Hürtgen was a separate event about 32 km away. |
 | NASA GIBS | 10 retained images through 18 August | Daily visual context, not a measured perimeter. |
@@ -57,9 +57,9 @@ The value changes only when a sourced report changes it. Between reports, the la
 
 ### Best estimate
 
-The Best estimate is the area of one solid red 50 m raster union derived by the site. It combines only qualifying evidence from corroborated VIIRS detections, the newest supported MODIS pass, positive cloud-clear Sentinel-2 change, and tightly constrained incident-local GRZLY aircraft-turn evidence.
+The Best estimate is one 50 m evidence union derived by the site. Black shows qualifying estimated burned ground retained for 30 days; red shows the subset supported by qualifying thermal or aircraft evidence from the previous 24 hours. It combines corroborated VIIRS detections, at most one retained supported MODIS pass, positive cloud-clear Sentinel-2 change, and tightly constrained incident-local GRZLY aircraft-turn evidence.
 
-It is deliberately named an estimate. It is neither official nor a field-surveyed perimeter, and it is not advertised as an upper or lower bound. The displayed number and displayed outline are calculated from the same grid, so they cannot silently disagree.
+It is deliberately named an estimate. It is neither official nor a field-surveyed perimeter, and it is not advertised as an upper or lower bound. The displayed number and black footprint are calculated from the same grid; the red area is a non-additive subset. The time windows are display heuristics, not measurements of extinguishment or vegetation regrowth.
 
 ### EFFIS area
 
@@ -163,7 +163,7 @@ The viewer can display a user-supplied GeoJSON `LineString` or CSV containing la
 
 | Layer | Default | Can affect Best estimate? | Purpose |
 | --- | --- | --- | --- |
-| Best estimate outline | On | It **is** the estimate | Solid red derived evidence union and matching area. |
+| Best estimate outline | On | It **is** the estimate | Black 30-day retained evidence union and matching area, with its under-24-hour active/recent subset in red. |
 | EFFIS | On | No | Broad independent daily algorithmic envelope. |
 | Sentinel-2 change | On | Yes, under the documented clear-pixel rules | Positive cloud-clear burn-consistent spectral change. |
 | Sentinel-3 | On | No in the current data | Catalogue/preview context; only coordinate-level FRP could become local points. |
@@ -175,7 +175,7 @@ The viewer can display a user-supplied GeoJSON `LineString` or CSV containing la
 | VIIRS Suomi-NPP | On | Yes, through corroboration rules | 375 m-class polar thermal detections. |
 | VIIRS NOAA-20 | On | Yes, through corroboration rules | Independent 375 m-class polar thermal detections. |
 | VIIRS NOAA-21 | On | Yes, through corroboration rules | Independent 375 m-class polar thermal detections. |
-| MODIS Terra/Aqua | Off | Only the newest qualifying supported pass | 1 km-class thermal support; never creates the core alone. |
+| MODIS Terra/Aqua | Off | At most one retained qualifying supported pass | 1 km-class thermal support; never creates the core alone. |
 | Meteosat | Off | Never | Frequent but very coarse geostationary thermal context. |
 | Aircraft tracks | On | Only filtered, repeat-supported `GRZLY##` turn evidence | Receiver-supported routes and conservative local edge evidence. |
 | Open-Meteo wind | On | No | Hourly model-grid weather. |
@@ -190,6 +190,8 @@ High and nominal FIRMS confidence are visible by default; low confidence is hidd
 
 Every calculation uses only evidence whose acquisition time is at or before the selected timeline frame. The same algorithm can therefore reconstruct what the viewer could reasonably have shown at any five-minute point without using future evidence.
 
+Qualifying evidence remains in the public burned footprint for 30 days. Thermal and aircraft-supported evidence is red only during its first 24 hours and then remains black until that retention cutoff. Sentinel-2 dNBR contributes only to black because it is spectral burn-change evidence, not a live heat measurement. No red area therefore means “no qualifying recent outline evidence,” not “no reported fire activity” or “confirmed extinguished.” A current sourced re-ignition report is displayed separately rather than converted into invented geometry.
+
 ### 2. Corroborated VIIRS core
 
 The thermal core uses the three VIIRS polar products: Suomi-NPP, NOAA-20, and NOAA-21. Detections are grouped on an approximately 0.005° spatial grid, roughly 500 m in this location.
@@ -203,15 +205,15 @@ Corroboration is spatial and cumulative up to the selected time; the satellites 
 
 This rule reduces the chance that a single noisy or displaced satellite point defines a large edge by itself, but it can still miss fire hidden by cloud, smoke, scan gaps, or overpass timing.
 
-### 3. Newest-pass MODIS support
+### 3. Retained single-pass MODIS support
 
 MODIS Terra and Aqua have coarser, roughly 1 km thermal pixels. MODIS can extend the existing estimate only when all of the following hold:
 
 - the detection has high confidence;
-- it belongs to the newest available five-minute Terra/Aqua pass at the selected time; and
+- it belongs to the newest qualifying Terra/Aqua pass inside the 30-day retention window; and
 - its qualifying footprint is within 500 m of the corroborated VIIRS core or an accepted aircraft-supported edge.
 
-MODIS cannot create an independent core and does not count as a second VIIRS spacecraft. Only the newest supported pass is used, so successive coarse snapshots do not accumulate forever into an inflated scar. This also means the estimate need not be monotonically increasing. On 15 August, for example, replacement of one supported MODIS pass by the next changed the estimate from roughly 3,572 ha to 3,012 ha.
+MODIS cannot create an independent core and does not count as a second VIIRS spacecraft. At most one supported pass is retained, so successive coarse snapshots do not accumulate into an inflated scar. A newer unsupported pass does not erase an earlier accepted burned edge, but the retained pass leaves the public footprint at 30 days.
 
 ### 4. Sentinel-2 positive change support
 
@@ -260,11 +262,11 @@ Each disconnected local cluster creates only its compact, shortest boundary lobe
 
 This is evidence of a repeated manoeuvre pattern near the thermally supported edge. Public receiver data contains no payload state and no authoritative mission record, so the result is not proof of a water drop, a fire-front position, or even the aircraft's assigned task.
 
-Aircraft contribution expires from the current Best estimate after 24 hours, matching the relevance window for track display. Exact historical observations remain in PostgreSQL.
+Aircraft contribution is red for 24 hours after the latest qualifying manoeuvre, matching the relevance window for track display. The accepted compact lobe then remains black until the 30-day retention cutoff. Exact historical observations remain in PostgreSQL.
 
 ### 6. One dissolved 50 m union
 
-All accepted evidence is rasterized on the same 50 m grid and dissolved into one geometry. A full grid cell represents 2,500 m², or 0.25 ha. Overlap is counted once. The displayed hectares are calculated from exactly the cells drawn in the red outline.
+All accepted evidence is rasterized on the same 50 m grid and dissolved into one geometry. A full grid cell represents 2,500 m², or 0.25 ha. Overlap is counted once. The displayed hectares are calculated from exactly the cells drawn in the black 30-day footprint. Red is the recent subset of that footprint and must not be added to the total.
 
 There is no separate “touched zone.” It was removed because its outer historical edge looked more authoritative than the evidence justified.
 
@@ -283,14 +285,14 @@ FIRMS is the main source of raw satellite heat observations. The viewer synchron
 | VIIRS Suomi-NPP | About 375 m; roughly two polar overpasses per day | On | May contribute to the corroborated core. |
 | VIIRS NOAA-20 | About 375 m; roughly two polar overpasses per day | On | May contribute to the corroborated core. |
 | VIIRS NOAA-21 | About 375 m; roughly two polar overpasses per day | On | May contribute to the corroborated core. |
-| MODIS Terra/Aqua | About 1 km; up to roughly four combined opportunities per day | Off | Only newest high-confidence supported pass may extend the core. |
+| MODIS Terra/Aqua | About 1 km; up to roughly four combined opportunities per day | Off | At most one newest qualifying high-confidence pass inside the 30-day window may extend the core. |
 | GOES_NRT Meteosat | Roughly 2.1 × 4.1 km to 3.3 × 9.1 km here, depending on spacecraft/viewing geometry; usually 10–15 minutes | Off | Visual context only; never contributes hectares. |
 
 The Meteosat rectangles are explicitly approximate viewing-geometry footprints. The source's `scan` and `track` columns are retained for provenance but are not physical kilometre dimensions for these products.
 
 FIRMS confidence is shown as high, nominal, low, or unknown according to the provider's product-specific field. Fire Radiative Power, or FRP, is a relative measure of radiant energy in megawatts at the observation time. It is not temperature, burned area, fire duration, or a direct severity score.
 
-Polar detections remain available on the historical timeline. Meteosat is an instantaneous, coarse context layer and fades after its 15-minute scan window. All underlying rows remain stored.
+Raw polar footprints fade linearly and disappear from the current map after 24 hours. Meteosat uses a 15-minute scan window. Both remain available on their historical timeline frames, all underlying rows remain stored, and qualifying polar evidence can still support the separate 30-day Best estimate.
 
 The service is checked by the five-minute scheduler, but a 15-minute database lease protects the limited NASA API allowance. Every successful poll merges exact rows into history and archives the five raw product responses. The UI distinguishes:
 
@@ -303,7 +305,7 @@ Therefore “checked just now, three rows returned, no newer heat” is a valid 
 
 ### EFFIS
 
-The Copernicus European Forest Fire Information System WFS is polled every six hours for a daily product. The site selects the geometry nearest the incident within the configured local search and calculates its local polygon area. The orange outline is carried forward on the timeline until a newer daily product arrives. It never alters the Best estimate.
+The Copernicus European Forest Fire Information System WFS is polled every six hours for a daily product. The site selects the geometry nearest the incident within the configured local search and calculates its local polygon area. Because later `TIME` queries can return exactly the same retained geometry, the viewer compares the coordinates and records when that geometry actually changed. It fades for 72 hours from that date and then leaves the current map. Query records and historical geometry remain in PostgreSQL. EFFIS never alters the Best estimate.
 
 ### Sentinel-2
 
@@ -313,11 +315,13 @@ The catalogue is checked every five minutes, but large raster assets are process
 
 A small purple patch is not a failure when most of the paired scene is obscured or rejected. It means only that the patch is the part for which the strict method has positive, clear evidence.
 
+The purple source layer fades over 30 days. This visual ageing does not remove its retained analysis or change the independently calculated Best estimate.
+
 ### Sentinel-3
 
-The Sentinel-3 SLSTR NRT FRP catalogue is checked every 30 minutes. Incident-intersecting overpasses and public previews are retained. A catalogue intersection or swath preview is not automatically a local heat point. Only coordinate-level FRP rows can be drawn as local detections.
+The Sentinel-3 SLSTR NRT FRP catalogue is checked every 30 minutes. Incident-intersecting overpasses and public previews are retained. A catalogue intersection or swath preview is not a local heat point. The linked coordinate-level FRP measurement assets require authenticated Copernicus data access and are not currently connected. If connected, only those coordinate measurements could become map detections, and they would fade over 24 hours.
 
-At the audited time, 12 passes intersected the incident search but none exposed usable local coordinates, so Sentinel-3 correctly added no map detections and no area.
+At the audited time, 12 passes intersected the incident search, but the measurement assets were not connected, so Sentinel-3 added no map detections and no area. The site labels this as catalogue-only coverage rather than interpreting zero plotted points as a negative satellite observation.
 
 ### Sentinel-1
 
@@ -386,6 +390,8 @@ CAMS supplies two optional layers:
 They are hourly Copernicus ensemble forecasts on a coarse 0.1° grid, roughly 10 km here. They are not local sensor measurements and do not describe the fire geometry. The wildfire-only attribution is itself modelled.
 
 The database retains both the georeferenced forecast crop and exact incident-grid values. The public colour style saturates at 500 µg/m³. The image edge is feathered so that the rectangular data crop is not mistaken for the boundary of a pollution plume; any remaining grid-like appearance comes from the product's coarse model cells.
+
+ECMWF can replace already valid hours when its new daily forecast cycle is published. Every retained frame therefore records both its valid time and forecast-cycle time. When a cycle changes, the ingest refreshes that cycle's elapsed UTC hours as one atomic set; the viewer selects the newest coherent cycle while superseded revisions remain in PostgreSQL for audit. A forecast-cycle change must never be interpreted as the atmosphere changing instantaneously.
 
 ## Aircraft data
 
@@ -583,7 +589,7 @@ Each product has a different footprint and false-positive/displacement risk. Uni
 
 ### “Why can the estimate get smaller?”
 
-It is an evidence estimate for the selected time, not a cumulative burned-area claim. The algorithm uses only the newest qualifying MODIS pass and expires aircraft edge evidence after 24 hours. Replacing temporary support can remove cells while all raw history remains available.
+It is a 30-day evidence estimate for the selected time, not a permanent burned-area claim. Qualifying cells leave the public footprint when they reach the retention cutoff while all raw history remains available. Red becomes black after 24 hours; that colour change is an evidence-age rule, not proof that the fire is out.
 
 ### “Why does Sentinel-2 show only a small part?”
 

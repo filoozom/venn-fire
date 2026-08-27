@@ -32,6 +32,7 @@ const layout = await page.evaluate(() => ({
   mapTiles: document.querySelectorAll('.leaflet-tile-loaded').length,
   aircraftMarkers: document.querySelectorAll('.aircraft-map-marker').length,
   aircraftSnapshot: [...document.querySelectorAll('.snapshot-card')].find((card) => card.textContent.includes('AIRCRAFT'))?.textContent.trim(),
+  reportedActivity: document.querySelector('.reported-activity-banner')?.textContent.replace(/\s+/g, ' ').trim() ?? null,
   windArrowTransform: getComputedStyle(document.querySelector('.big-wind-arrow svg')).transform,
 }))
 

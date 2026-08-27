@@ -17,22 +17,22 @@ If you can say that naturally, you already have the main story.
 ## The three numbers to memorize
 
 1. **Reported area** — a quoted source figure. It is carried forward until another report changes it and can mean “affected,” not uniformly burned.
-2. **Best estimate** — the site's derived red outline on a 50 m grid. It combines strict satellite evidence and conservative incident-local aircraft support. It is reproducible but not official.
+2. **Best estimate** — the site's derived 50 m evidence union. Black retains qualifying estimated burned ground for 30 days; red is the subset with qualifying thermal or aircraft evidence from the previous 24 hours. It is reproducible but not official.
 3. **EFFIS area** — an independent, broad, daily algorithmic VIIRS envelope. It is a comparison, not ground truth, and never modifies the Best estimate.
 
 Audited example: reported about **3,000 ha**, Best estimate **3,057 ha**, EFFIS **6,334 ha**. The disagreement is expected because they answer different questions.
 
 ## How the Best estimate works
 
-Remember: **VIIRS core → newest MODIS support → clear Sentinel-2 change → repeated local GRZLY turns → one 50 m union.**
+Remember: **30-day VIIRS core → one retained supported MODIS pass → clear Sentinel-2 change → repeated local GRZLY turns → one 50 m union; recent evidence red, older evidence black.**
 
 - **VIIRS core:** at least two independent VIIRS spacecraft support the same approximate location, with at least one high-confidence observation.
-- **MODIS:** only high-confidence pixels from the newest Terra/Aqua pass can extend an existing supported edge. Its coarse 1 km pixels cannot create the core and old passes do not accumulate forever.
-- **Sentinel-2:** compares pre- and post-fire near-/short-wave infrared imagery. Only clear, strong, connected positive dNBR change near the thermal core is added. Cloudy or rejected pixels are unknown, not unburned.
-- **Aircraft:** only repeated sharp `GRZLY##` turns near the thermal edge can add small compact lobes. The full route, approach, water-source run, and isolated outliers are excluded. This is support, never proof of a drop.
-- **Union:** everything is rasterized to 50 m cells. The red geometry and hectare figure come from exactly the same cells. There is no “touched zone.”
+- **MODIS:** only high-confidence pixels from one newest qualifying Terra/Aqua pass inside the 30-day window can extend an existing supported edge. Its coarse 1 km pixels cannot create the core and multiple old passes do not accumulate.
+- **Sentinel-2:** compares pre- and post-fire near-/short-wave infrared imagery. Only clear, strong, connected positive dNBR change near the thermal core is added to the black burned footprint. It is never treated as current heat. Cloudy or rejected pixels are unknown, not unburned.
+- **Aircraft:** only repeated sharp `GRZLY##` turns near the thermal edge can add small compact lobes. The full route, approach, water-source run, and isolated outliers are excluded. This is support, never proof of a drop. Accepted support is red for 24 hours, then black until day 30.
+- **Union:** everything is rasterized to 50 m cells. The black footprint and hectare figure come from exactly the same retained cells; red is a non-additive recent subset. There is no separate “touched zone.”
 
-The estimate may shrink when the newest MODIS pass replaces the previous one or 24-hour aircraft support expires. Raw history is still retained.
+The public estimate may shrink when evidence reaches the 30-day cutoff. Raw source history is still retained. The cutoff approximates a one-month visible burn-scar period; it does not measure vegetation regrowth, and no red area does not prove extinguishment.
 
 ## What every major source contributes
 
@@ -48,7 +48,7 @@ The estimate may shrink when the newest MODIS pass replaces the previous one or 
 | GIBS | Daily visual satellite imagery | Measured perimeter |
 | Aircraft receivers | Exact public receiver positions and complete incident-connected sessions | Mission, payload, water drop, or positions inside gaps |
 | RMI/DWD/Open-Meteo | Separate station, radar, and model context | One perfectly blended fire-site weather truth |
-| CAMS | Coarse particulate forecasts | Local sensor measurement or plume boundary |
+| CAMS | Coarse particulate forecasts retained as coherent daily forecast cycles | Local sensor measurement or plume boundary |
 | BE-Alert/municipal feeds/media | Searchable chronology and public communications | A complete archive from before collection began |
 
 ## Five facts that prevent most wrong answers
@@ -57,7 +57,9 @@ The estimate may shrink when the newest MODIS pass replaces the previous one or 
 2. **Five-minute granularity is not five-minute source data.** It is the scheduler/timeline grid; satellites, hourly models, ten-minute stations, and daily products keep their real cadence.
 3. **No detection is not proof of no fire.** Cloud, smoke, canopy, overpass timing, scan geometry, sensitivity, and receiver coverage all create gaps.
 4. **Map visibility is not estimate membership.** Layer switches and FIRMS confidence filters change the drawing, not the estimate algorithm.
-5. **Everything important is retained.** PostgreSQL holds current normalized datasets, immutable changed-content versions, refresh runs, raw artifacts, and exact aircraft observations. Public tracks merely fade and disappear after 24 hours.
+5. **Map expiry is not deletion.** PostgreSQL retains normalized datasets, changed-content versions, refresh runs, raw artifacts, and exact observations. Time-sensitive map evidence fades according to its cadence: radar 60 minutes; FIRMS, connected Sentinel-3 measurements and aircraft 24 hours; CAMS three hours; GIBS and unchanged EFFIS geometry 72 hours; Sentinel-2 change 30 days. Sentinel-3 is currently catalogue-only.
+
+CAMS can revise already valid hourly fields when its daily forecast cycle changes. The viewer refreshes the elapsed hours from that cycle together, so an upstream model revision is not drawn as a five-minute atmospheric collapse; replaced artifacts remain auditable.
 
 ## Architecture in 20 seconds
 
@@ -91,8 +93,8 @@ Do not memorize these as permanent figures—memorize how to explain their times
 
 ## Rapid interview answers
 
-**Is the red outline official?**  
-No. It is a transparent, reproducible evidence estimate. Authorities remain authoritative.
+**Are the black and red areas official?**
+No. They are two age states of the same transparent, reproducible evidence estimate. Authorities remain authoritative.
 
 **Why are FIRMS points not a perimeter?**  
 They are sensor footprints around thermal anomalies at specific times. Resolution and uncertainty differ by product.
@@ -110,7 +112,7 @@ The route may show repeated incident-local manoeuvres, but public receiver data 
 No qualifying public receiver observations were retained for that day. Coverage, transponder use, provider history, and actual operations can all explain that; the site cannot infer missing positions.
 
 **Why can the estimate decrease?**  
-Newest-pass MODIS support replaces older support, and aircraft-derived support expires after 24 hours. It is a current evidence estimate, not a cumulative scar claim.
+Qualifying evidence leaves the public footprint after 30 days. It remains in PostgreSQL, but the map does not claim a permanent scar. Red also becomes black after 24 hours; that colour change is not proof that the ground is extinguished.
 
 **Does the site cache provider data?**  
 It stores it durably in PostgreSQL. The public API uses `no-store`; database leases prevent duplicate upstream calls.

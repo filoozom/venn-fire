@@ -39,7 +39,7 @@ Die folgenden Werte veranschaulichen den Stand bei Erstellung dieses Leitfadens.
 | Wetterüberschrift | WSW aus 246°, in Richtung 66°; 17,7 km/h, Böen bis 28,3 km/h; 14 °C; 97,2 % relative Luftfeuchtigkeit | Nahezu aktuelle Messung der Station Mont Rigi, als vorläufig gekennzeichnet. Die Richtung bezeichnet, **woher** der Wind kommt; die Website nennt zusätzlich, wohin er **weht**. |
 | Neuester Niederschlag am Vorfallort | RMI: im ausgewählten Bild nichts erkannt | Kategorische Radarbeobachtung, kein Nachweis, dass jeder Punkt am Boden trocken war. |
 | Sentinel-2-Vergleich | Vor dem Brand: 14. August gegen 12:47 Uhr MESZ; danach: 16. August gegen 12:47 Uhr MESZ; 21,9 % klar; 187,92 ha rohe qualifizierende Änderung; 796 akzeptierte 50-Meter-Zellen, entsprechend 199 ha vor Überlappung mit anderen Belegen | Gezeigt werden nur klare, qualifizierende positive spektrale Änderungen. Der nicht beobachtete Großteil ist unbekannt, nicht unverbrannt. |
-| Sentinel-3 | 12 den Vorfall schneidende Überflüge; 0 lokale koordinatengenaue Detektionen | Katalogtreffer und Vorschauen sind vorhanden, aber es standen keine lokal nutzbaren FRP-Zeilen mit Koordinaten zur Verfügung. |
+| Sentinel-3 | 12 den Vorfall schneidende Überflüge; 0 lokale koordinatengenaue Detektionen | Katalogtreffer und Vorschauen sind vorhanden; die koordinatengenauen FRP-Daten erfordern authentifizierten Copernicus-Datenzugriff und waren nicht angebunden. |
 | Sentinel-1 | 30 Aufnahmen; 2 vergleichbare Paare; 0 kalibrierte Änderungsanalysen | Nur Katalog- und Vorschaubildkontext. Das Produkt verändert derzeit die Schätzung nicht. |
 | Copernicus EMS | 0 Treffer zum Vorfall | Im synchronisierten Katalog wurde keine passende Aktivierung gefunden. EMSR920 bei Hürtgen war ein separates Ereignis etwa 32 km entfernt. |
 | NASA GIBS | 10 gespeicherte Bilder bis einschließlich 18. August | Täglicher visueller Kontext, keine gemessene Brandgrenze. |
@@ -57,9 +57,9 @@ Der Wert ändert sich ausschließlich, wenn eine belegte Meldung ihn ändert. Da
 
 ### Best estimate
 
-Die „Best estimate“ ist die Fläche einer einzigen durchgezogenen roten Rasterunion mit 50-Meter-Zellen, die von der Website abgeleitet wird. Sie kombiniert ausschließlich qualifizierende Belege aus bestätigten VIIRS-Detektionen, dem neuesten gestützten MODIS-Überflug, positiven wolkenfreien Sentinel-2-Änderungen und streng begrenzten lokalen Kurvenbewegungen von GRZLY-Flugzeugen.
+Die „Best estimate“ ist eine von der Website abgeleitete 50-Meter-Evidenzunion. Schwarz zeigt qualifizierten, geschätzt verbrannten Boden, der 30 Tage sichtbar bleibt; Rot zeigt die Teilmenge mit qualifizierenden Wärme- oder Flugzeugbelegen aus den letzten 24 Stunden. Sie kombiniert bestätigte VIIRS-Detektionen, höchstens einen gespeicherten gestützten MODIS-Überflug, positive wolkenfreie Sentinel-2-Änderungen und streng begrenzte lokale Kurvenbewegungen von GRZLY-Flugzeugen.
 
-Die Bezeichnung „Schätzung“ ist bewusst gewählt. Sie ist weder amtlich noch im Feld vermessen und wird weder als Ober- noch als Untergrenze ausgegeben. Die dargestellte Zahl und die sichtbare Kontur werden aus demselben Raster berechnet und können deshalb nicht unbemerkt voneinander abweichen.
+Die Bezeichnung „Schätzung“ ist bewusst gewählt. Sie ist weder amtlich noch im Feld vermessen und wird weder als Ober- noch als Untergrenze ausgegeben. Die dargestellte Zahl und die schwarze Fläche werden aus demselben Raster berechnet; Rot ist eine darin enthaltene, nicht addierbare Teilmenge. Die Zeitfenster sind Darstellungsregeln und keine Messung von Löscherfolg oder Vegetationswachstum.
 
 ### EFFIS-Fläche
 
@@ -163,7 +163,7 @@ Die Website kann eine vom Nutzer ausgewählte GeoJSON-`LineString` oder CSV-Date
 
 | Ebene | Standard | Kann die „Best estimate“ beeinflussen? | Zweck |
 | --- | --- | --- | --- |
-| Kontur der „Best estimate“ | Ein | Sie **ist** die Schätzung | Durchgezogene rote abgeleitete Evidenzunion und zugehörige Fläche. |
+| Kontur der „Best estimate“ | Ein | Sie **ist** die Schätzung | Schwarze, 30 Tage gespeicherte Evidenzunion mit zugehöriger Fläche; ihre aktive/aktuelle Teilmenge unter 24 Stunden ist rot. |
 | EFFIS | Ein | Nein | Breite unabhängige tägliche algorithmische Hülle. |
 | Sentinel-2-Änderung | Ein | Ja, unter den dokumentierten Regeln für klare Pixel | Positive, wolkenfreie, mit Brandwirkung vereinbare spektrale Änderung. |
 | Sentinel-3 | Ein | In den aktuellen Daten nein | Katalog- und Vorschaubildkontext; nur koordinatengenaue FRP-Daten könnten zu lokalen Punkten werden. |
@@ -175,7 +175,7 @@ Die Website kann eine vom Nutzer ausgewählte GeoJSON-`LineString` oder CSV-Date
 | VIIRS Suomi-NPP | Ein | Ja, über die Bestätigungsregeln | Thermische Polarsatelliten-Detektionen der 375-m-Klasse. |
 | VIIRS NOAA-20 | Ein | Ja, über die Bestätigungsregeln | Unabhängige thermische Polarsatelliten-Detektionen der 375-m-Klasse. |
 | VIIRS NOAA-21 | Ein | Ja, über die Bestätigungsregeln | Unabhängige thermische Polarsatelliten-Detektionen der 375-m-Klasse. |
-| MODIS Terra/Aqua | Aus | Nur der neueste qualifizierende gestützte Überflug | Thermische Unterstützung der 1-km-Klasse; bildet niemals allein den Kern. |
+| MODIS Terra/Aqua | Aus | Höchstens ein gespeicherter qualifizierender gestützter Überflug | Thermische Unterstützung der 1-km-Klasse; bildet niemals allein den Kern. |
 | Meteosat | Aus | Niemals | Häufiger, aber sehr grober geostationärer Wärmekontext. |
 | Flugzeugspuren | Ein | Nur gefilterte, wiederholt gestützte Kurven von `GRZLY##` | Durch Empfänger gestützte Routen und konservative lokale Randbelege. |
 | Open-Meteo-Wind | Ein | Nein | Stündliches Wettermodellraster. |
@@ -190,6 +190,8 @@ Hohe und nominelle FIRMS-Konfidenz sind standardmäßig sichtbar; niedrige Konfi
 
 Jede Berechnung verwendet ausschließlich Belege, deren Aufnahmezeit am oder vor dem ausgewählten Zeitstrahlpunkt liegt. Derselbe Algorithmus kann daher rekonstruieren, was die Website zu jedem Fünf-Minuten-Zeitpunkt vernünftigerweise hätte zeigen können, ohne spätere Erkenntnisse zu verwenden.
 
+Qualifizierende Belege bleiben 30 Tage in der öffentlichen verbrannten Fläche. Wärme- und flugzeuggestützte Belege sind ausschließlich während der ersten 24 Stunden rot und danach bis zum Ablauf des Zeitfensters schwarz. Sentinel-2-dNBR trägt nur zu Schwarz bei, weil es eine spektrale Brandänderung und keine aktuelle Hitzemessung ist. Keine rote Fläche bedeutet daher „keine qualifizierenden aktuellen Belege für die Umrisslinie“, nicht „keine gemeldete Brandaktivität“ oder „nachweislich gelöscht“. Eine aktuelle, belegte Meldung über ein Wiederaufflammen wird separat angezeigt, statt in erfundene Geometrie umgewandelt zu werden.
+
 ### 2. Bestätigter VIIRS-Kern
 
 Der thermische Kern verwendet die drei polaren VIIRS-Produkte Suomi-NPP, NOAA-20 und NOAA-21. Detektionen werden in einem räumlichen Raster von ungefähr 0,005° zusammengefasst, was an diesem Ort etwa 500 m entspricht.
@@ -203,15 +205,15 @@ Die Bestätigung ist räumlich und bis zum ausgewählten Zeitpunkt kumulativ; di
 
 Diese Regel verringert das Risiko, dass ein einzelner verrauschter oder versetzter Satellitenpunkt allein einen großen Rand festlegt. Feuer kann dennoch durch Wolken, Rauch, Abtastlücken oder ungünstige Überflugzeiten fehlen.
 
-### 3. Unterstützung durch den neuesten MODIS-Überflug
+### 3. Unterstützung durch einen gespeicherten MODIS-Überflug
 
 MODIS Terra und Aqua haben gröbere thermische Pixel von ungefähr 1 km. MODIS darf die bestehende Schätzung nur erweitern, wenn alle folgenden Bedingungen erfüllt sind:
 
 - Die Detektion besitzt hohe Konfidenz.
-- Sie gehört zum neuesten verfügbaren Fünf-Minuten-Terra-/Aqua-Überflug am ausgewählten Zeitpunkt.
+- Sie gehört zum neuesten qualifizierenden Terra-/Aqua-Überflug innerhalb des 30-Tage-Fensters.
 - Ihr qualifizierender Fußabdruck liegt höchstens 500 m vom bestätigten VIIRS-Kern oder einem akzeptierten flugzeuggestützten Rand entfernt.
 
-MODIS kann keinen eigenständigen Kern bilden und zählt nicht als zweiter VIIRS-Satellit. Es wird nur der neueste gestützte Überflug verwendet, damit sich aufeinanderfolgende grobe Momentaufnahmen nicht unbegrenzt zu einer aufgeblähten Brandnarbe addieren. Deshalb muss die Schätzung auch nicht monoton wachsen. Am 15. August änderte beispielsweise der Ersatz eines gestützten MODIS-Überflugs durch den nächsten die Schätzung von ungefähr 3.572 ha auf 3.012 ha.
+MODIS kann keinen eigenständigen Kern bilden und zählt nicht als zweiter VIIRS-Satellit. Höchstens ein gestützter Überflug bleibt enthalten, damit sich aufeinanderfolgende grobe Momentaufnahmen nicht zu einer aufgeblähten Brandnarbe addieren. Ein neuerer, nicht gestützter Überflug löscht einen früher akzeptierten Brandrand nicht; der gespeicherte Überflug verlässt die öffentliche Fläche jedoch nach 30 Tagen.
 
 ### 4. Positive Sentinel-2-Änderungsbelege
 
@@ -260,11 +262,11 @@ Jedes getrennte lokale Cluster erzeugt nur seine kompakte, kürzeste Ausbuchtung
 
 Das ist ein Hinweis auf ein wiederholtes Manövermuster nahe einem thermisch gestützten Rand. Öffentliche Empfängerdaten enthalten weder Nutzlastzustand noch amtliche Einsatzaufzeichnung. Das Ergebnis ist deshalb kein Nachweis eines Wasserabwurfs, einer Feuerfront oder auch nur des konkreten Auftrags des Flugzeugs.
 
-Der Flugzeugbeitrag läuft nach 24 Stunden aus der aktuellen „Best estimate“ aus, entsprechend dem Relevanzfenster der Spurendarstellung. Exakte historische Beobachtungen bleiben in PostgreSQL erhalten.
+Der Flugzeugbeitrag bleibt nach dem letzten qualifizierenden Manöver 24 Stunden rot, entsprechend dem Relevanzfenster der Spurendarstellung. Die akzeptierte kompakte Ausbuchtung bleibt danach bis zur 30-Tage-Grenze schwarz. Exakte historische Beobachtungen bleiben in PostgreSQL erhalten.
 
 ### 6. Eine aufgelöste 50-Meter-Union
 
-Alle akzeptierten Belege werden auf dasselbe 50-Meter-Raster übertragen und zu einer einzigen Geometrie aufgelöst. Eine volle Rasterzelle entspricht 2.500 m² beziehungsweise 0,25 ha. Überlappungen werden nur einmal gezählt. Die angezeigten Hektar werden aus exakt den Zellen berechnet, welche die rote Kontur bilden.
+Alle akzeptierten Belege werden auf dasselbe 50-Meter-Raster übertragen und zu einer einzigen Geometrie aufgelöst. Eine volle Rasterzelle entspricht 2.500 m² beziehungsweise 0,25 ha. Überlappungen werden nur einmal gezählt. Die angezeigten Hektar werden aus exakt den Zellen der schwarzen 30-Tage-Fläche berechnet. Rot ist die aktuelle Teilmenge und darf nicht zum Gesamtwert addiert werden.
 
 Eine separate „Touched zone“ gibt es nicht. Sie wurde entfernt, weil ihr äußerer historischer Rand verlässlicher wirkte, als es die Belege rechtfertigten.
 
@@ -283,14 +285,14 @@ FIRMS ist die Hauptquelle für rohe satellitengestützte Wärmebeobachtungen. Di
 | VIIRS Suomi-NPP | Etwa 375 m; ungefähr zwei polare Überflüge pro Tag | Ein | Kann zum bestätigten Kern beitragen. |
 | VIIRS NOAA-20 | Etwa 375 m; ungefähr zwei polare Überflüge pro Tag | Ein | Kann zum bestätigten Kern beitragen. |
 | VIIRS NOAA-21 | Etwa 375 m; ungefähr zwei polare Überflüge pro Tag | Ein | Kann zum bestätigten Kern beitragen. |
-| MODIS Terra/Aqua | Etwa 1 km; zusammen bis zu ungefähr vier Beobachtungsmöglichkeiten pro Tag | Aus | Nur der neueste hochkonfidente gestützte Überflug darf den Kern erweitern. |
+| MODIS Terra/Aqua | Etwa 1 km; zusammen bis zu ungefähr vier Beobachtungsmöglichkeiten pro Tag | Aus | Höchstens ein neuester qualifizierender hochkonfidenter Überflug im 30-Tage-Fenster darf den Kern erweitern. |
 | GOES_NRT Meteosat | Hier je nach Satellit und Blickgeometrie ungefähr 2,1 × 4,1 km bis 3,3 × 9,1 km; gewöhnlich alle 10 bis 15 Minuten | Aus | Nur visueller Kontext; trägt niemals Hektar bei. |
 
 Die Meteosat-Rechtecke sind ausdrücklich angenäherte Fußabdrücke der Blickgeometrie. Die Quellfelder `scan` und `track` werden zur Nachvollziehbarkeit gespeichert, stellen für diese Produkte aber keine physischen Kilometermaße dar.
 
 FIRMS-Konfidenz erscheint abhängig vom produktspezifischen Anbieterfeld als hoch, nominell, niedrig oder unbekannt. Die Fire Radiative Power (FRP) ist ein relatives Maß der abgestrahlten Leistung in Megawatt zum Beobachtungszeitpunkt. Sie ist weder Temperatur noch verbrannte Fläche, Branddauer oder direkter Schweregrad.
 
-Polare Detektionen bleiben auf dem historischen Zeitstrahl verfügbar. Meteosat ist eine momentane, grobe Kontextebene und verschwindet nach seinem 15-Minuten-Abtastfenster. Alle zugrunde liegenden Zeilen bleiben gespeichert.
+Rohe polare Fußabdrücke verblassen linear und verschwinden nach 24 Stunden von der aktuellen Karte. Für Meteosat gilt ein 15-Minuten-Abtastfenster. Beide bleiben auf ihren historischen Zeitstrahlbildern verfügbar, sämtliche Zeilen bleiben gespeichert und qualifizierende polare Belege können weiterhin die getrennte 30-Tage-Schätzung stützen.
 
 Der Dienst wird durch den Fünf-Minuten-Scheduler geprüft; eine 15-minütige Datenbanksperre schützt jedoch das begrenzte NASA-API-Kontingent. Jede erfolgreiche Abfrage führt exakte Zeilen mit der Historie zusammen und archiviert die fünf rohen Produktantworten. Die Oberfläche unterscheidet:
 
@@ -303,7 +305,7 @@ Deshalb ist „gerade geprüft, drei Zeilen zurückgegeben, keine neuere Wärme�
 
 ### EFFIS
 
-Der WFS des Copernicus European Forest Fire Information System wird alle sechs Stunden auf ein tägliches Produkt geprüft. Die Website wählt die dem Vorfall nächstgelegene Geometrie innerhalb des lokalen Suchbereichs und berechnet ihre Polygonfläche. Die orange Kontur wird auf dem Zeitstrahl fortgeschrieben, bis ein neueres Tagesprodukt erscheint. Sie verändert die „Best estimate“ niemals.
+Der WFS des Copernicus European Forest Fire Information System wird alle sechs Stunden auf ein tägliches Produkt geprüft. Die Website wählt die dem Vorfall nächstgelegene Geometrie innerhalb des lokalen Suchbereichs und berechnet ihre Polygonfläche. Da spätere `TIME`-Abfragen exakt dieselbe gespeicherte Geometrie zurückgeben können, vergleicht die Anzeige die Koordinaten und merkt sich, wann sich die Form tatsächlich geändert hat. Ab diesem Datum verblasst sie 72 Stunden lang und verschwindet danach von der aktuellen Karte. Abfragen und historische Geometrien bleiben in PostgreSQL gespeichert. EFFIS verändert die „Best estimate“ niemals.
 
 ### Sentinel-2
 
@@ -313,11 +315,13 @@ Der Katalog wird alle fünf Minuten geprüft, große Rasterdaten werden jedoch n
 
 Ein kleiner violetter Bereich ist kein Fehler, wenn der Großteil des Bildpaares verdeckt oder verworfen wurde. Er bedeutet lediglich, dass das strenge Verfahren dort positive, klare Belege besitzt.
 
+Die violette Quellenebene verblasst über 30 Tage. Diese visuelle Alterung entfernt weder die gespeicherte Analyse noch verändert sie die unabhängig berechnete „Best estimate“.
+
 ### Sentinel-3
 
-Der Sentinel-3-SLSTR-NRT-FRP-Katalog wird alle 30 Minuten geprüft. Überflüge, die den Vorfall schneiden, und öffentliche Vorschaubilder werden gespeichert. Ein Katalogtreffer oder eine Vorschau des Satellitenstreifens wird nicht automatisch zu einem lokalen Wärmepunkt. Nur FRP-Zeilen mit Koordinaten können als lokale Detektionen dargestellt werden.
+Der Sentinel-3-SLSTR-NRT-FRP-Katalog wird alle 30 Minuten geprüft. Überflüge, die den Vorfall schneiden, und öffentliche Vorschaubilder werden gespeichert. Ein Katalogtreffer oder eine Vorschau des Satellitenstreifens ist kein lokaler Wärmepunkt. Die verknüpften koordinatengenauen FRP-Messdaten erfordern authentifizierten Copernicus-Datenzugriff und sind derzeit nicht angebunden. Bei einer Anbindung könnten nur diese Koordinatenmessungen als Kartendetektionen erscheinen; sie würden über 24 Stunden verblassen.
 
-Zum geprüften Zeitpunkt schnitten 12 Überflüge den Suchbereich des Vorfalls, keiner stellte jedoch nutzbare lokale Koordinaten bereit. Sentinel-3 fügte daher korrekterweise weder Kartenpunkte noch Fläche hinzu.
+Zum geprüften Zeitpunkt schnitten 12 Überflüge den Suchbereich des Vorfalls, die Messdaten waren jedoch nicht angebunden. Sentinel-3 fügte deshalb weder Kartenpunkte noch Fläche hinzu. Die Website bezeichnet dies als reine Katalogabdeckung, statt null dargestellte Punkte als negative Satellitenbeobachtung zu deuten.
 
 ### Sentinel-1
 
@@ -386,6 +390,8 @@ CAMS liefert zwei optionale Ebenen:
 Es handelt sich um stündliche Copernicus-Ensembleprognosen auf einem groben 0,1°-Raster, hier ungefähr 10 km. Sie sind keine lokalen Sensormessungen und beschreiben nicht die Brandgeometrie. Auch die Zuordnung ausschließlich zu Waldbränden stammt aus einem Modell.
 
 Die Datenbank speichert sowohl den georeferenzierten Prognoseausschnitt als auch exakte Werte der Rasterzelle am Vorfall. Die öffentliche Farbskala sättigt bei 500 µg/m³. Der Bildrand wird weich ausgeblendet, damit die rechteckige Datenauswahl nicht als Grenze einer Rauchfahne missverstanden wird; ein verbleibender rasterartiger Eindruck stammt von den groben Modellzellen.
+
+ECMWF kann bereits gültige Stunden ersetzen, sobald ein neuer täglicher Prognoselauf veröffentlicht wird. Deshalb speichert jedes Bild sowohl seine Gültigkeitszeit als auch den Zeitpunkt des Prognoselaufs. Bei einem Laufwechsel aktualisiert der Import die bereits vergangenen UTC-Stunden dieses Laufs als einen atomaren Datensatz; die Anzeige wählt den neuesten zusammenhängenden Lauf, während ersetzte Versionen zur Prüfung in PostgreSQL erhalten bleiben. Ein Wechsel des Prognoselaufs darf nicht als augenblickliche Veränderung der Atmosphäre verstanden werden.
 
 ## Flugzeugdaten
 
@@ -583,7 +589,7 @@ Jedes Produkt besitzt eine andere Auflösung und ein anderes Risiko für Fehlala
 
 ### „Warum kann die Schätzung kleiner werden?“
 
-Sie ist eine Evidenzschätzung für den ausgewählten Zeitpunkt und keine Behauptung einer kumulativen verbrannten Fläche. Der Algorithmus verwendet nur den neuesten qualifizierenden MODIS-Überflug; flugzeugbasierte Randbelege laufen nach 24 Stunden aus. Das Ersetzen vorübergehender Unterstützung kann Zellen entfernen, während sämtliche Rohhistorie erhalten bleibt.
+Sie ist eine 30-Tage-Evidenzschätzung für den ausgewählten Zeitpunkt und keine Behauptung einer dauerhaften verbrannten Fläche. Qualifizierende Zellen verlassen die öffentliche Fläche an der Zeitgrenze, während sämtliche Rohhistorie erhalten bleibt. Rot wird nach 24 Stunden schwarz; dieser Farbwechsel ist eine Regel zum Alter der Belege und kein Nachweis, dass der Brand gelöscht ist.
 
 ### „Warum zeigt Sentinel-2 nur einen kleinen Teil?“
 

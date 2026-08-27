@@ -17,22 +17,22 @@ Wenn du das natürlich formulieren kannst, beherrschst du bereits die Kernaussag
 ## Die drei Zahlen, die du kennen musst
 
 1. **Gemeldete Fläche** — eine aus einer Quelle zitierte Zahl. Sie wird bis zur nächsten Meldung fortgeschrieben und kann „betroffen“ bedeuten, nicht vollständig oder gleichmäßig verbrannt.
-2. **Best estimate (beste Schätzung)** — die abgeleitete rote Kontur der Website auf einem 50-Meter-Raster. Sie kombiniert strenge Satellitenbelege mit konservativer, lokal auf den Einsatz bezogener Flugzeugunterstützung. Sie ist reproduzierbar, aber nicht amtlich.
+2. **Best estimate (beste Schätzung)** — die abgeleitete Evidenzunion der Website auf einem 50-Meter-Raster. Schwarz hält qualifizierten, geschätzt verbrannten Boden 30 Tage sichtbar; Rot ist die Teilmenge mit qualifizierenden Wärme- oder Flugzeugbelegen aus den letzten 24 Stunden. Sie ist reproduzierbar, aber nicht amtlich.
 3. **EFFIS-Fläche** — eine unabhängige, breite, täglich algorithmisch erzeugte VIIRS-Hülle. Sie dient als Vergleich, nicht als Ground Truth, und verändert die „Best estimate“ niemals.
 
 Geprüftes Beispiel: gemeldet etwa **3.000 ha**, „Best estimate“ **3.057 ha**, EFFIS **6.334 ha**. Die Abweichung ist zu erwarten, weil die drei Werte unterschiedliche Fragen beantworten.
 
 ## So entsteht die „Best estimate“
 
-Merksatz: **VIIRS-Kern → neueste MODIS-Unterstützung → wolkenfreie Sentinel-2-Änderung → wiederholte lokale GRZLY-Kurven → eine 50-Meter-Union.**
+Merksatz: **VIIRS-Kern der letzten 30 Tage → ein gespeicherter gestützter MODIS-Überflug → wolkenfreie Sentinel-2-Änderung → wiederholte lokale GRZLY-Kurven → eine 50-Meter-Union; neue Belege rot, ältere schwarz.**
 
 - **VIIRS-Kern:** Mindestens zwei unabhängige VIIRS-Satelliten stützen ungefähr denselben Ort; mindestens eine Beobachtung besitzt hohe Konfidenz.
-- **MODIS:** Nur hochkonfidente Pixel des neuesten Terra-/Aqua-Überflugs dürfen einen bereits gestützten Rand erweitern. Die groben 1-km-Pixel können keinen eigenen Kern bilden, und alte Überflüge werden nicht unbegrenzt aufaddiert.
-- **Sentinel-2:** Verglichen werden Nah- und Kurzwelleninfrarotbilder vor und nach dem Brand. Hinzugefügt werden ausschließlich klare, starke, zusammenhängende positive dNBR-Änderungen in der Nähe des thermischen Kerns. Bewölkte oder verworfene Pixel sind unbekannt, nicht unverbrannt.
-- **Flugzeuge:** Nur wiederholte scharfe Kurven von `GRZLY##` nahe dem thermischen Rand können kleine, kompakte Ausbuchtungen hinzufügen. Die vollständige Route, An- und Abflug, der Weg zur Wasserquelle und isolierte Ausreißer werden ausgeschlossen. Das ist ein unterstützender Hinweis, niemals der Nachweis eines Abwurfs.
-- **Union:** Sämtliche Belege werden auf 50-Meter-Zellen gerastert. Die rote Geometrie und die Hektarangabe stammen exakt aus denselben Zellen. Eine separate „Touched zone“ gibt es nicht.
+- **MODIS:** Nur hochkonfidente Pixel eines neuesten qualifizierenden Terra-/Aqua-Überflugs innerhalb des 30-Tage-Fensters dürfen einen bereits gestützten Rand erweitern. Die groben 1-km-Pixel können keinen eigenen Kern bilden, und mehrere alte Überflüge werden nicht aufaddiert.
+- **Sentinel-2:** Verglichen werden Nah- und Kurzwelleninfrarotbilder vor und nach dem Brand. Hinzugefügt werden ausschließlich klare, starke, zusammenhängende positive dNBR-Änderungen in der Nähe des thermischen Kerns — und zwar zur schwarzen Brandfläche, niemals als Behauptung aktueller Hitze. Bewölkte oder verworfene Pixel sind unbekannt, nicht unverbrannt.
+- **Flugzeuge:** Nur wiederholte scharfe Kurven von `GRZLY##` nahe dem thermischen Rand können kleine, kompakte Ausbuchtungen hinzufügen. Die vollständige Route, An- und Abflug, der Weg zur Wasserquelle und isolierte Ausreißer werden ausgeschlossen. Das ist ein unterstützender Hinweis, niemals der Nachweis eines Abwurfs. Akzeptierte Unterstützung bleibt 24 Stunden rot und danach bis zum 30. Tag schwarz.
+- **Union:** Sämtliche Belege werden auf 50-Meter-Zellen gerastert. Die schwarze Fläche und die Hektarangabe stammen exakt aus denselben gespeicherten Zellen; Rot ist eine darin enthaltene, nicht addierbare aktuelle Teilmenge. Eine separate „Touched zone“ gibt es nicht.
 
-Die Schätzung kann kleiner werden, wenn ein neuer MODIS-Überflug den vorherigen ersetzt oder flugzeuggestützte Hinweise nach 24 Stunden auslaufen. Die historischen Rohdaten bleiben trotzdem gespeichert.
+Die öffentliche Schätzung kann kleiner werden, sobald Belege die 30-Tage-Grenze erreichen. Die historischen Rohdaten bleiben gespeichert. Das Zeitfenster nähert eine einen Monat lang sichtbare Brandnarbe an; es misst kein Nachwachsen der Vegetation, und das Fehlen roter Flächen beweist nicht, dass der Brand gelöscht ist.
 
 ## Was die wichtigsten Quellen beitragen
 
@@ -48,7 +48,7 @@ Die Schätzung kann kleiner werden, wenn ein neuer MODIS-Überflug den vorherige
 | GIBS | Tägliche visuelle Satellitenbilder | Gemessene Brandgrenze |
 | Flugzeugempfänger | Exakte öffentlich gemeldete Positionen und vollständige einsatzbezogene Sitzungen | Auftrag, Nutzlast, Wasserabwurf oder Positionen innerhalb von Datenlücken |
 | RMI/DWD/Open-Meteo | Getrennte Stations-, Radar- und Modellinformationen | Eine perfekt zusammengeführte Wetterwahrheit am Brandort |
-| CAMS | Grobe Feinstaubprognosen | Lokale Sensormessung oder Rauchfahnengrenze |
+| CAMS | Grobe Feinstaubprognosen aus jeweils einem zusammenhängenden täglichen Prognoselauf | Lokale Sensormessung oder Rauchfahnengrenze |
 | BE-Alert/Kommunen/Medien | Durchsuchbare Chronologie und öffentliche Kommunikation | Vollständiges Archiv aus der Zeit vor Beginn der Erfassung |
 
 ## Fünf Fakten, die die meisten falschen Antworten verhindern
@@ -57,7 +57,9 @@ Die Schätzung kann kleiner werden, wenn ein neuer MODIS-Überflug den vorherige
 2. **Fünf-Minuten-Granularität bedeutet nicht, dass jede Quelle alle fünf Minuten misst.** Sie bezeichnet das Raster von Scheduler und Zeitstrahl; Satelliten, Stundenmodelle, Zehn-Minuten-Stationen und Tagesprodukte behalten ihren echten Rhythmus.
 3. **Keine Detektion beweist nicht, dass kein Feuer vorhanden ist.** Wolken, Rauch, Vegetationsdecke, Überflugzeit, Blickgeometrie, Empfindlichkeit und Empfängerabdeckung erzeugen Lücken.
 4. **Sichtbarkeit auf der Karte ist nicht gleich Mitgliedschaft in der Schätzung.** Ebenenschalter und FIRMS-Konfidenzfilter ändern die Darstellung, nicht den Schätzalgorithmus.
-5. **Alle wichtigen Daten bleiben erhalten.** PostgreSQL speichert aktuelle normalisierte Datensätze, unveränderliche Inhaltsversionen, Aktualisierungsläufe, Rohdaten-Artefakte und exakte Flugzeugbeobachtungen. Öffentliche Flugspuren verblassen lediglich und verschwinden nach 24 Stunden aus der Karte.
+5. **Ablauf auf der Karte bedeutet keine Löschung.** PostgreSQL speichert normalisierte Datensätze, Inhaltsversionen, Aktualisierungsläufe, Rohdaten-Artefakte und exakte Beobachtungen. Zeitabhängige Kartenbelege verblassen entsprechend ihrem Rhythmus: Radar 60 Minuten; FIRMS, angebundene Sentinel-3-Messungen und Flugzeuge 24 Stunden; CAMS drei Stunden; GIBS und unveränderte EFFIS-Geometrie 72 Stunden; Sentinel-2-Änderungen 30 Tage. Sentinel-3 ist derzeit nur als Katalog angebunden.
+
+CAMS kann bereits gültige Stundenfelder ersetzen, wenn der tägliche Prognoselauf wechselt. Die Anzeige aktualisiert die vergangenen Stunden dieses Laufs gemeinsam, damit eine Modellrevision nicht wie ein atmosphärischer Einbruch innerhalb von fünf Minuten erscheint; ersetzte Artefakte bleiben prüfbar.
 
 ## Die Architektur in 20 Sekunden
 
@@ -91,8 +93,8 @@ Lerne diese Zahlen nicht als dauerhafte Werte auswendig — lerne, ihre Zeitstem
 
 ## Schnelle Interviewantworten
 
-**Ist die rote Kontur amtlich?**  
-Nein. Sie ist eine transparente, reproduzierbare Evidenzschätzung. Maßgeblich bleiben die Behörden.
+**Sind die schwarzen und roten Flächen amtlich?**
+Nein. Sie sind zwei Alterszustände derselben transparenten, reproduzierbaren Evidenzschätzung. Maßgeblich bleiben die Behörden.
 
 **Warum sind FIRMS-Punkte keine Brandgrenze?**  
 Sie sind Sensorfußabdrücke thermischer Anomalien zu bestimmten Zeitpunkten. Auflösung und Unsicherheit unterscheiden sich je nach Produkt.
@@ -110,7 +112,7 @@ Die Route kann wiederholte lokale Manöver nahe einem thermisch gestützten Rand
 Für diesen Tag wurden keine qualifizierenden öffentlichen Empfängerbeobachtungen gespeichert. Empfängerabdeckung, Transpondernutzung, Anbieterhistorie und der tatsächliche Einsatz können das erklären; die Website erfindet fehlende Positionen nicht.
 
 **Warum kann die Schätzung kleiner werden?**  
-Die Unterstützung des neuesten MODIS-Überflugs ersetzt die ältere, und flugzeugbasierte Unterstützung läuft nach 24 Stunden aus. Es handelt sich um eine aktuelle Evidenzschätzung, nicht um die Behauptung einer monoton wachsenden kumulativen Brandnarbe.
+Qualifizierende Belege verlassen die öffentliche Fläche nach 30 Tagen. Sie bleiben in PostgreSQL gespeichert, aber die Karte behauptet keine dauerhafte Brandnarbe. Rot wird außerdem nach 24 Stunden schwarz; dieser Farbwechsel beweist nicht, dass der Boden gelöscht ist.
 
 **Speichert die Website Anbieterdaten zwischen?**  
 Sie speichert sie dauerhaft in PostgreSQL. Die öffentliche API verwendet `no-store`; Datenbanksperren verhindern doppelte externe Abfragen.

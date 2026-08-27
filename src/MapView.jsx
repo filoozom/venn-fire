@@ -157,6 +157,7 @@ export default function MapView({
   sentinelBurnGeometry = null,
   sentinel3Detections = [],
   fireOutlineRings = [],
+  activeFireRings = [],
   mapLabels = [],
   protectedArea = [],
 }) {
@@ -409,14 +410,17 @@ export default function MapView({
         .addTo(group)
     }
 
-    if (layers.perimeter && effisArea) {
+    const effisDisplayOpacity = Number.isFinite(Number(effisArea?.displayOpacity))
+      ? Number(effisArea.displayOpacity)
+      : 1
+    if (layers.perimeter && effisArea && effisDisplayOpacity > 0) {
       L.polygon(effisArea.rings, {
         className: 'fire-perimeter-glow',
         color: '#d98a3b',
         fillColor: '#d98a3b',
         weight: 6,
-        opacity: 0.10,
-        fillOpacity: 0.025,
+        opacity: 0.10 * effisDisplayOpacity,
+        fillOpacity: 0.025 * effisDisplayOpacity,
         interactive: false,
       }).addTo(group)
 
@@ -425,12 +429,12 @@ export default function MapView({
         color: '#d48b3a',
         fillColor: '#d48b3a',
         weight: 2.4,
-        opacity: 0.90,
-        fillOpacity: 0.07,
+        opacity: 0.90 * effisDisplayOpacity,
+        fillOpacity: 0.07 * effisDisplayOpacity,
         dashArray: '8 5',
       })
-        .bindPopup(`<div class="map-popup"><span class="eyebrow">COPERNICUS EFFIS · VIIRS NRT</span><strong>${Math.round(effisArea.areaHa).toLocaleString('en-GB')} ha activity envelope</strong><small>${effisArea.productLabel}${effisCarriedForward ? ' · carried forward as last available product' : ''} · ${effisArea.nominalResolutionM} m nominal sensor pixels</small><small>This shape contains the day's fire activity but can also enclose unaffected ground between detections. It is not a burned-area estimate or a field-confirmed perimeter.</small><small>Separate reporting at this selected time: ${frame.reportedAreaText} ha (${frame.areaLabel}).</small><a href="${effisArea.sourceRequestUrl}" target="_blank" rel="noreferrer">Open source WFS GeoJSON</a><a href="https://forest-fire.emergency.copernicus.eu/apps/effis.csv/?c=629562.19,6608535.18&amp;z=8.544845581054688&amp;t=sentinel2" target="_blank" rel="noreferrer">Open EFFIS viewer</a></div>`)
-        .bindTooltip(`<strong>EFFIS daily activity envelope</strong><br>${Math.round(effisArea.areaHa).toLocaleString('en-GB')} ha calculated polygon area · ${effisArea.productLabel}<br><small>May include unaffected ground between detections</small>`, { sticky: true })
+        .bindPopup(`<div class="map-popup"><span class="eyebrow">COPERNICUS EFFIS · VIIRS NRT</span><strong>${Math.round(effisArea.areaHa).toLocaleString('en-GB')} ha activity envelope</strong><small>Geometry last changed ${effisArea.geometryObservedDate ?? effisArea.productDate}${effisCarriedForward ? ' · carried forward by later queries' : ''} · ${effisArea.nominalResolutionM} m nominal sensor pixels</small><small>The exact geometry fades for 72 hours and then leaves the map. It remains in PostgreSQL and on its historical timeline frame.</small><small>This shape can enclose unaffected ground between detections. It is not a burned-area estimate or a field-confirmed perimeter.</small><small>Separate reporting at this selected time: ${frame.reportedAreaText} ha (${frame.areaLabel}).</small><a href="${effisArea.sourceRequestUrl}" target="_blank" rel="noreferrer">Open source WFS GeoJSON</a><a href="https://forest-fire.emergency.copernicus.eu/apps/effis.csv/?c=629562.19,6608535.18&amp;z=8.544845581054688&amp;t=sentinel2" target="_blank" rel="noreferrer">Open EFFIS viewer</a></div>`)
+        .bindTooltip(`<strong>EFFIS daily activity envelope</strong><br>${Math.round(effisArea.areaHa).toLocaleString('en-GB')} ha calculated polygon area · geometry last changed ${effisArea.geometryObservedDate ?? effisArea.productDate}<br><small>Age-faded map evidence · may include unaffected ground between detections</small>`, { sticky: true })
         .addTo(group)
 
     }
@@ -475,7 +479,7 @@ export default function MapView({
           : 'Thermal anomaly, not a burned-area polygon'
       const retentionDetail = detection.sensorKey === 'meteosat'
         ? 'Instantaneous scan opacity fades to zero over 15 minutes'
-        : 'Retained as timestamped polar-satellite evidence'
+        : 'Raw footprint opacity fades to zero over 24 hours; retained history still supports the separate 30-day estimate'
       layer.bindTooltip(
         `<strong>${detection.confidence.label} confidence</strong><br>`
         + `${detection.sensorName}${detection.satellite ? ` · ${detection.satellite}` : ''} · ${formatDecimal(detection.frpMw)} MW FRP<br>`
@@ -491,31 +495,40 @@ export default function MapView({
       const latitude = Number(detection.latitude)
       const longitude = Number(detection.longitude)
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return
+      const displayOpacity = Number.isFinite(Number(detection.displayOpacity))
+        ? Number(detection.displayOpacity)
+        : 1
+      if (displayOpacity <= 0) return
       L.circleMarker([latitude, longitude], {
         className: 'sentinel3-frp-detection',
         color: '#9f2f73',
         fillColor: '#e04c9a',
         weight: 1.2,
-        opacity: 0.9,
-        fillOpacity: 0.3,
+        opacity: 0.9 * displayOpacity,
+        fillOpacity: 0.3 * displayOpacity,
         radius: 5,
       }).bindTooltip(
         `<strong>Sentinel-3 SLSTR FRP detection</strong><br>`
         + `${formatDecimal(detection.frpMw)} MW${detection.channel ? ` · ${escapeHtml(detection.channel)}` : ''}<br>`
-        + `<small>${escapeHtml(String(detection.acquiredAt || '').replace('T', ' ').slice(0, 16))} UTC · ${formatDecimal(detection.nominalResolutionM, 0)} m nominal product resolution</small>`,
+        + `<small>${escapeHtml(String(detection.acquiredAt || '').replace('T', ' ').slice(0, 16))} UTC · ${formatDecimal(detection.nominalResolutionM, 0)} m nominal product resolution · fades over 24 h</small>`,
         { direction: 'top' },
       ).addTo(group)
     })
 
     if (sentinelBurnGeometry?.features?.length) {
       L.geoJSON(sentinelBurnGeometry, {
-        style: {
-          color: '#765093',
-          weight: 1.15,
-          opacity: 0.88,
-          fillColor: '#8f6aab',
-          fillOpacity: 0.22,
-          className: 'sentinel-burn-change',
+        style: (feature) => {
+          const displayOpacity = Number.isFinite(Number(feature?.properties?.displayOpacity))
+            ? Number(feature.properties.displayOpacity)
+            : 1
+          return {
+            color: '#765093',
+            weight: 1.15,
+            opacity: 0.88 * displayOpacity,
+            fillColor: '#8f6aab',
+            fillOpacity: 0.22 * displayOpacity,
+            className: 'sentinel-burn-change',
+          }
         },
         onEachFeature: (feature, layer) => {
           const properties = feature.properties ?? {}
@@ -523,24 +536,40 @@ export default function MapView({
             `<strong>Sentinel-2 observed change</strong><br>`
             + `${Number(properties.supportCellCount ?? 0).toLocaleString('en-GB')} supported 50 m cells · ${formatDecimal(properties.supportAreaHa)} ha grid coverage<br>`
             + `<small>Near-infrared comparison · acquired ${escapeHtml(String(properties.acquiredAt ?? '').replace('T', ' ').slice(0, 16))} UTC · ${Math.round(Number(properties.clearFraction ?? 0) * 100)}% of the crop cloud-clear</small><br>`
-            + '<small>Spectral change consistent with fire and connected to the corroborated fire core. It is not a field-confirmed perimeter; obscured pixels remain unknown.</small>',
+            + '<small>Spectral change consistent with fire and connected to the corroborated fire core. It fades over 30 days, is not a field-confirmed perimeter, and obscured pixels remain unknown.</small>',
             { sticky: true },
           )
         },
       }).addTo(group)
     }
 
-    // One dissolved boundary around the complete selected 50 m union. Any
-    // qualifying newest-pass MODIS pixels and repeat-supported aircraft lobe
-    // have already been folded into these rings; no second edge is rendered.
+    // The retained 50 m union is a black burn-scar outline. It remains visible
+    // for 30 days as a deliberate display heuristic, not as a claim that
+    // regrowth has or has not occurred at an individual cell.
     if (fireOutlineRings.length) {
       L.polygon(fireOutlineRings, {
-        color: '#ff2f26',
+        color: '#111714',
         weight: 2.4,
-        opacity: 0.95,
+        opacity: 0.94,
         fill: false,
+        fillRule: 'evenodd',
         interactive: false,
-        className: 'fire-outline',
+        className: 'burned-area-outline',
+      }).addTo(group)
+    }
+
+    // Red is reserved for qualifying thermal or aircraft-supported evidence
+    // observed during the previous 24 hours. Drawing it after the black scar
+    // makes the mutually meaningful states readable where they overlap.
+    if (activeFireRings.length) {
+      L.polygon(activeFireRings, {
+        color: '#ff2f26',
+        weight: 2.8,
+        opacity: 0.98,
+        fill: false,
+        fillRule: 'evenodd',
+        interactive: false,
+        className: 'fire-outline active-fire-outline',
       }).addTo(group)
     }
 
@@ -633,7 +662,7 @@ export default function MapView({
         }), { direction: 'top', offset: [0, -18] })
         .addTo(group)
     })
-  }, [frameIndex, frame, flights, effisArea, effisCarriedForward, layers, importedTracks, firmsDetections, rasterOverlays, sentinelBurnGeometry, sentinel3Detections, fireOutlineRings, protectedArea])
+  }, [frameIndex, frame, flights, effisArea, effisCarriedForward, layers, importedTracks, firmsDetections, rasterOverlays, sentinelBurnGeometry, sentinel3Detections, fireOutlineRings, activeFireRings, protectedArea])
 
   return (
     <div className="map-surface" aria-label="Interactive fire situation map">
