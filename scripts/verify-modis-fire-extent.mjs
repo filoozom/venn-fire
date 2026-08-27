@@ -6,6 +6,7 @@ import {
   MODIS_EXTENT_GRID_CELL_M,
   MODIS_EXTENT_TIME_BUCKET_MS,
   deriveModisSupportedExtent,
+  deriveRetainedModisSupportedExtent,
 } from '../src/modisFireEstimate.js'
 import { estimateFootprintArea, footprintOutlineRings } from '../src/firmsDetections.js'
 
@@ -142,6 +143,28 @@ const unsupportedNewest = deriveModisSupportedExtent({
 })
 assert.equal(unsupportedNewest.detections.length, 0, 'an unsupported newest pass must not fall back to stale coarse geometry')
 assert.equal(unsupportedNewest.passAcquiredAt, futurePass.acquiredAt)
+
+const retainedAfterUnsupportedPass = deriveRetainedModisSupportedExtent({
+  detections,
+  coreDetections: [core],
+  aircraftEdgeCandidates,
+  frameTimestampMs: Date.parse('2026-08-15T12:10:00.000Z'),
+  minimumTimestampMs: Date.parse('2026-08-14T12:10:00.000Z'),
+  origin,
+})
+assert.equal(retainedAfterUnsupportedPass.detections.length, 2,
+  'a newer unsupported pass must not erase the newest accepted burned edge')
+assert.equal(retainedAfterUnsupportedPass.passAcquiredAt, latestNearAircraft.acquiredAt)
+
+const retainedAfterExpiry = deriveRetainedModisSupportedExtent({
+  detections,
+  coreDetections: [core],
+  aircraftEdgeCandidates,
+  frameTimestampMs: Date.parse('2026-08-15T12:10:00.000Z'),
+  minimumTimestampMs: Date.parse('2026-08-15T12:06:00.000Z'),
+  origin,
+})
+assert.equal(retainedAfterExpiry.detections.length, 0, 'retention cutoff must remove older supported passes')
 
 const nominalNewest = deriveModisSupportedExtent({
   detections: [previousPass, detection({

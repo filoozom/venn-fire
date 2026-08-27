@@ -84,6 +84,9 @@ assert.deepEqual(edge.callSigns, ['GRZLY81'], 'unrelated callsigns must be exclu
 assert.equal(edge.extensionLines.length, 1, 'one local evidence cluster should produce one compact extension')
 assert.equal(edge.extensionLines[0].length, 4, 'the two evidence cells should connect to two core anchors')
 assert.equal(edge.supportPolygons.length, 1, 'one local evidence cluster should produce one compact lobe')
+assert.equal(edge.supportFeatures.length, 1, 'the lobe should retain its latest evidence timestamp')
+assert.equal(edge.supportFeatures[0].polygon, edge.supportPolygons[0])
+assert.equal(edge.supportFeatures[0].observedAt, edge.latestObservedAt)
 assert.ok(edge.supportPolygons[0].length >= 4, 'supported turns should close conservatively against the existing outline')
 assert.equal('areaHa' in edge, false, 'aircraft evidence must never generate a hectare figure')
 edge.candidates.forEach((candidate) => {
@@ -169,5 +172,6 @@ assert.equal(currentAfterExpiry.supportPolygons.length, 0,
 const noCore = deriveAircraftSupportedEdge({ flights: [incidentFlight], origin })
 assert.deepEqual(noCore.extensionLines, [], 'aircraft positions cannot create a fire outline without a satellite core')
 assert.deepEqual(noCore.supportPolygons, [], 'aircraft positions cannot create support geometry without a satellite core')
+assert.deepEqual(noCore.supportFeatures, [], 'empty support must not invent timestamped burn evidence')
 
 console.log('Aircraft-supported fire-edge checks passed')

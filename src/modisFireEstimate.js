@@ -13,7 +13,7 @@
 export const MODIS_EXTENT_GRID_CELL_M = 50
 export const MODIS_EXTENT_TIME_BUCKET_MS = 5 * 60 * 1000
 export const MODIS_MAX_SUPPORT_GAP_M = 500
-export const MODIS_EXTENT_RULE = 'newest high-confidence Terra/Aqua pass within 500 m of the VIIRS core or aircraft-supported edge'
+export const MODIS_EXTENT_RULE = 'at most one retained high-confidence Terra/Aqua pass within 500 m of the VIIRS core or aircraft-supported edge'
 
 function projectionFor(origin) {
   const latitude = Number(origin?.latitude ?? origin?.[0])
@@ -93,6 +93,8 @@ export function deriveModisSupportedExtent({
   gridCellM = MODIS_EXTENT_GRID_CELL_M,
   timeBucketMs = MODIS_EXTENT_TIME_BUCKET_MS,
   maxSupportGapM = MODIS_MAX_SUPPORT_GAP_M,
+  minimumTimestampMs = Number.NEGATIVE_INFINITY,
+  fallbackToSupportedPass = false,
 } = {}) {
   const projection = projectionFor(origin)
   const empty = emptyExtent(gridCellM, timeBucketMs, maxSupportGapM)
@@ -112,25 +114,41 @@ export function deriveModisSupportedExtent({
         ? detection.timestampMs
         : Date.parse(detection.acquiredAt)
       const frameAtMs = Math.ceil(timestampMs / timeBucketMs) * timeBucketMs
-      return Number.isFinite(timestampMs) && frameAtMs <= frameTimestampMs
+      return Number.isFinite(timestampMs)
+        && timestampMs >= minimumTimestampMs
+        && frameAtMs <= frameTimestampMs
         ? { detection, timestampMs, frameAtMs }
         : null
     })
     .filter(Boolean)
 
   if (!available.length) return empty
-  const latestFrameAtMs = Math.max(...available.map((entry) => entry.frameAtMs))
-  const latestPass = available.filter((entry) => entry.frameAtMs === latestFrameAtMs)
-  const highConfidencePass = latestPass.filter(({ detection }) => detection?.confidence?.label === 'high')
-  const supported = highConfidencePass.filter(({ detection }) => {
-    const coreDistanceM = Math.min(...validCore.map((core) => rectangleDistanceM(detection, core, projection)))
-    const aircraftDistanceM = aircraftEdgeCandidates.length
-      ? Math.min(...aircraftEdgeCandidates.map((candidate) => (
-          rectangleToCellDistanceM(detection, candidate, projection, gridCellM)
-        )))
-      : Number.POSITIVE_INFINITY
-    return coreDistanceM <= maxSupportGapM || aircraftDistanceM <= maxSupportGapM
-  })
+  const passAt = (frameAtMs) => {
+    const detectionsInPass = available.filter((entry) => entry.frameAtMs === frameAtMs)
+    const highConfidence = detectionsInPass.filter(({ detection }) => detection?.confidence?.label === 'high')
+    const supported = highConfidence.filter(({ detection }) => {
+      const coreDistanceM = Math.min(...validCore.map((core) => rectangleDistanceM(detection, core, projection)))
+      const aircraftDistanceM = aircraftEdgeCandidates.length
+        ? Math.min(...aircraftEdgeCandidates.map((candidate) => (
+            rectangleToCellDistanceM(detection, candidate, projection, gridCellM)
+          )))
+        : Number.POSITIVE_INFINITY
+      return coreDistanceM <= maxSupportGapM || aircraftDistanceM <= maxSupportGapM
+    })
+    return { frameAtMs, detectionsInPass, highConfidence, supported }
+  }
+  const passFrames = [...new Set(available.map((entry) => entry.frameAtMs))]
+    .sort((left, right) => right - left)
+  const newestPass = passAt(passFrames[0])
+  const selectedPass = fallbackToSupportedPass
+    ? passFrames.map(passAt).find((pass) => pass.supported.length) ?? newestPass
+    : newestPass
+  const {
+    frameAtMs: latestFrameAtMs,
+    detectionsInPass: latestPass,
+    highConfidence: highConfidencePass,
+    supported,
+  } = selectedPass
 
   if (!supported.length) {
     return {
@@ -154,4 +172,18 @@ export function deriveModisSupportedExtent({
     timeBucketMs,
     maxSupportGapM,
   }
+}
+
+/**
+ * Keep the newest qualifying supported MODIS pass inside a caller-supplied
+ * retention window. Unlike the live edge rule, a later unsupported pass does
+ * not erase an already accepted burned-edge observation. Only one coarse pass
+ * is retained, so successive 1 km swaths still cannot accumulate into an
+ * inflated scar.
+ */
+export function deriveRetainedModisSupportedExtent(options = {}) {
+  return deriveModisSupportedExtent({
+    ...options,
+    fallbackToSupportedPass: true,
+  })
 }

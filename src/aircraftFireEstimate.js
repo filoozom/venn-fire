@@ -328,7 +328,7 @@ export function deriveAircraftSupportedEdge({
 } = {}) {
   const projection = projectionFor(origin)
   if (!projection || !detections.length || !outlineRings.length) {
-    return { candidates: [], extensionLines: [], supportPolygons: [], callSigns: [], gridCellM, timeBucketMs }
+    return { candidates: [], extensionLines: [], supportPolygons: [], supportFeatures: [], callSigns: [], gridCellM, timeBucketMs }
   }
 
   const candidates = flights
@@ -365,15 +365,25 @@ export function deriveAircraftSupportedEdge({
     .filter((geometry) => geometry.supportPolygon.length)
   const retained = supportGeometry.flatMap((geometry) => geometry.cluster)
   if (!retained.length) {
-    return { candidates: [], extensionLines: [], supportPolygons: [], callSigns: [], gridCellM, timeBucketMs }
+    return { candidates: [], extensionLines: [], supportPolygons: [], supportFeatures: [], callSigns: [], gridCellM, timeBucketMs }
   }
-  const supportPolygons = supportGeometry.map((geometry) => geometry.supportPolygon)
+  const supportFeatures = supportGeometry.map((geometry) => {
+    const timestampMs = Math.max(...geometry.cluster.map((candidate) => candidate.timestampMs))
+    return {
+      polygon: geometry.supportPolygon,
+      timestampMs,
+      observedAt: new Date(timestampMs).toISOString(),
+      callSigns: [...new Set(geometry.cluster.map((candidate) => candidate.callSign))].sort(),
+    }
+  })
+  const supportPolygons = supportFeatures.map((feature) => feature.polygon)
   const extensionLines = supportGeometry.map((geometry) => geometry.extensionLine)
 
   return {
     candidates: retained.slice().sort((left, right) => left.timestampMs - right.timestampMs),
     extensionLines,
     supportPolygons,
+    supportFeatures,
     callSigns: [...new Set(retained.map((candidate) => candidate.callSign))].sort(),
     latestObservedAt: new Date(Math.max(...retained.map((candidate) => candidate.timestampMs))).toISOString(),
     gridCellM,
