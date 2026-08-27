@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { runInNewContext } from 'node:vm'
 
+import { annotateEffisGeometryFreshness } from '../src/sourceFreshness.js'
 import { loadDataset, saveArtifact, saveDataset } from './database.mjs'
 
 export const LEGACY_EFFIS_MIGRATION_KEY = 'migration-effis-history-a80aa9a'
@@ -72,7 +73,7 @@ export async function backfillLegacyEffisHistory({ requestedAtMs, query }) {
   const current = (await loadDataset('effis', query))?.payload ?? { products: [] }
   const byDate = new Map((current.products || []).map((product) => [product.productDate, product]))
   recovered.forEach((product) => byDate.set(product.productDate, product))
-  const products = [...byDate.values()].sort((left, right) => left.productDate.localeCompare(right.productDate))
+  const products = annotateEffisGeometryFreshness([...byDate.values()])
   await saveDataset({
     key: 'effis',
     payload: { ...current, schemaVersion: current.schemaVersion || 1, generatedAt: migratedAt, products },

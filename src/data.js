@@ -1,4 +1,5 @@
 import { aircraftCountryFields } from './aircraftCountries.js'
+import { annotateEffisGeometryFreshness } from './sourceFreshness.js'
 
 export const FIVE_MINUTES_MS = 5 * 60 * 1000
 export const AIRCRAFT_PATH_MAX_GAP_MS = 2 * 60 * 1000
@@ -551,7 +552,8 @@ export function effisAreaForTimestamp(products, timestampMs) {
 }
 
 export function effisProductIsCarriedForward(product, timestampMs) {
-  return Boolean(product && product.productDate < localDateOf(timestampMs))
+  const observedDate = product?.geometryObservedDate ?? product?.productDate
+  return Boolean(product && observedDate < localDateOf(timestampMs))
 }
 
 export function mergePrecipitationRadar(rmiRadar = { frames: [] }, dwdRadarHistory = { frames: [] }) {
@@ -674,7 +676,7 @@ export function runtimeDataFromResponse(response) {
     dwdWindStations: dwd.stations ?? [],
     weatherModel: openMeteo,
     weatherStation: rmi,
-    effisProducts: effis.products ?? [],
+    effisProducts: annotateEffisGeometryFreshness(effis.products ?? []),
     firms,
     aircraft,
     reports: reportsPayload,

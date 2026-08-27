@@ -10,6 +10,8 @@
 // figure can never appear in the interface without its provenance. See
 // FOOTPRINT_ESTIMATE_CAVEATS for the error directions it cannot correct for.
 
+import { SOURCE_FADE_WINDOWS_MS, linearSourceOpacity } from './sourceFreshness.js'
+
 const FIRMS_API_ROOT = 'https://firms.modaps.eosdis.nasa.gov/api/area/csv'
 const FIRMS_KEY_URL = 'https://firms.modaps.eosdis.nasa.gov/api/map_key/'
 const FIRMS_SOURCE_URL = 'https://firms.modaps.eosdis.nasa.gov/'
@@ -74,7 +76,7 @@ export const FIRMS_SENSORS = [
     providesArea: false,
     displayMode: 'footprint',
     pixelSizeLabel: '1 km nominal pixel',
-    areaExclusionReason: 'MODIS pixels are too coarse for a standalone per-sensor area. Only tightly filtered newest-pass pixels can extend the combined Best estimate.',
+    areaExclusionReason: 'MODIS pixels are too coarse for a standalone per-sensor area. At most one tightly filtered supported pass inside the retention window can extend the combined Best estimate.',
     apiSource: 'MODIS_NRT',
     name: 'MODIS Terra/Aqua',
     platform: 'Terra and Aqua',
@@ -193,7 +195,7 @@ export const FOOTPRINT_ESTIMATE_CAVEATS = [
   'Only ground that was actively flaming during an overpass can be detected. Ground that ignited and burned out between overpasses is never counted, and smoke or cloud removes further detections. The estimate therefore understates area for a fast-moving fire between passes.',
   'Because those two errors act in opposite directions and do not cancel predictably, this figure is neither an upper nor a lower bound on burned area.',
   'The footprint rectangle is axis-aligned in latitude and longitude from the published scan and track pixel dimensions. It approximates the true sensor parallelogram and ignores the scan-angle rotation.',
-  'Standalone sensor figures are estimated independently and must not be added. The Best estimate instead computes one geometric union of its selected VIIRS and newest-pass MODIS footprints plus any compact repeat-supported aircraft lobes, so overlapping ground is counted once.',
+  'Standalone sensor figures are estimated independently and must not be added. The Best estimate instead computes one geometric union of its retained VIIRS and qualifying MODIS footprints plus any compact repeat-supported aircraft lobes, so overlapping ground is counted once.',
   'Corroboration records that two spacecraft observed the same cell. It raises confidence that something was burning there; it does not measure how much of the cell burned, and an uncorroborated detection is not thereby proven false.',
 ]
 
@@ -604,13 +606,23 @@ function rasterizedFootprintUnion(detections, {
   supportPolygons = [],
   supportCells = [],
 }) {
-  const anchorLat = origin?.latitude ?? detections[0].latitude
-  const anchorLon = origin?.longitude ?? detections[0].longitude
+  const anchorLat = origin?.latitude ?? detections[0]?.latitude
+  const anchorLon = origin?.longitude ?? detections[0]?.longitude
+  if (!Number.isFinite(Number(anchorLat)) || !Number.isFinite(Number(anchorLon))) {
+    return {
+      occupied: new Set(),
+      projection: null,
+      sensorCellCount: 0,
+      supportCellCount: 0,
+      polygonSupportCellCount: 0,
+      directSupportCellCount: 0,
+    }
+  }
   const projection = {
-    anchorLat,
-    anchorLon,
-    mPerLat: metresPerDegreeLatitude(anchorLat),
-    mPerLon: metresPerDegreeLongitude(anchorLat),
+    anchorLat: Number(anchorLat),
+    anchorLon: Number(anchorLon),
+    mPerLat: metresPerDegreeLatitude(Number(anchorLat)),
+    mPerLon: metresPerDegreeLongitude(Number(anchorLat)),
   }
   const occupied = new Set()
   detections.forEach((detection) => addDetectionCells(occupied, detection, projection, gridCellM))
@@ -638,7 +650,7 @@ export function estimateFootprintArea(detections, {
     || supportCells.some((cell) => Array.isArray(cell) && cell.length === 2)
   const method = `Union of published sensor pixel footprints${hasSupport ? ' and qualifying support geometry' : ''}, dissolved on a ${gridCellM} m grid`
 
-  if (!detections.length) {
+  if (!detections.length && !hasSupport) {
     return {
       unionHa: 0,
       sumHa: 0,
@@ -662,9 +674,11 @@ export function estimateFootprintArea(detections, {
   for (const detection of detections) {
     sumSquareMetres += detection.scanKm * detection.trackKm * 1e6
   }
+  const sumHa = sumSquareMetres / 10000
 
   const {
     occupied,
+    projection,
     sensorCellCount,
     supportCellCount,
     polygonSupportCellCount,
@@ -675,10 +689,28 @@ export function estimateFootprintArea(detections, {
     supportPolygons,
     supportCells,
   })
+  if (!projection) {
+    return {
+      unionHa: 0,
+      sumHa,
+      overlapFactor: null,
+      detectionCount: detections.length,
+      sensorUnionHa: 0,
+      supportCellCount: 0,
+      polygonSupportCellCount: 0,
+      directSupportCellCount: 0,
+      polygonSupportAreaHa: 0,
+      directSupportAreaHa: 0,
+      supportAreaHa: 0,
+      gridCellM,
+      method,
+      isEstimate: true,
+      isBurnedArea: false,
+    }
+  }
   const unionHa = occupied.size * gridCellM * gridCellM / 10000
   const sensorUnionHa = sensorCellCount * gridCellM * gridCellM / 10000
   const supportAreaHa = supportCellCount * gridCellM * gridCellM / 10000
-  const sumHa = sumSquareMetres / 10000
 
   return {
     unionHa,
@@ -705,21 +737,23 @@ export function estimateFootprintArea(detections, {
  */
 const CONFIDENCE_RANKS = { low: 1, nominal: 2, high: 3 }
 export const GEOSTATIONARY_DISPLAY_WINDOW_MS = 15 * 60 * 1000
+export const POLAR_DISPLAY_WINDOW_MS = SOURCE_FADE_WINDOWS_MS.firmsPolar
 
 /**
- * Polar overpasses remain as timestamped satellite evidence. Meteosat is an
- * instantaneous coarse scan, so it fades only inside its short display window
- * and never accumulates into a false burned-area layer.
+ * Every raw thermal footprint fades from its exact acquisition time. Polar
+ * detections disappear from the live map after 24 hours; Meteosat uses its
+ * shorter 15-minute scan window. PostgreSQL retention is unaffected.
  */
 export function firmsDetectionOpacityAt(detection, selectedTimestampMs) {
   const acquiredAtMs = Number.isFinite(detection.timestampMs)
     ? detection.timestampMs
     : Date.parse(detection.acquiredAt)
   if (!Number.isFinite(acquiredAtMs) || acquiredAtMs > selectedTimestampMs) return 0
-  if (detection.sensorKey !== 'meteosat') return 1
-  const ageMs = selectedTimestampMs - acquiredAtMs
-  if (ageMs >= GEOSTATIONARY_DISPLAY_WINDOW_MS) return 0
-  return 1 - ageMs / GEOSTATIONARY_DISPLAY_WINDOW_MS
+  return linearSourceOpacity(
+    acquiredAtMs,
+    selectedTimestampMs,
+    detection.sensorKey === 'meteosat' ? GEOSTATIONARY_DISPLAY_WINDOW_MS : POLAR_DISPLAY_WINDOW_MS,
+  )
 }
 
 export function firmsDetectionVisibleAt(detection, selectedTimestampMs) {
@@ -870,7 +904,9 @@ export function footprintOutlineRings(detections, {
   supportPolygons = [],
   supportCells = [],
 } = {}) {
-  if (!detections.length) return []
+  const hasSupport = supportPolygons.some((polygon) => Array.isArray(polygon) && polygon.length >= 4)
+    || supportCells.some((cell) => Array.isArray(cell) && cell.length === 2)
+  if (!detections.length && !hasSupport) return []
 
   // Same occupancy test as estimateFootprintArea, so the outline and the hectare
   // figure always describe the same ground.
@@ -880,6 +916,7 @@ export function footprintOutlineRings(detections, {
     supportPolygons,
     supportCells,
   })
+  if (!projection || !occupied.size) return []
   const { anchorLat, anchorLon, mPerLat, mPerLon } = projection
 
   // A cell side is on the boundary when the neighbour across it is empty. Each

@@ -6,6 +6,7 @@ import { loadFirms } from '../api/firms-situation.js'
 import { loadAreaReports } from '../api/live-reports.js'
 import { loadAircraft, loadWeather } from '../api/live-situation.js'
 import { FIRMS_SENSORS } from '../src/firmsDetections.js'
+import { annotateEffisGeometryFreshness } from '../src/sourceFreshness.js'
 import {
   AIRCRAFT_ARTIFACT_BACKFILL_OVERLAP_MS,
   AIRCRAFT_ARTIFACT_BACKFILL_WINDOW_MS,
@@ -972,14 +973,25 @@ async function refreshFirms({ requestedAtMs, query, bucketAt }) {
       gridCellM: null,
     }]
   })
-  const payload = { ...previous, ...incomingPayload, sensors, detections }
+  const latestRetainedAcquiredAt = detections.at(-1)?.acquiredAt
+    ?? previous.latestAcquiredAt
+    ?? incomingPayload.latestAcquiredAt
+    ?? null
+  const payload = {
+    ...previous,
+    ...incomingPayload,
+    sensors,
+    detections,
+    latestAcquiredAt: latestRetainedAcquiredAt,
+  }
   const stored = await saveDataset({ key: 'firms', payload }, query)
   return {
     itemCount: detections.length,
     metadata: {
       changed: stored.changed,
       currentWindow: incomingPayload.detections.length,
-      latestAcquiredAt: incomingPayload.latestAcquiredAt,
+      latestWindowAcquiredAt: incomingPayload.latestAcquiredAt,
+      latestRetainedAcquiredAt,
       healthySensors: incomingPayload.sources.filter((source) => source.ok).map((source) => source.sensorKey),
       failedSensors: incomingPayload.sources.filter((source) => !source.ok).map((source) => source.sensorKey),
       rawArtifactCount: artifacts.length,
@@ -1148,15 +1160,24 @@ async function refreshEffis({ requestedAtMs, query }) {
     loadEffisProduct(productDate, generatedAt),
     previousPayload('effis', query, { products: [] }),
   ])
-  const products = mergeRows(
+  const products = annotateEffisGeometryFreshness(mergeRows(
     previous.products,
     [product],
     (item) => item.productDate,
     (left, right) => left.productDate.localeCompare(right.productDate),
-  )
+  ))
   const payload = { schemaVersion: 1, generatedAt, products }
   const stored = await saveDataset({ key: 'effis', payload }, query)
-  return { itemCount: products.length, metadata: { changed: stored.changed, productDate } }
+  const latest = products.at(-1)
+  return {
+    itemCount: products.length,
+    metadata: {
+      changed: stored.changed,
+      productDate,
+      geometryChanged: latest?.geometryChanged ?? false,
+      geometryObservedDate: latest?.geometryObservedDate ?? productDate,
+    },
+  }
 }
 
 async function refreshEffisHistory({ requestedAtMs, query }) {
@@ -1564,7 +1585,7 @@ export const REFRESH_SOURCES = [
   {
     key: 'cams', label: 'CAMS smoke and air quality', intervalMinutes: 60, run: refreshCams,
     providerUrl: 'https://atmosphere.copernicus.eu/',
-    coverage: 'Hourly Copernicus 0.1° wildfire-only PM10 and PM2.5 model forecasts, including incident-grid values and georeferenced images; wildfire-only PM10 is experimental.',
+    coverage: 'Hourly Copernicus 0.1° wildfire-only PM10 and PM2.5 model forecasts retained by coherent daily forecast cycle, including incident-grid values and georeferenced images; wildfire-only PM10 is experimental.',
   },
 ]
 
