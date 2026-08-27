@@ -6,6 +6,7 @@ const shortFormat = ['short', 'shorts', 'vertical'].includes(requestedPresentati
 const enabled = ['news', 'broadcast', 'short', 'shorts', 'vertical'].includes(requestedPresentation)
   || parameters.get('view') === 'news'
 const language = parameters.get('lang') === 'en' ? 'en' : 'de'
+const showApyosLogo = parameters.get('apyos-logo') !== '0'
 const translations = {
   de: {
     announcedArea: 'Gemeldete Fläche',
@@ -257,7 +258,7 @@ function startNewsPresentation() {
   dashboard.innerHTML = dashboardMarkup()
   document.body.append(dashboard)
 
-  if (shortFormat) {
+  if (shortFormat && showApyosLogo) {
     const brand = document.createElement('div')
     brand.id = 'news-presentation-brand'
     brand.setAttribute('aria-label', 'Apyos')
@@ -309,6 +310,7 @@ if (enabled) {
   document.documentElement.lang = language
   document.documentElement.dataset.presentation = 'news'
   document.documentElement.dataset.newsFormat = shortFormat ? 'short' : 'landscape'
+  document.documentElement.dataset.apyosLogo = showApyosLogo ? 'visible' : 'hidden'
   document.title = copy.documentTitle
   startNewsPresentation()
 }

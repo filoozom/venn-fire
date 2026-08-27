@@ -22,6 +22,7 @@
   "baseMap": "default",
   "presentation": "viewer",
   "language": "de",
+  "showApyosLogo": true,
   "mapFocus": "default",
   "mapZoomSteps": null,
   "layers": {

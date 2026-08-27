@@ -49,6 +49,9 @@ try {
       gridMarkers: [...document.querySelectorAll('.wind-source-marker b')].filter((element) => element.textContent?.trim() === 'GRID').length,
       timelineHeadDisplay: getComputedStyle(document.querySelector('.timeline-head')).display,
       eventMarkerDisplay: getComputedStyle(document.querySelector('.event-markers')).display,
+      reportedActivityDisplay: document.querySelector('.reported-activity-banner')
+        ? getComputedStyle(document.querySelector('.reported-activity-banner')).display
+        : 'absent',
       axisLabels: [...document.querySelectorAll('.timeline-ticks span')].map((element) => (
         `${element.dataset.day} ${element.textContent}`.replace(/\s+/g, ' ').trim()
       )),
@@ -78,7 +81,8 @@ try {
   if (state.headerDisplay !== 'none' || state.playDisplay === 'none') {
     throw new Error(`News chrome/play state is incorrect: ${JSON.stringify(state)}`)
   }
-  if (state.feedItems !== 0 || /Incident updates|Einsatzmeldungen/u.test(state.dashboardText)) {
+  if (state.feedItems !== 0 || state.reportedActivityDisplay !== 'none'
+    || /Incident updates|Einsatzmeldungen/u.test(state.dashboardText)) {
     throw new Error(`News update feed is still present: ${JSON.stringify(state)}`)
   }
   // The wind must be the RMI station observation alone. It previously showed a

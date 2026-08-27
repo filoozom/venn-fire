@@ -101,6 +101,12 @@ The same presentation is available as a live database-backed browser view:
 https://venn-fire.vercel.app/?presentation=news&lang=de
 ```
 
+The Apyos mark remains enabled by default. For an unbranded export, pass
+`--no-apyos-logo` to the renderer (or set `"showApyosLogo": false` in its JSON
+configuration). This only changes that render; it does not remove the logo from
+the reusable presentation template. The equivalent browser preview uses
+`apyos-logo=0`.
+
 The range remains draggable and the compact play button restarts from the
 incident beginning when the page is at the latest frame. Change `lang=de` to
 `lang=en` for the English version; the normal website is unaffected.

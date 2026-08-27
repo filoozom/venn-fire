@@ -35,6 +35,10 @@ html[data-presentation="news"] .map-region {
   height: 100vh !important;
 }
 
+html[data-presentation="news"] .reported-activity-banner {
+  display: none;
+}
+
 html[data-presentation="news"] .map-topbar {
   top: 30px !important;
   right: 34px !important;
@@ -136,6 +140,13 @@ html[data-presentation="news"] .timeline-panel::after {
   height: 31px;
   background: url('/apyos-wordmark.svg') no-repeat center / contain;
   transform: translateY(-50%);
+}
+
+/* The Apyos mark is part of the reusable presentation template, but exports
+   can opt out without changing or deleting the normal branded layout. */
+html[data-presentation="news"][data-apyos-logo="hidden"] .timeline-panel::after,
+html[data-presentation="news"][data-apyos-logo="hidden"] #news-presentation-brand {
+  display: none !important;
 }
 
 html[data-presentation="news"] .mini-area-chart {
@@ -371,6 +382,7 @@ html[data-presentation="news"] .water-drop-marker > span {
   transform-origin: center;
 }
 
+html[data-presentation="news"] .burned-area-outline,
 html[data-presentation="news"] .fire-outline {
   stroke-width: 3.4;
 }
@@ -656,6 +668,7 @@ html[data-news-format="short"] .water-drop-marker > span {
   transform: scale(3.2);
 }
 
+html[data-news-format="short"] .burned-area-outline,
 html[data-news-format="short"] .fire-outline {
   stroke-width: 4.2;
 }

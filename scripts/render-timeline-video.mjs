@@ -36,6 +36,7 @@ const DEFAULT_CONFIG = Object.freeze({
   baseMap: null,
   presentation: 'viewer',
   language: 'de',
+  showApyosLogo: true,
   mapFocus: 'default',
   mapZoomSteps: null,
   mapZoomFactor: null,
@@ -79,6 +80,7 @@ Options:
   --base-map <default|terrain|satellite|topo>
   --presentation <viewer|news|short> Full viewer, 16:9 news, or 9:16 short
   --language <de|en>          News-presentation language (default: de)
+  --no-apyos-logo             Hide the Apyos mark in this render only
   --map-focus <default|incident|fire>
   --map-zoom-steps <number>   Extra zoom-in steps after focusing the map
   --map-zoom-factor <number>  Exact incident-centred linear zoom factor
@@ -171,6 +173,7 @@ function validateConfig(config) {
     waitForAircraft: booleanValue(config.waitForAircraft, 'waitForAircraft'),
     waitForAssets: booleanValue(config.waitForAssets, 'waitForAssets'),
     freezeData: booleanValue(config.freezeData, 'freezeData'),
+    showApyosLogo: booleanValue(config.showApyosLogo, 'showApyosLogo'),
   }
   if (normalized.width % 2 || normalized.height % 2) fail('width and height must be even for yuv420p video')
   if (normalized.bitrateMbps < normalized.minimumBitrateMbps) {
@@ -261,6 +264,7 @@ async function configurationFromArguments(arguments_) {
     if (option === '--no-wait-for-aircraft') config.waitForAircraft = false
     else if (option === '--no-wait-for-assets') config.waitForAssets = false
     else if (option === '--no-freeze-data') config.freezeData = false
+    else if (option === '--no-apyos-logo') config.showApyosLogo = false
     else if (option === '--headful') config.headless = false
     else if (option === '--overwrite') config.overwrite = true
     else fail(`Unknown option: ${option}`)
@@ -288,6 +292,7 @@ function presentationUrl(config) {
   if (isNewsPresentation(config)) {
     url.searchParams.set('presentation', config.presentation)
     url.searchParams.set('lang', config.language)
+    if (!config.showApyosLogo) url.searchParams.set('apyos-logo', '0')
   }
   return url.toString()
 }
@@ -1260,6 +1265,7 @@ async function main() {
         baseMap: config.baseMap ?? 'website default',
         presentation: config.presentation,
         language: config.language,
+        showApyosLogo: config.showApyosLogo,
         mapFocus: config.mapFocus === 'default' && isNewsPresentation(config) ? 'fire-and-water-sources' : config.mapFocus,
         mapZoomSteps: config.mapZoomSteps ?? 0,
         mapZoomFactor: config.mapZoomFactor,
