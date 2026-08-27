@@ -722,7 +722,11 @@ function mergeNotices(previous, incoming) {
 }
 
 export function municipalNoticeEvent(notice) {
-  const observedAt = notice.effectiveAt || notice.publishedAt
+  // Authorities often update one long-lived incident page in place. If the
+  // body provides a specific effective time, use it; otherwise place the
+  // event at the page's actual update time rather than burying today's update
+  // on its original publication date.
+  const observedAt = notice.effectiveAt || notice.updatedAt || notice.publishedAt
   return {
     id: `official-local:${notice.id}`,
     observedAt,
@@ -736,6 +740,8 @@ export function municipalNoticeEvent(notice) {
         ? 'official police update'
         : 'official municipal notice'})`,
     sourceUrl: notice.url,
+    sourcePublishedAt: notice.publishedAt || null,
+    sourceUpdatedAt: notice.updatedAt || null,
   }
 }
 

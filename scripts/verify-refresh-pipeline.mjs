@@ -657,6 +657,11 @@ const jalhayNotice = normalizeWordpressApiNotice({
 assert.equal(jalhayNotice.publishedAt, '2026-08-15T06:32:12.000Z')
 assert.equal(jalhayNotice.effectiveAt, '2026-08-15T15:00:00.000Z')
 assert.equal(municipalNoticeEvent(jalhayNotice).type, 'closure', 'a no-evacuation notice containing road closures must remain a closure')
+assert.equal(municipalNoticeEvent({
+  ...jalhayNotice,
+  effectiveAt: null,
+  updatedAt: '2026-08-27T16:07:56.000Z',
+}).observedAt, '2026-08-27T16:07:56.000Z', 'an in-place official update must use its update timestamp')
 
 const [rss2Item] = parseMunicipalRdfFeed(`
   <rss><channel><item>
