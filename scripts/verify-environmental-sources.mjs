@@ -6,6 +6,7 @@ import { gzipSync } from 'node:zlib'
 
 import {
   CAMS_AOI_BOUNDS,
+  camsForecastRefreshPlan,
   dwdRadarArchiveUrl,
   dwdRadolanValueMm,
   encodeRgbaPng,
@@ -18,6 +19,7 @@ import {
   parseRmiRadarPayload,
   rmiRadarIncidentCategory,
 } from '../server/environmental-sources.mjs'
+import { camsForecastCycleLabel, camsForecastFrameAt } from '../src/camsForecasts.js'
 import { buildFireFrames, mergePrecipitationRadar } from '../src/data.js'
 
 const radarBody = Buffer.alloc(6 + 8 + 2)
@@ -120,6 +122,75 @@ const timeDimension = extractWmsLayerTime(`
 `, 'composition_europe_pm_wf_forecast_surface')
 assert.equal(timeDimension.defaultTime, '2026-08-17T00:00:00Z')
 assert(timeDimension.values.endsWith('/PT1H'))
+
+const changedCyclePlan = camsForecastRefreshPlan({
+  timeDimension: {
+    defaultTime: '2026-08-19T00:00:00Z',
+    values: '2026-07-20T00:00:00Z,2026-07-20T01:00:00Z/2026-08-23T00:00:00Z/PT1H',
+  },
+  requestedAtMs: Date.parse('2026-08-19T09:02:00Z'),
+  previousFrames: [{
+    productKey: 'wildfire-pm10',
+    validAt: '2026-08-19T08:00:00Z',
+    forecastRunAt: '2026-08-18T00:00:00Z',
+  }],
+  productKey: 'wildfire-pm10',
+})
+assert.equal(changedCyclePlan.forecastRunAt, '2026-08-19T00:00:00Z')
+assert.equal(changedCyclePlan.coherentFrom, '2026-08-19T00:00:00Z')
+assert.equal(changedCyclePlan.validTimes.length, 10)
+assert.equal(changedCyclePlan.validTimes[0], '2026-08-19T00:00:00Z')
+assert.equal(changedCyclePlan.validTimes.at(-1), '2026-08-19T09:00:00Z')
+assert.equal(changedCyclePlan.cycleChanged, true)
+assert.equal(changedCyclePlan.backfill, true)
+
+const sameCycleFrames = changedCyclePlan.validTimes.slice(0, -1).map((validAt) => ({
+  productKey: 'wildfire-pm10',
+  validAt,
+  forecastRunAt: changedCyclePlan.forecastRunAt,
+}))
+const continuingCyclePlan = camsForecastRefreshPlan({
+  timeDimension: {
+    defaultTime: '2026-08-19T00:00:00Z',
+    values: '2026-07-20T00:00:00Z,2026-07-20T01:00:00Z/2026-08-23T00:00:00Z/PT1H',
+  },
+  requestedAtMs: Date.parse('2026-08-19T09:02:00Z'),
+  previousFrames: sameCycleFrames,
+  productKey: 'wildfire-pm10',
+})
+assert.deepEqual(continuingCyclePlan.validTimes, ['2026-08-19T09:00:00Z'])
+assert.equal(continuingCyclePlan.cycleChanged, false)
+assert.equal(continuingCyclePlan.backfill, false)
+
+const camsRevisionFrames = [{
+  productKey: 'wildfire-pm10',
+  validAt: '2026-08-19T08:00:00Z',
+  retrievedAt: '2026-08-19T08:02:00Z',
+  point: { value: 132.169 },
+}, {
+  productKey: 'wildfire-pm10',
+  validAt: '2026-08-19T08:00:00Z',
+  forecastRunAt: '2026-08-19T00:00:00Z',
+  retrievedAt: '2026-08-19T09:02:00Z',
+  point: { value: 6.26913 },
+}, {
+  productKey: 'wildfire-pm10',
+  validAt: '2026-08-19T09:00:00Z',
+  forecastRunAt: '2026-08-19T00:00:00Z',
+  retrievedAt: '2026-08-19T09:02:00Z',
+  point: { value: 3.57706 },
+}]
+assert.equal(camsForecastFrameAt(
+  camsRevisionFrames,
+  'wildfire-pm10',
+  Date.parse('2026-08-19T08:55:00Z'),
+).point.value, 6.26913)
+assert.equal(camsForecastFrameAt(
+  camsRevisionFrames,
+  'wildfire-pm10',
+  Date.parse('2026-08-19T09:00:00Z'),
+).point.value, 3.57706)
+assert.equal(camsForecastCycleLabel(camsRevisionFrames.at(-1)), 'cycle 2026-08-19 00:00 UTC')
 
 assert.deepEqual(parseCamsFeatureInfo(`
 Name: composition_europe_pm_wf_forecast_surface

@@ -119,6 +119,8 @@ const CAMS_PRODUCTS = Object.freeze([
     validation: 'regularly validated at regional scale',
   },
 ])
+const CAMS_FORECAST_HORIZON_MS = 5 * 24 * 60 * 60 * 1000
+const CAMS_FRAME_FETCH_BATCH_SIZE = 6
 
 const COPERNICUS_STAC = 'https://stac.dataspace.copernicus.eu/v1'
 const SENTINEL3_COLLECTION = 'sentinel-3-sl-2-frp-nrt'
@@ -939,6 +941,73 @@ function currentCamsTime(timeDimension, requestedAtMs) {
   return new Date(selected).toISOString().replace('.000Z', 'Z')
 }
 
+function camsForecastRunAt(timeDimension, validAt) {
+  const runAtMs = Date.parse(timeDimension?.defaultTime)
+  const validAtMs = Date.parse(validAt)
+  if (!Number.isFinite(runAtMs) || !Number.isFinite(validAtMs)
+      || runAtMs > validAtMs || validAtMs - runAtMs > CAMS_FORECAST_HORIZON_MS) return null
+  return new Date(runAtMs).toISOString().replace('.000Z', 'Z')
+}
+
+export function camsForecastRefreshPlan({
+  timeDimension,
+  requestedAtMs,
+  previousFrames = [],
+  productKey,
+}) {
+  const validAt = currentCamsTime(timeDimension, requestedAtMs)
+  const validAtMs = Date.parse(validAt)
+  const forecastRunAt = camsForecastRunAt(timeDimension, validAt)
+  if (!forecastRunAt) {
+    return {
+      validAt,
+      forecastRunAt: null,
+      coherentFrom: validAt,
+      validTimes: [validAt],
+      cycleChanged: false,
+      backfill: false,
+    }
+  }
+
+  // The WMS exposes one mutable daily forecast cycle. When that cycle changes,
+  // values for already elapsed valid hours are replaced upstream. Re-fetch the
+  // elapsed part of the current UTC day so the timeline never joins an old
+  // cycle directly to a new one. Existing tagged frames make later hourly runs
+  // fetch only the newly valid hour.
+  const forecastRunAtMs = Date.parse(forecastRunAt)
+  const utcDayStartMs = Math.floor(validAtMs / 86_400_000) * 86_400_000
+  const coherentFromMs = Math.max(forecastRunAtMs, utcDayStartMs)
+  const coherentFrom = new Date(coherentFromMs).toISOString().replace('.000Z', 'Z')
+  const existingValidTimes = new Set(previousFrames.filter((frame) => (
+    frame.productKey === productKey && frame.forecastRunAt === forecastRunAt
+  )).map((frame) => frame.validAt))
+  const previousRunTimes = previousFrames.filter((frame) => (
+    frame.productKey === productKey && Number.isFinite(Date.parse(frame.forecastRunAt))
+  )).map((frame) => Date.parse(frame.forecastRunAt))
+  const latestPreviousRunAtMs = previousRunTimes.length ? Math.max(...previousRunTimes) : null
+  const validTimes = []
+  for (let cursor = coherentFromMs; cursor <= validAtMs; cursor += 3_600_000) {
+    const candidate = new Date(cursor).toISOString().replace('.000Z', 'Z')
+    if (!existingValidTimes.has(candidate)) validTimes.push(candidate)
+  }
+  return {
+    validAt,
+    forecastRunAt,
+    coherentFrom,
+    validTimes,
+    cycleChanged: latestPreviousRunAtMs !== forecastRunAtMs,
+    backfill: validTimes.some((candidate) => candidate !== validAt),
+  }
+}
+
+async function mapInBatches(rows, batchSize, mapper) {
+  const results = []
+  for (let index = 0; index < rows.length; index += batchSize) {
+    results.push(...await Promise.all(rows.slice(index, index + batchSize).map(mapper)))
+  }
+  return results
+}
+
 function camsMapUrl(product, validAt) {
   return wmsUrl(CAMS_WMS_URL, {
     token: 'public',
@@ -1017,9 +1086,32 @@ export async function refreshCams({ requestedAtMs, query }) {
     ...frame,
     bounds: frame.bounds ?? previous.bounds ?? INCIDENT_AOI_BOUNDS,
   }))
-  const incoming = await Promise.all(CAMS_PRODUCTS.map(async (product) => {
+  const plans = CAMS_PRODUCTS.map((product) => {
     const timeDimension = extractWmsLayerTime(capabilities.text, product.layer)
-    const validAt = currentCamsTime(timeDimension, requestedAtMs)
+    return {
+      product,
+      timeDimension,
+      ...camsForecastRefreshPlan({
+        timeDimension,
+        requestedAtMs,
+        previousFrames,
+        productKey: product.key,
+      }),
+    }
+  })
+  const advertisedRuns = new Set(plans.map((plan) => plan.forecastRunAt ?? 'unknown'))
+  if (advertisedRuns.size !== 1) {
+    throw new Error('CAMS products expose different forecast cycles; retry after publication completes')
+  }
+  const jobs = plans.flatMap((plan) => plan.validTimes.map((validAt) => ({
+    ...plan,
+    validAt,
+  })))
+  const incoming = await mapInBatches(jobs, CAMS_FRAME_FETCH_BATCH_SIZE, async ({
+    product,
+    validAt,
+    forecastRunAt,
+  }) => {
     const mapUrl = camsMapUrl(product, validAt)
     const featureUrl = camsFeatureUrl(product, validAt)
     const [map, feature] = await Promise.all([
@@ -1031,12 +1123,12 @@ export async function refreshCams({ requestedAtMs, query }) {
       storeArtifact({
         artifactPrefix: 'cams-image', sourceKey: 'cams', originalPath: mapUrl,
         contentType: 'image/png', capturedAt: generatedAt, bytes: map.bytes,
-        discriminator: `${product.key}-${validAt}`,
+        discriminator: `${product.key}-${forecastRunAt ?? 'unknown-run'}-${validAt}`,
       }, query),
       storeArtifact({
         artifactPrefix: 'cams-value', sourceKey: 'cams', originalPath: featureUrl,
         contentType: 'text/plain', capturedAt: generatedAt, bytes: feature.bytes, compress: true,
-        discriminator: `${product.key}-${validAt}`,
+        discriminator: `${product.key}-${forecastRunAt ?? 'unknown-run'}-${validAt}`,
       }, query),
     ])
     return {
@@ -1044,6 +1136,7 @@ export async function refreshCams({ requestedAtMs, query }) {
       layer: product.layer,
       label: product.label,
       validAt,
+      forecastRunAt,
       retrievedAt: generatedAt,
       bounds: CAMS_AOI_BOUNDS,
       modelResolutionDegrees: product.modelResolutionDegrees,
@@ -1053,25 +1146,48 @@ export async function refreshCams({ requestedAtMs, query }) {
       image,
       valueArtifactKey: valueArtifact.artifactKey,
     }
-  }))
+  })
+
+  // A daily cycle can be published while a multi-hour backfill is running.
+  // Reject that batch instead of labelling a mixture of two cycles as one; the
+  // source lease retry will fetch the newly published cycle from the start.
+  const capabilitiesAfterFetch = await fetchText(capabilitiesUrl, { timeoutMs: 45_000 })
+  for (const plan of plans) {
+    const finalDimension = extractWmsLayerTime(capabilitiesAfterFetch.text, plan.product.layer)
+    const finalRunAt = camsForecastRunAt(finalDimension, plan.validAt)
+    if (finalRunAt !== plan.forecastRunAt) {
+      throw new Error(`CAMS ${plan.product.key} forecast cycle changed during refresh`)
+    }
+  }
+
   const frames = mergeUnique(
     previousFrames,
     incoming,
-    (frame) => `${frame.productKey}|${frame.validAt}|${frame.image.sha256}`,
+    (frame) => `${frame.productKey}|${frame.forecastRunAt ?? 'legacy'}|${frame.validAt}|${frame.image.sha256 ?? frame.image.artifactKey}`,
     (left, right) => Date.parse(left.validAt) - Date.parse(right.validAt)
-      || left.productKey.localeCompare(right.productKey) || Date.parse(left.retrievedAt) - Date.parse(right.retrievedAt),
+      || left.productKey.localeCompare(right.productKey)
+      || (Date.parse(left.forecastRunAt) || 0) - (Date.parse(right.forecastRunAt) || 0)
+      || Date.parse(left.retrievedAt) - Date.parse(right.retrievedAt),
   )
+  const latestValidAt = plans.map((plan) => plan.validAt).sort().at(-1) ?? null
+  const currentFrames = plans.map((plan) => frames.filter((frame) => (
+    frame.productKey === plan.product.key
+      && frame.validAt === plan.validAt
+      && (!plan.forecastRunAt || frame.forecastRunAt === plan.forecastRunAt)
+  )).at(-1)).filter(Boolean)
   const payload = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt,
     source: { name: 'Copernicus Atmosphere Monitoring Service via ECMWF public WMS', url: 'https://atmosphere.copernicus.eu/' },
     attribution: `Generated using Copernicus Atmosphere Monitoring Service Information ${new Date(requestedAtMs).getUTCFullYear()}`,
     bounds: CAMS_AOI_BOUNDS,
     products: CAMS_PRODUCTS,
     frames,
-    latestValidAt: incoming[0]?.validAt ?? null,
-    interpretation: 'Hourly 0.1 degree regional-model forecast. It is not a ground sensor or fire-perimeter measurement; the wildfire-only PM10 product is experimental and the published colour style saturates at 500 µg/m³.',
-    retentionPolicy: 'all distinct forecast images and incident-point values in PostgreSQL',
+    latestValidAt,
+    currentForecastRuns: Object.fromEntries(plans.map((plan) => [plan.product.key, plan.forecastRunAt])),
+    timelinePolicy: 'Within each UTC day, elapsed valid hours are retrospectively refreshed from one coherent daily CAMS forecast cycle; superseded cycle artifacts remain retained for audit.',
+    interpretation: 'Hourly 0.1 degree regional-model forecast. Daily forecast-cycle revisions can replace already valid hours; the displayed timeline uses a coherent retained cycle rather than joining revisions. It is not a ground sensor or fire-perimeter measurement; the wildfire-only PM10 product is experimental and the published colour style saturates at 500 µg/m³.',
+    retentionPolicy: 'all distinct forecast-cycle revisions, images and incident-point values in PostgreSQL',
   }
   const stored = await saveDataset({ key: 'cams', payload }, query)
   return {
@@ -1079,7 +1195,11 @@ export async function refreshCams({ requestedAtMs, query }) {
     metadata: {
       changed: stored.changed,
       latestValidAt: payload.latestValidAt,
-      productValues: incoming.map((frame) => ({ productKey: frame.productKey, ...frame.point })),
+      forecastRuns: payload.currentForecastRuns,
+      cycleChanges: plans.filter((plan) => plan.cycleChanged).map((plan) => plan.product.key),
+      backfilledFrameCount: incoming.filter((frame) => frame.validAt !== latestValidAt).length,
+      fetchedFrameCount: incoming.length,
+      productValues: currentFrames.map((frame) => ({ productKey: frame.productKey, ...frame.point })),
       rawArtifactCount: 1 + incoming.length * 2,
       rawArtifacts: [capabilitiesArtifact.artifactKey],
     },
@@ -1197,6 +1317,8 @@ export async function refreshSentinel3Frp({ requestedAtMs, query }) {
       swirResolutionM: 500,
       mwirResolutionM: 1_000,
       role: 'near-real-time fire-radiative-power overpass catalogue and retained visual previews',
+      measurementCoverage: 'catalogue-only',
+      measurementNote: 'Coordinate-level FRP measurement assets require authenticated Copernicus data access and are not connected.',
     },
     scenes,
     detections: previous.detections || [],
@@ -1212,6 +1334,7 @@ export async function refreshSentinel3Frp({ requestedAtMs, query }) {
       latestAcquiredAt: payload.latestAcquiredAt,
       overpassCount: scenes.length,
       localDetectionCount: payload.detections.length,
+      measurementCoverage: payload.product.measurementCoverage,
       storedPreviewCount: scenes.filter((scene) => scene.thumbnail?.stored).length,
       rawArtifactCount: 1 + scenesWithThumbnails.filter((scene) => scene.thumbnail?.stored && !previousScenes.get(scene.id)?.thumbnail?.stored).length,
       rawArtifacts: [catalogueArtifact.artifactKey],

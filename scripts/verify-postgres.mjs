@@ -152,6 +152,7 @@ const publicEnvironmental = publicDatasetPayload('cams', {
   frames: [{
     productKey: 'wildfire-pm10',
     validAt: '2026-08-17T17:00:00Z',
+    forecastRunAt: '2026-08-17T00:00:00Z',
     point: { value: 1.88, unit: 'µg/m³' },
     valueArtifactKey: 'private-value-artifact',
     image: {
@@ -167,6 +168,7 @@ assert.equal(publicEnvironmental.frames[0].valueArtifactKey, undefined)
 assert.equal(publicEnvironmental.frames[0].image.artifactKey, undefined)
 assert.equal(publicEnvironmental.frames[0].image.sha256, undefined)
 assert.equal(publicEnvironmental.frames[0].image.databaseUrl, '/api/source-image?id=opaque')
+assert.equal(publicEnvironmental.frames[0].forecastRunAt, '2026-08-17T00:00:00Z')
 
 const publicDwdRadar = publicDatasetPayload('dwd-radar-history', {
   archives: [{
