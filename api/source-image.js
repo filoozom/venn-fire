@@ -11,7 +11,7 @@ const ALLOWED_PREFIXES = new Map([
 ])
 const OPAQUE_ID = /^[A-Za-z0-9_-]{8,512}$/u
 
-function requestedArtifact(id) {
+export function requestedArtifact(id) {
   if (!OPAQUE_ID.test(String(id ?? ''))) return null
   try {
     const artifactKey = Buffer.from(String(id), 'base64url').toString('utf8')

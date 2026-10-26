@@ -5,6 +5,7 @@ import { capabilitiesXml, exceptionXml, mapRequest, snapshotTime, wmsError, wmsL
 import { renderMap } from '../server/wms-render.mjs'
 import { mergeIncidentFlights, runtimeDataFromResponse } from '../src/data.js'
 import { firmsDetectionsForMap } from '../src/mapState.js'
+import { requestedArtifact } from './source-image.js'
 
 const DATASET_KEYS = ['incident-config', 'weather-open-meteo', 'weather-rmi', 'weather-dwd', 'reports', 'firms', 'effis', 'aircraft', 'sentinel2', 'sentinel3-frp', 'rmi-radar', 'dwd-radar-history', 'nasa-gibs', 'cams']
 const IMAGE_PREFIXES = { 'nasa-gibs': 'nasa-gibs-image:', cams: 'cams-image:', 'rmi-radar': 'rmi-radar-image:', 'dwd-radar-history': 'dwd-radar-image:' }
@@ -15,7 +16,7 @@ let renderingRevision
 function renderRevision() {
   // Calculation/style edits must invalidate conditional responses even when data is unchanged.
   renderingRevision ??= Promise.all([
-    './wms.js', '../server/wms.mjs', '../server/wms-render.mjs',
+    './wms.js', './source-image.js', '../server/wms.mjs', '../server/wms-render.mjs',
     ...['mapState', 'mapStyles', 'data', 'sourceFreshness', 'firmsDetections', 'aircraftTracks', 'aircraftFireEstimate', 'fireActivityEstimate', 'modisFireEstimate', 'camsForecasts'].map((name) => `../src/${name}.js`),
   ].map((path) => readFile(new URL(path, import.meta.url)))).then((parts) => entityTag(Buffer.concat(parts)))
   return renderingRevision
@@ -42,11 +43,12 @@ async function databaseSnapshot() {
   return snapshotPromise
 }
 
-async function retainedImage(overlay) {
-  const key = overlay.image.artifactKey
+export async function retainedImage(overlay, readArtifact = loadArtifact) {
+  const id = new URL(overlay.image.databaseUrl, 'http://localhost').searchParams.get('id')
+  const key = overlay.image.artifactKey ?? requestedArtifact(id)?.artifactKey
   const prefix = IMAGE_PREFIXES[overlay.sourceKey]
   if (!prefix || typeof key !== 'string' || !key.startsWith(prefix)) throw new Error('Invalid retained image reference')
-  const artifact = await loadArtifact(key)
+  const artifact = await readArtifact(key)
   if (!artifact || artifact.sourceKey !== overlay.sourceKey || artifact.contentEncoding !== 'identity'
     || !['image/png', 'image/jpeg'].includes(artifact.contentType) || artifact.originalSize > 16 * 1024 * 1024) {
     throw new Error('Retained image is unavailable or invalid')

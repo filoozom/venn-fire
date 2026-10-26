@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { writeFile } from 'node:fs/promises'
 import sharp from 'sharp'
 import proj4 from 'proj4'
-import { createWmsHandler } from '../api/wms.js'
+import { createWmsHandler, retainedImage } from '../api/wms.js'
 import { mergeIncidentFlights, runtimeDataFromResponse, windFrameAt } from '../src/data.js'
 import { bestEstimateAt, environmentalStateAt, firmsDetectionsForMap, footprintOriginFor } from '../src/mapState.js'
 import { mapRequest, wmsLayers, wmsParameters } from '../server/wms.mjs'
@@ -41,6 +41,19 @@ const detections = firmsDetectionsForMap(runtime.firms.detections, runtime.timel
 const layers = wmsLayers(runtime, flights, detections)
 let bundle = { runtime, flights, detections, layers, revision: 'fixture-1' }
 const red = await sharp({ create: { width: 4, height: 4, channels: 4, background: '#ff0000' } }).png().toBuffer()
+for (const [sourceKey, prefix] of [['nasa-gibs', 'nasa-gibs-image'], ['cams', 'cams-image'], ['rmi-radar', 'rmi-radar-image'], ['dwd-radar-history', 'dwd-radar-image']]) {
+  const key = `${prefix}:fixture`
+  const publicImage = { databaseUrl: `/api/source-image?id=${Buffer.from(key).toString('base64url')}` }
+  const artifact = { sourceKey, contentEncoding: 'identity', contentType: 'image/png', originalSize: red.length, contentBase64: red.toString('base64') }
+  const bytes = await retainedImage({ sourceKey, image: publicImage }, async (requestedKey) => {
+    assert.equal(requestedKey, key, 'Compact public images must resolve their opaque ID to the stored artifact')
+    return artifact
+  })
+  assert.deepEqual(bytes, red)
+  await assert.rejects(retainedImage({ sourceKey, image: publicImage }, async () => null), /unavailable or invalid/u)
+  await assert.rejects(retainedImage({ sourceKey, image: publicImage }, async () => ({ ...artifact, sourceKey: 'other' })), /unavailable or invalid/u)
+}
+await assert.rejects(retainedImage({ sourceKey: 'cams', image: { databaseUrl: '/api/source-image?id=invalid' } }), /Invalid retained image reference/u)
 let reads = 0
 const handler = createWmsHandler({ getSnapshot: async () => bundle, loadImage: async () => { reads += 1; return red } })
 
