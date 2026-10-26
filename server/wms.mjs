@@ -7,6 +7,7 @@ proj4.defs('EPSG:3812', '+proj=lcc +lat_0=50.797815 +lon_0=4.35921583333333 +lat
 
 export const WMS_MAX_SIZE = 2048
 export const WMS_MAX_PIXELS = WMS_MAX_SIZE ** 2
+export const WMS_MAX_LAYERS = 64
 export const WMS_CRS = ['CRS:84', 'EPSG:4326', 'EPSG:3857', 'EPSG:31370', 'EPSG:3812']
 export const MERCATOR_LIMIT = 20037508.342789244
 
@@ -97,7 +98,7 @@ export function mapRequest(parameters, layers, runtime) {
   }
   if (required('VERSION') !== '1.3.0') throw wmsError('InvalidParameterValue', 'Supported WMS version: 1.3.0')
   const names = required('LAYERS').split(',')
-  if (names.length > 32) throw wmsError('InvalidParameterValue', 'At most 32 layers per map')
+  if (names.length > WMS_MAX_LAYERS) throw wmsError('InvalidParameterValue', `At most ${WMS_MAX_LAYERS} layers per map`)
   const selectedLayers = names.map((name) => {
     const layer = layers.find((entry) => entry.name === name)
     if (!layer) throw wmsError('LayerNotDefined', `Unknown layer: ${name}`)
@@ -169,7 +170,7 @@ ${layer.static ? '' : `<Dimension name="time" units="ISO8601" default="${default
   }
   return `<?xml version="1.0" encoding="UTF-8"?>
 <WMS_Capabilities version="1.3.0" xmlns="http://www.opengis.net/wms" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.opengis.net/wms https://schemas.opengis.net/wms/1.3.0/capabilities_1_3_0.xsd">
-<Service><Name>WMS</Name><Title>Venn Fire Watch</Title><Abstract>Independent incident overlays with five-minute historical map states. TIME describes observation/forecast validity, not what was known when the page was first published.</Abstract>${online}<Fees>none</Fees><AccessConstraints>Source attribution and source data terms apply.</AccessConstraints><LayerLimit>32</LayerLimit><MaxWidth>${WMS_MAX_SIZE}</MaxWidth><MaxHeight>${WMS_MAX_SIZE}</MaxHeight></Service>
+<Service><Name>WMS</Name><Title>Venn Fire Watch</Title><Abstract>Independent incident overlays with five-minute historical map states. TIME describes observation/forecast validity, not what was known when the page was first published.</Abstract>${online}<Fees>none</Fees><AccessConstraints>Source attribution and source data terms apply.</AccessConstraints><LayerLimit>${WMS_MAX_LAYERS}</LayerLimit><MaxWidth>${WMS_MAX_SIZE}</MaxWidth><MaxHeight>${WMS_MAX_SIZE}</MaxHeight></Service>
 <Capability><Request>${operation('GetCapabilities', 'text/xml')}${operation('GetMap', 'image/png')}</Request><Exception><Format>XML</Format></Exception>
 <Layer><Title>Venn Fire Watch overlays</Title>${WMS_CRS.map((crs) => `<CRS>${crs}</CRS>`).join('')}${layers.map(layerXml).join('')}</Layer></Capability></WMS_Capabilities>`
 }

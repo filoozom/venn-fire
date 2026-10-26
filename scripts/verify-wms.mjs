@@ -81,6 +81,7 @@ const capabilitiesText = capabilities.body.toString()
 assert.match(capabilitiesText, /https:\/\/venn.apyos.com\/wms\?/u)
 assert.match(capabilitiesText, /Test &amp; station/u)
 assert.match(capabilitiesText, /PT5M<\/Dimension>/u)
+assert.match(capabilitiesText, /<LayerLimit>64<\/LayerLimit>/u)
 assert.match(capabilitiesText, /<CRS>EPSG:31370<\/CRS><CRS>EPSG:3812<\/CRS>/u)
 assert.equal(new Set(layers.map((layer) => layer.name)).size, layers.length)
 for (const name of ['best_estimate', 'aircraft', 'sentinel2_change', 'sentinel3_frp', 'precipitation', 'gibs_true_color', 'gibs_false_color', 'cams_pm25', 'cams_wildfire_pm10', 'wind_model', 'wind_mont_rigi', 'wind_dwd_123', 'protected_area', 'firms_viirs_noaa21_low', 'firms_modis_nominal', 'firms_meteosat_high']) {
@@ -103,6 +104,7 @@ assert.notEqual(historicalCapabilities.headers.etag, capabilities.headers.etag)
 
 for (const [changes, code] of [
   [{ LAYERS: '<unknown>' }, 'LayerNotDefined'],
+  [{ LAYERS: Array(65).fill('best_estimate').join(',') }, 'InvalidParameterValue'],
   [{ CRS: 'EPSG:99999' }, 'InvalidCRS'],
   [{ VERSION: '1.1.1' }, 'InvalidParameterValue'],
   [{ STYLES: 'remote' }, 'StyleNotDefined'],
@@ -175,6 +177,10 @@ assert.equal(windFrameAt(runtime, timeMs).drossartWind, null, 'No future model o
 const combined = await invoke(query({ LAYERS: 'precipitation,best_estimate,aircraft', STYLES: ',,', TIME: at(10) }))
 assert.equal(combined.statusCode, 200)
 await writeFile('/tmp/fire-wms-preview.png', combined.body)
+const allLayers = await invoke(query({ LAYERS: layers.map((layer) => layer.name).join(','), TIME: at(10) }))
+assert.ok(layers.length > 32, 'The regression must cover selecting more than 32 advertised layers')
+assert.equal(allLayers.statusCode, 200)
+assert.ok(await visible(allLayers.body))
 
 const cached = await invoke(query({ LAYERS: 'firms_viirs_snpp_high' }), { headers: { 'if-none-match': high.headers.etag } })
 assert.equal(cached.statusCode, 304)
@@ -210,7 +216,7 @@ for (const crs of ['EPSG:31370', 'EPSG:3812']) {
   const request = { width: 100, height: 100, bbox, crs }
   const point = pixelPosition([50.55, 6.05], request)
   assert.ok(point.every((value) => Math.abs(value - 50) < 0.01), `${crs} marker must land at the map centre`)
-  for (const name of ['firms_viirs_snpp_high', 'precipitation']) {
+  for (const name of ['firms_viirs_snpp_high', 'precipitation', layers.map((layer) => layer.name).join(',')]) {
     const result = await invoke(query({ LAYERS: name, CRS: crs, BBOX: bbox.join(',') }))
     assert.equal(result.statusCode, 200)
     assert.ok(await visible(result.body), `${crs} must render ${name}`)
