@@ -357,7 +357,7 @@ async function fetchSourceHtml(source) {
   const response = await fetch(source.url, {
     headers: {
       Accept: 'text/html,application/xhtml+xml',
-      'User-Agent': 'venn-fire-live-monitor/1.0 (+https://venn-fire.vercel.app)',
+      'User-Agent': 'venn-fire-live-monitor/1.0 (+https://venn.apyos.com)',
     },
     signal: AbortSignal.timeout(8_000),
   })
@@ -444,7 +444,7 @@ function requestSearchQuery(request) {
   const queryValue = Array.isArray(request?.query?.q) ? request.query.q[0] : request?.query?.q
   if (queryValue != null) return String(queryValue).trim().slice(0, 100)
   try {
-    return new URL(request?.url || '/', 'https://venn-fire.vercel.app').searchParams.get('q')?.trim().slice(0, 100) || ''
+    return new URL(request?.url || '/', 'https://venn.apyos.com').searchParams.get('q')?.trim().slice(0, 100) || ''
   } catch {
     return ''
   }

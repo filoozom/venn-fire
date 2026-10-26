@@ -143,7 +143,7 @@ async function refreshIncidentMapContext({ requestedAtMs, query }) {
   const mapLabels = await Promise.all(INCIDENT_WATER_CONTEXT_ENTITIES.map(async (entityId) => (
     mapLabelFromWikidata(entityId, await fetchJson(
       `https://www.wikidata.org/wiki/Special:EntityData/${entityId}.json`,
-      { headers: { 'User-Agent': 'VennFireWatch/1.0 (https://venn-fire.vercel.app/)' } },
+      { headers: { 'User-Agent': 'VennFireWatch/1.0 (https://venn.apyos.com/)' } },
     ))
   )))
   const managedIds = new Set(mapLabels.map((label) => label.id))

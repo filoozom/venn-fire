@@ -6,7 +6,7 @@ This is internal implementation documentation. The public viewer should expose t
 
 - The Copernicus Data Space OData catalogue remains the authoritative scene-discovery record and supplies the retained public JPEG quicklooks.
 - Public Sentinel-2 Collection 1 L2A Cloud-Optimized GeoTIFFs are discovered through [Element 84 Earth Search](https://github.com/Element84/earth-search) and read from the [AWS Open Data Sentinel-2 COG archive](https://registry.opendata.aws/sentinel-2-l2a-cogs/).
-- The Vercel scheduler checks both catalogues every five minutes. Multispectral pixels are downloaded and processed only when a previously unseen post-fire scene appears.
+- The local scheduler checks both catalogues every five minutes. Multispectral pixels are downloaded and processed only when a previously unseen post-fire scene appears.
 - The incident crop uses tile `T31UGS`, EPSG:32631 and WGS84 bounds `[5.88, 50.42, 6.23, 50.68]`.
 
 ## Inputs and selection

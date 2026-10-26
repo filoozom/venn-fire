@@ -1,22 +1,18 @@
-// The API handlers are written against Vercel's Node runtime, which pre-parses
-// the query string onto request.query and adds Express-style status()/json()
-// helpers to the response. Node's own http server provides neither, so this
-// adapter supplies exactly those pieces and nothing else. It lets the same
-// handler files serve both Vercel and the self-hosted server without forking.
+// Supply parsed query parameters and status()/json() helpers to API handlers
+// running on Node's HTTP server.
 
 function parsedQuery(requestUrl) {
   const { searchParams } = new URL(requestUrl ?? '/', 'http://localhost')
   const query = Object.create(null)
   for (const key of new Set(searchParams.keys())) {
     const values = searchParams.getAll(key)
-    // Vercel collapses a single occurrence to a string and keeps repeats as an
-    // array; the handlers defend against both.
+    // Keep repeated parameters as arrays; handlers defend against both forms.
     query[key] = values.length > 1 ? values : values[0]
   }
   return query
 }
 
-export function withVercelRuntime(handler) {
+export function withHttpHelpers(handler) {
   return async function adapted(request, response) {
     request.query ??= parsedQuery(request.url)
 

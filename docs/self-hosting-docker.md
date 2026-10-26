@@ -1,25 +1,21 @@
 # Self-hosting with Docker
 
-The container replaces four things Vercel provides: the serverless functions in
-`api/`, the static hosting of the built client, the daily cron, and the queue
-chain that drives the five-minute source refresh. One long-lived Node process
-does all four, so the queue and its deployment bookkeeping are not needed.
+One long-lived Node process serves the built client and read API, keeps the database schema current, and refreshes sources every five minutes.
 
-The same handler files serve both platforms. `server/vercel-adapter.mjs` supplies
-the two things Vercel's runtime adds and Node's `http` server does not: a parsed
-`request.query`, and `response.status()` / `response.json()`.
+`server/http-adapter.mjs` supplies parsed `request.query` parameters and `response.status()` / `response.json()` helpers to the API handlers.
 
 ## Quick start
 
 ```bash
-cp .env.docker.example .env       # set POSTGRES_PASSWORD
+# Set POSTGRES_PASSWORD in .env before starting
 docker compose up -d --build
 ```
 
-Then **seed the incident definition** — the deployment is not usable without it:
+Then **seed the incident definition** — the deployment is not usable without it. Copy your incident-config JSON into the container first:
 
 ```bash
-docker compose exec app node scripts/seed-incident-config.mjs https://venn-fire.vercel.app
+docker compose cp ./incident-config.json app:/tmp/incident-config.json
+docker compose exec app node scripts/seed-incident-config.mjs /tmp/incident-config.json
 docker compose exec app node scripts/refresh-once.mjs
 ```
 
@@ -101,18 +97,6 @@ directly, though a reverse proxy is still the right place for TLS:
 - `/api/data` compresses its own body and answers `If-None-Match` with 304.
   See the reasoning in `server/http-response.mjs`.
 
-## Differences from the Vercel deployment
-
-- **No queue.** The refresh chain in `server/refresh-scheduler.mjs` and the
-  `/api/refresh` and `/api/refresh-queue` endpoints are Vercel-only; both require
-  `VERCEL_DEPLOYMENT_ID`. The container uses the shared cadence in
-  `server/refresh-cadence.mjs` directly.
-- **`/api/butgenbach-source` is not routed.** It exists to give Vercel functions
-  a fixed egress identity. Off-platform, `fetchButgenbachBody` already fetches
-  the official URL directly.
-- **Single process.** `DATABASE_POOL_MAX` is one pool, not one per warm function
-  instance, so it can be larger than the Vercel value.
-
 ## Caveat: `FIRMS_MAP_KEY`
 
 Without a key the `firms` source fails and the dataset can be left in a reduced
@@ -142,7 +126,7 @@ TRAEFIK_NETWORK=traefik           # docker network ls
 TRAEFIK_ENTRYPOINT=websecure
 TRAEFIK_CERT_RESOLVER=letsencrypt
 APP_HOST=venn.apyos.com
-REFRESH_ENABLED=false             # see below
+REFRESH_ENABLED=true              # refresh on one app instance
 FIRMS_MAP_KEY=
 ENV
 
@@ -160,16 +144,7 @@ docker inspect <traefik-container> | grep -iE 'entrypoints|certresolver'
 
 ### Which instance refreshes
 
-`REFRESH_ENABLED` defaults to **false** here. Two deployments refreshing one
-database is the only way this can disturb existing data. The refresh does claim
-each source per five-minute bucket in `source_refresh_runs`, so a race is
-contained rather than corrupting, but there is no reason to run two writers.
-Enable it on exactly one instance:
-
-- Keeping Vercel as the writer: leave `REFRESH_ENABLED=false`. The container is
-  then a pure reader and cannot modify anything but its own connection.
-- Cutting over to the container: disable the Vercel cron, then set
-  `REFRESH_ENABLED=true` and restart.
+`REFRESH_ENABLED` defaults to **true**. Enable it on exactly one app instance; set it to `false` on any additional readers. The refresh claims each source per five-minute bucket in `source_refresh_runs`, so overlapping runs do not duplicate provider work.
 
 `RUN_MIGRATIONS=true` is safe against a populated database. Every statement is
 `CREATE TABLE IF NOT EXISTS` or an additive index; there is no `DROP`,

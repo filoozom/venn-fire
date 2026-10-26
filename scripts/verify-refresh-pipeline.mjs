@@ -1,10 +1,8 @@
 #!/usr/bin/env node
 
 import assert from 'node:assert/strict'
-import { createHmac } from 'node:crypto'
 import { gunzipSync } from 'node:zlib'
 
-import butgenbachSourceHandler, { config as butgenbachSourceConfig } from '../api/butgenbach-source.js'
 import { loadFirms } from '../api/firms-situation.js'
 import {
   INCIDENT_AIRCRAFT,
@@ -24,6 +22,7 @@ import { buildProviderArtifact } from '../server/source-artifacts.mjs'
 import { parseLegacyEffisSource } from '../server/effis-sources.mjs'
 import { parseLegacyReportSource } from '../server/report-sources.mjs'
 import { payloadHash, setNoStoreHeaders } from '../server/database.mjs'
+import { withHttpHelpers } from '../server/http-adapter.mjs'
 import { normalizeVediaArticle } from '../server/media-sources.mjs'
 import {
   MUNICIPAL_PROVIDERS,
@@ -51,10 +50,7 @@ import {
   nextRefreshWakeAt,
   REFRESH_INTERVAL_MS,
   REFRESH_OFFSET_MS,
-  REFRESH_QUEUE_TOPIC,
-  REFRESH_SCHEDULER_DATASET,
-  refreshSchedulerDeployment,
-} from '../server/refresh-scheduler.mjs'
+} from '../server/refresh-cadence.mjs'
 
 const expectedSources = [
   'incident-map-context',
@@ -250,15 +246,8 @@ assert.deepEqual(INCIDENT_AIRCRAFT.get('480444'), {
 })
 assert.equal(CURRENT_AIRCRAFT_TRACE_PROVIDERS.length, 1)
 assert.equal(HISTORICAL_AIRCRAFT_TRACE_PROVIDERS.length, 2)
-assert.equal(REFRESH_QUEUE_TOPIC, 'venn-fire-refresh')
-assert.equal(REFRESH_SCHEDULER_DATASET, 'refresh-scheduler')
 assert.equal(REFRESH_INTERVAL_MS, 5 * 60_000)
 assert.equal(REFRESH_OFFSET_MS, 2 * 60_000)
-assert.deepEqual(refreshSchedulerDeployment({
-  VERCEL_DEPLOYMENT_ID: 'dpl_test',
-  VERCEL_GIT_COMMIT_SHA: 'abc123',
-}), { deploymentId: 'dpl_test', gitCommitSha: 'abc123' })
-assert.throws(() => refreshSchedulerDeployment({}), /VERCEL_DEPLOYMENT_ID/)
 assert.equal(
   new Date(nextRefreshWakeAt(Date.parse('2026-08-15T14:19:39.000Z'))).toISOString(),
   '2026-08-15T14:22:00.000Z',
@@ -267,6 +256,23 @@ assert.equal(
   new Date(nextRefreshWakeAt(Date.parse('2026-08-15T14:22:00.000Z'))).toISOString(),
   '2026-08-15T14:27:00.000Z',
 )
+
+const localResponse = {
+  headers: new Map(),
+  hasHeader(key) { return this.headers.has(key) },
+  setHeader(key, value) { this.headers.set(key, value) },
+  end(body) { this.body = body },
+}
+await withHttpHelpers((request, response) => {
+  assert.equal(Object.getPrototypeOf(request.query), null)
+  assert.equal(request.query.q, 'Bütgenbach')
+  assert.deepEqual(request.query.id, ['one', 'two'])
+  response.status(200).json({ query: request.query.q })
+})({ url: '/api/live-reports?q=B%C3%BCtgenbach&id=one&id=two' }, localResponse)
+assert.equal(localResponse.statusCode, 200)
+assert.equal(localResponse.headers.get('Content-Type'), 'application/json; charset=utf-8')
+assert.equal(localResponse.headers.get('Content-Length'), String(localResponse.body.length))
+assert.deepEqual(JSON.parse(localResponse.body), { query: 'Bütgenbach' })
 
 const provider = LIVE_AIRCRAFT_PROVIDERS[0]
 const normalized = normalizeAircraft({
@@ -572,7 +578,6 @@ const headers = new Map()
 setNoStoreHeaders({ setHeader: (key, value) => headers.set(key, value) })
 assert.equal(headers.get('Cache-Control'), 'no-store, max-age=0')
 assert.equal(headers.get('CDN-Cache-Control'), 'no-store')
-assert.equal(headers.get('Vercel-CDN-Cache-Control'), 'no-store')
 
 const media = normalizeVediaArticle({
   id: 'fixture-article',
@@ -776,68 +781,5 @@ const [preparationEvent] = buildEvents({
   frameCount: 400,
 })
 assert.equal(preparationEvent.type, 'alert', 'evacuation preparation must not be presented as an evacuation order')
-
-assert.equal(butgenbachSourceConfig.runtime, 'edge')
-const proxyPath = '/wp-sitemap-posts-post-1.xml'
-const proxyTimestamp = Math.floor(Date.now() / (5 * 60 * 1000))
-const proxyToken = 'deterministic-test-token'
-const proxySignature = createHmac('sha256', proxyToken)
-  .update(`${proxyTimestamp}\n${proxyPath}`)
-  .digest('hex')
-const previousProxyToken = process.env.INTERNAL_SOURCE_TOKEN
-const previousFetch = globalThis.fetch
-let proxiedUrl = null
-try {
-  process.env.INTERNAL_SOURCE_TOKEN = proxyToken
-  globalThis.fetch = async (url) => {
-    proxiedUrl = String(url)
-    return new Response('<urlset />', { status: 200, headers: { 'Content-Type': 'application/xml' } })
-  }
-  const proxyResponse = await butgenbachSourceHandler(new Request(
-    `https://venn-fire.vercel.app/api/butgenbach-source?path=${encodeURIComponent(proxyPath)}`,
-    {
-      headers: {
-        'X-Venn-Timestamp': String(proxyTimestamp),
-        'X-Venn-Signature': proxySignature,
-      },
-    },
-  ))
-  assert.equal(proxyResponse.status, 200)
-  assert.equal(proxiedUrl, `https://butgenbach.be${proxyPath}`)
-  assert.match(proxyResponse.headers.get('cache-control'), /no-store/)
-
-  const nestedProxyPath = '/erlass-des-buergermeisters-ueber-das-voruebergehende-verbot-bestimmter-aktivitaeten-auf-dem-see-von-buetgenbach-um-die-wasserentnahme-im-rahmen-der-derzeitigen-brandbekaempfung-zu-ermoeglichen/'
-  const nestedProxySignature = createHmac('sha256', proxyToken)
-    .update(`${proxyTimestamp}\n${nestedProxyPath}`)
-    .digest('hex')
-  const nestedProxyResponse = await butgenbachSourceHandler(new Request(
-    `https://venn-fire.vercel.app/api/butgenbach-source?path=${encodeURIComponent(nestedProxyPath)}`,
-    {
-      headers: {
-        'X-Venn-Timestamp': String(proxyTimestamp),
-        'X-Venn-Signature': nestedProxySignature,
-      },
-    },
-  ))
-  assert.equal(nestedProxyResponse.status, 200, 'nested official WordPress article paths must be allowed')
-  assert.equal(proxiedUrl, `https://butgenbach.be${nestedProxyPath}`)
-
-  proxiedUrl = null
-  const rejectedProxyResponse = await butgenbachSourceHandler(new Request(
-    'https://venn-fire.vercel.app/api/butgenbach-source?path=https%3A%2F%2Fexample.test%2F',
-    {
-      headers: {
-        'X-Venn-Timestamp': String(proxyTimestamp),
-        'X-Venn-Signature': proxySignature,
-      },
-    },
-  ))
-  assert.equal(rejectedProxyResponse.status, 401)
-  assert.equal(proxiedUrl, null, 'the signed source route must never become an open proxy')
-} finally {
-  globalThis.fetch = previousFetch
-  if (previousProxyToken == null) delete process.env.INTERNAL_SOURCE_TOKEN
-  else process.env.INTERNAL_SOURCE_TOKEN = previousProxyToken
-}
 
 console.log(`refresh pipeline verified: ${REFRESH_SOURCES.length} leased sources, public data adapters, five-minute grid, semantic history, no-store APIs`)

@@ -19,7 +19,6 @@ const TABLES = [
   { name: 'app_datasets', primaryKey: ['dataset_key'], batchSize: 100 },
   { name: 'app_dataset_versions', primaryKey: ['dataset_key', 'content_hash'], batchSize: 100 },
   { name: 'source_refresh_runs', primaryKey: ['source_key', 'bucket_at'], batchSize: 250 },
-  { name: 'refresh_scheduler_ticks', primaryKey: ['deployment_id', 'scheduled_for'], batchSize: 250 },
   { name: 'source_artifacts', primaryKey: ['artifact_key'], batchSize: 10 },
   { name: 'flight_import_runs', primaryKey: ['bucket_at'], batchSize: 250 },
   { name: 'flight_observations', primaryKey: ['observation_key'], batchSize: 250 },

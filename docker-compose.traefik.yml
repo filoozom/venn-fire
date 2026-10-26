@@ -28,10 +28,8 @@ services:
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
       RUN_MIGRATIONS: ${RUN_MIGRATIONS:-true}
 
-      # Leave this false while another deployment still refreshes the same
-      # database. Two writers on one database is the one way this deployment
-      # could disturb existing data.
-      REFRESH_ENABLED: ${REFRESH_ENABLED:-false}
+      # Enable source refresh on exactly one app instance.
+      REFRESH_ENABLED: ${REFRESH_ENABLED:-true}
       REFRESH_ON_BOOT: ${REFRESH_ON_BOOT:-false}
 
       FIRMS_MAP_KEY: ${FIRMS_MAP_KEY:-}

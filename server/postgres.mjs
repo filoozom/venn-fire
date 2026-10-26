@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs'
 
 import pg from 'pg'
-import { attachDatabasePool } from '@vercel/functions'
 
 const { Pool } = pg
 
@@ -95,15 +94,12 @@ export function postgresPoolOptions(url, environment = process.env) {
     : { connectionString: url }
   return {
     ...connection,
-    // Vercel can create many warm function instances. Keep each instance small;
-    // a PgBouncer endpoint in front of a self-hosted server is still strongly
-    // recommended for production traffic.
     max: positiveInteger(environment.DATABASE_POOL_MAX, 5, 20),
     connectionTimeoutMillis: positiveInteger(environment.DATABASE_CONNECT_TIMEOUT_MS, 8_000, 60_000),
     idleTimeoutMillis: positiveInteger(environment.DATABASE_IDLE_TIMEOUT_MS, 5_000, 300_000),
     maxLifetimeSeconds: positiveInteger(environment.DATABASE_MAX_LIFETIME_SECONDS, 300, 3_600),
     allowExitOnIdle: true,
-    application_name: environment.DATABASE_APPLICATION_NAME?.trim() || 'venn-fire-vercel',
+    application_name: environment.DATABASE_APPLICATION_NAME?.trim() || 'venn-fire-selfhosted',
   }
 }
 
@@ -114,7 +110,6 @@ export function postgresPool(url = postgresUrl(), environment = process.env) {
     pool.on('error', (error) => {
       console.error('Unexpected PostgreSQL pool error:', error?.message || error)
     })
-    if (environment.VERCEL === '1') attachDatabasePool(pool)
     pools.set(url, pool)
   }
   return pools.get(url)

@@ -4,5 +4,4 @@ dist/
 *.log
 output/
 timeline-video.config.json
-.vercel
 .env*

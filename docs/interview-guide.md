@@ -10,7 +10,7 @@ For a short version that can be learned in roughly 15 minutes, see the [intervie
 
 Venn Fire Watch is a five-minute, time-travelable observation viewer for the High Fens wildfire around Drossart, Baelen, and Jalhay. It combines official situation reports, satellite heat detections and imagery, aircraft receiver tracks, weather observations and forecasts, precipitation radar, air-quality forecasts, public alerts, and local-authority notices.
 
-Vercel Functions collect those sources on controlled schedules. Every current dataset, meaningful historical version, source refresh result, and raw audit artifact is retained in PostgreSQL. The browser reads only the database-backed API; it never calls the upstream providers directly and has no bundled static incident-data fallback.
+The local Node server collects those sources on controlled schedules. Every current dataset, meaningful historical version, source refresh result, and raw audit artifact is retained in PostgreSQL. The browser reads only the database-backed API; it never calls the upstream providers directly and has no bundled static incident-data fallback.
 
 The most important design decision is that the viewer keeps different kinds of evidence separate:
 
@@ -498,8 +498,8 @@ There is no bundled static incident dataset and no browser call to a source prov
 ### Data flow
 
 ```text
-Vercel Queue delayed wake-up
-  → private refresh function
+Local five-minute timer
+  → source refresh worker
   → per-source PostgreSQL lease
   → fixed upstream provider
   → normalized current dataset
@@ -510,7 +510,7 @@ Vercel Queue delayed wake-up
   → five-minute timeline
 ```
 
-All incident API responses emit browser, CDN, and Vercel-CDN `no-store` headers. There is no CDN data cache. Database-backed current projections make reads efficient, while leases prevent repeated browser requests, queue retries, GitHub fallbacks, or overlapping deployments from multiplying upstream API calls.
+The data API supports ETag revalidation and a short shared cache; content-addressed images are immutable. The other read APIs emit `no-store` headers. Database leases prevent overlapping refresh runs from multiplying upstream API calls.
 
 ### PostgreSQL tables
 
@@ -518,7 +518,6 @@ All incident API responses emit browser, CDN, and Vercel-CDN `no-store` headers.
 - `app_dataset_versions`: immutable historical versions when meaningful source content changes.
 - `app_public_datasets`: compact projections optimized for the public browser response.
 - `source_refresh_runs`: every claimed source/time bucket, including successful unchanged polls, errors, and item counts.
-- `refresh_scheduler_ticks`: deployment/wake-up ownership and duplicate-message protection.
 - `source_artifacts`: content-addressed raw responses, satellite quicklooks, clipped raster arrays, radar data, imagery, and forecast products.
 - `flight_import_runs`: idempotent flight-history recovery/import bookkeeping.
 - `flight_observations`: exact deduplicated receiver fixes.
@@ -542,11 +541,7 @@ Completion fingerprints prevent the system from repeatedly consuming provider al
 
 ### Continuous scheduler
 
-The primary wake-up is a Vercel Queue message scheduled for minute 02/07/12/... of each hour. The private consumer schedules the next delayed message before refreshing the leased sources. Queue delivery can retry without duplicating source calls.
-
-A GitHub Action runs every 15 minutes as a fallback and deployment bootstrap. It first waits for the production alias to serve the intended commit, then makes one refresh call. A daily Vercel cron provides another recovery path suitable for the current plan limits.
-
-Scheduler ownership is pinned to the active deployment. When a new release takes over, the old queue chain stops. This is why a deployment-wait workflow must compare the deployed Git SHA before claiming refresh ownership.
+The local Node server refreshes sources at minute 02/07/12/... of each hour. Per-source database leases protect provider limits. Operators can run `scripts/refresh-once.mjs` manually, or set `REFRESH_ENABLED=false` when using an external scheduler.
 
 ## What the website cannot establish
 
@@ -621,7 +616,7 @@ A timestamped authoritative operational perimeter would provide the largest impr
 
 ## Source and project references
 
-- [Production viewer](https://venn-fire.vercel.app)
+- [Production viewer](https://venn.apyos.com)
 - [Project README](../README.md)
 - [Sentinel-2 analysis methodology](sentinel2-analysis.md)
 - [Internal synchronized-source limit inventory](known-source-limits.md)

@@ -10,7 +10,7 @@ Dies ist die Kurzfassung des [ausführlichen Interview-Leitfadens](interview-gui
 >
 > Entscheidend ist, dass die Anwendung diese Quellen nicht so behandelt, als würden sie alle dasselbe aussagen. Die gemeldete Fläche ist die von Behörden veröffentlichte Zahl. Die „Best estimate“ ist unsere konservative, aus Belegen abgeleitete Rasterunion mit 50-Meter-Zellen. EFFIS ist ein breiteres tägliches algorithmisches Produkt. FIRMS-Punkte sind Wärmedetektionen, und Flugspuren sind Empfängerpositionen — weder eine amtliche Grenze noch ein Nachweis für Wasserabwürfe.
 >
-> Vercel Functions aktualisieren jede Quelle in einem sinnvollen Rhythmus. PostgreSQL speichert aktuelle und historische Daten sowie die Rohdaten für die Nachvollziehbarkeit. Der Browser liest ausschließlich aus dieser Datenbank. Die Website dient dem Lageverständnis und der Rekonstruktion dessen, was zu einem bestimmten Zeitpunkt bekannt war. Für Sicherheit, Zugang und Evakuierungen bleiben die Behörden maßgeblich.
+> Der lokale Node-Server aktualisiert jede Quelle in einem sinnvollen Rhythmus. PostgreSQL speichert aktuelle und historische Daten sowie die Rohdaten für die Nachvollziehbarkeit. Der Browser liest ausschließlich aus dieser Datenbank. Die Website dient dem Lageverständnis und der Rekonstruktion dessen, was zu einem bestimmten Zeitpunkt bekannt war. Für Sicherheit, Zugang und Evakuierungen bleiben die Behörden maßgeblich.
 
 Wenn du das natürlich formulieren kannst, beherrschst du bereits die Kernaussage.
 
@@ -64,16 +64,16 @@ CAMS kann bereits gültige Stundenfelder ersetzen, wenn der tägliche Prognosela
 ## Die Architektur in 20 Sekunden
 
 ```text
-Vercel Queue alle fünf Minuten
+Lokaler Timer alle fünf Minuten
   → Aktualisierungsfunktion
   → quellenspezifische Datenbanksperre
   → externer Anbieter
   → PostgreSQL: aktueller Stand + Historie + Rohdaten-Artefakt
-  → kompakte API ohne Cache
+  → kompakte datenbankgestützte API
   → React-/Leaflet-Browseranwendung
 ```
 
-Es gibt weder einen CDN-Cache noch einen mitgelieferten statischen Ersatzdatensatz für den Vorfall. Die Datenbank ist die dauerhafte, synchronisierte Quelle; Sperren schützen die begrenzten API-Kontingente der Anbieter. Die Seite wird clientseitig gerendert: Zuerst lädt die kleine Kernansicht, anschließend asynchron die umfangreichere Flugzeughistorie.
+Die Daten-API unterstützt ETags und einen kurzen gemeinsamen Cache; es gibt keinen mitgelieferten statischen Ersatzdatensatz für den Vorfall. Die Datenbank ist die dauerhafte, synchronisierte Quelle; Sperren schützen die begrenzten API-Kontingente der Anbieter. Die Seite wird clientseitig gerendert: Zuerst lädt die kleine Kernansicht, anschließend asynchron die umfangreichere Flugzeughistorie.
 
 Das Wetterfeld hält Beobachtungen zum ausgewählten Zeitpunkt von der neuesten Open-Meteo-Prognose getrennt. Letztere zeigt jede Modellstunde der nächsten 48 Stunden mit Regen, Bewölkung, Sichtweite, Temperatur, Wind und Böen.
 

@@ -19,7 +19,7 @@ const defaults = postgresPoolOptions('postgresql://example.test/fire', {})
 assert.equal(defaults.max, 5)
 assert.equal(defaults.connectionTimeoutMillis, 8_000)
 assert.equal(defaults.idleTimeoutMillis, 5_000)
-assert.equal(defaults.application_name, 'venn-fire-vercel')
+assert.equal(defaults.application_name, 'venn-fire-selfhosted')
 
 const selfHostedEnvironment = {
   PGHOST: 'db.example.test',

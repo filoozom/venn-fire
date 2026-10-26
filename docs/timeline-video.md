@@ -98,7 +98,7 @@ above the timeline.
 The same presentation is available as a live database-backed browser view:
 
 ```text
-https://venn-fire.vercel.app/?presentation=news&lang=de
+https://venn.apyos.com/?presentation=news&lang=de
 ```
 
 The Apyos mark remains enabled by default. For an unbranded export, pass

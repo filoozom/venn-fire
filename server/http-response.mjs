@@ -1,14 +1,9 @@
 import { createHash } from 'node:crypto'
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib'
 
-// Vercel meters Fast Origin Transfer on the bytes a function hands to the Edge
-// Network, before the edge compresses for the client. A 7 MB JSON body that
-// reaches the browser as ~400 KB of brotli is still 7 MB of metered origin
-// transfer, so the function has to do the compressing itself.
-//
 // Brotli quality 5 compresses the ~7 MB dataset response to ~360 KB in ~40 ms.
 // Quality 11 saves a further 74 KB but takes ~3.9 s, which would dominate the
-// function's own duration budget for no useful gain.
+// response time for little gain.
 const BROTLI_QUALITY = 5
 const GZIP_LEVEL = 6
 
@@ -50,7 +45,6 @@ export function setSharedCacheHeaders(response, { maxAgeSeconds, staleWhileReval
   // allowing it to store the body, which is what makes its If-None-Match work.
   response.setHeader('Cache-Control', `public, max-age=0, must-revalidate, s-maxage=${maxAgeSeconds}, stale-while-revalidate=${staleWhileRevalidateSeconds}`)
   response.setHeader('CDN-Cache-Control', shared)
-  response.setHeader('Vercel-CDN-Cache-Control', shared)
   response.removeHeader('Pragma')
 }
 
@@ -60,7 +54,6 @@ export function setImmutableCacheHeaders(response) {
   const value = `public, max-age=${YEAR_SECONDS}, immutable`
   response.setHeader('Cache-Control', value)
   response.setHeader('CDN-Cache-Control', value)
-  response.setHeader('Vercel-CDN-Cache-Control', value)
   response.removeHeader('Pragma')
 }
 

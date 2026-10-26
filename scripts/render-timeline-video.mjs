@@ -11,7 +11,7 @@ import { chromium } from '@playwright/test'
 const FIVE_MINUTES_MS = 5 * 60 * 1000
 
 const DEFAULT_CONFIG = Object.freeze({
-  url: 'https://venn-fire.vercel.app',
+  url: 'https://venn.apyos.com',
   output: 'output/venn-fire-full-timeline.mp4',
   previewOutput: null,
   metadataOutput: null,
@@ -1063,16 +1063,6 @@ async function writeRepeatedFrames(encoder, png, count) {
   for (let index = 0; index < count; index += 1) await writeEncoderFrame(encoder, png)
 }
 
-async function deploymentMetadata(context, viewerUrl) {
-  try {
-    const response = await context.request.get(new URL('/api/deployment', viewerUrl).href, { timeout: 15_000 })
-    if (!response.ok()) return { available: false, status: response.status() }
-    return await response.json()
-  } catch (error) {
-    return { available: false, error: error.message }
-  }
-}
-
 async function main() {
   // pnpm may preserve its conventional standalone `--` argument.
   const parsed = await configurationFromArguments(process.argv.slice(2).filter((argument) => argument !== '--'))
@@ -1171,7 +1161,6 @@ async function main() {
     const introFrames = Math.round(config.introSeconds * config.fps)
     const outroFrames = Math.round(config.outroSeconds * config.fps)
     const encodedFrameCount = introFrames + (frames.length * config.holdFrames) + outroFrames
-    const deployment = await deploymentMetadata(context, config.url)
 
     console.log(`Frozen at ${coreResponse?.generatedAt ?? 'unknown'}; ${sliderMax + 1} source frames available`)
     if (previewPath) {
@@ -1227,7 +1216,6 @@ async function main() {
       renderer: 'scripts/render-timeline-video.mjs',
       viewer: {
         url: config.url,
-        deployment,
         frozenData: config.freezeData,
         coreResponseGeneratedAt: coreResponse?.generatedAt ?? null,
         aircraftResponseGeneratedAt: apiPayloads.get('aircraft')?.generatedAt ?? null,

@@ -9,7 +9,7 @@
 // needs Postgres credentials for the origin; this only needs its public API,
 // which is all a self-hosted deployment normally has.
 //
-//   node scripts/seed-incident-config.mjs https://venn-fire.vercel.app
+//   node scripts/seed-incident-config.mjs https://venn.apyos.com
 //   node scripts/seed-incident-config.mjs ./incident-config.json
 import { readFile } from 'node:fs/promises'
 import process from 'node:process'

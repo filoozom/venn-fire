@@ -10,7 +10,7 @@ Eine Kurzfassung, die sich in ungefähr 15 Minuten lernen lässt, steht im [Inte
 
 Venn Fire Watch ist eine in Fünf-Minuten-Schritten rückblickend nutzbare Übersicht für den Brand im Hohen Venn bei Drossart, Baelen und Jalhay. Sie verbindet behördliche Lageberichte, satellitengestützte Wärmedetektionen und Bilder, öffentlich empfangene Flugzeugspuren, Wetterbeobachtungen und -prognosen, Niederschlagsradar, Luftqualitätsprognosen, öffentliche Warnungen und Mitteilungen lokaler Behörden.
 
-Vercel Functions rufen diese Quellen in kontrollierten Zeitabständen ab. Jeder aktuelle Datensatz, jede inhaltlich relevante historische Version, jedes Aktualisierungsergebnis und jedes rohe Audit-Artefakt wird in PostgreSQL gespeichert. Der Browser liest ausschließlich aus der datenbankgestützten API; er kontaktiert niemals direkt einen Anbieter und enthält keinen statischen Ersatzdatensatz des Vorfalls.
+Der lokale Node-Server ruft diese Quellen in kontrollierten Zeitabständen ab. Jeder aktuelle Datensatz, jede inhaltlich relevante historische Version, jedes Aktualisierungsergebnis und jedes rohe Audit-Artefakt wird in PostgreSQL gespeichert. Der Browser liest ausschließlich aus der datenbankgestützten API; er kontaktiert niemals direkt einen Anbieter und enthält keinen statischen Ersatzdatensatz des Vorfalls.
 
 Die wichtigste Designentscheidung ist die klare Trennung unterschiedlicher Belegarten:
 
@@ -498,8 +498,8 @@ Es gibt weder einen mitgelieferten statischen Vorfalldatensatz noch Browseraufru
 ### Datenfluss
 
 ```text
-Verzögerter Vercel-Queue-Weckruf
-  → private Aktualisierungsfunktion
+Lokaler Fünf-Minuten-Timer
+  → Aktualisierungsprozess
   → quellenspezifische PostgreSQL-Sperre
   → fest definierter externer Anbieter
   → normalisierter aktueller Datensatz
@@ -510,7 +510,7 @@ Verzögerter Vercel-Queue-Weckruf
   → Fünf-Minuten-Zeitstrahl
 ```
 
-Alle Vorfall-API-Antworten setzen `no-store` für Browser, CDN und Vercel-CDN. Es gibt keinen CDN-Datencache. Datenbankgestützte aktuelle Projektionen halten Lesevorgänge effizient, während Sperren verhindern, dass wiederholte Browseranfragen, Queue-Wiederholungen, GitHub-Notläufe oder überlappende Deployments die Zahl externer API-Aufrufe vervielfachen.
+Die Daten-API unterstützt ETags und einen kurzen gemeinsamen Cache; inhaltsadressierte Bilder sind unveränderlich. Die übrigen Lese-APIs setzen `no-store`. Datenbanksperren verhindern doppelte Anbieteraufrufe bei überlappenden Aktualisierungen.
 
 ### PostgreSQL-Tabellen
 
@@ -518,7 +518,6 @@ Alle Vorfall-API-Antworten setzen `no-store` für Browser, CDN und Vercel-CDN. E
 - `app_dataset_versions`: unveränderliche historische Versionen bei inhaltlichen Änderungen der Quelle.
 - `app_public_datasets`: kompakte Projektionen für eine effiziente öffentliche Browserantwort.
 - `source_refresh_runs`: jedes beanspruchte Quellen-/Zeitfenster einschließlich erfolgreicher unveränderter Abfragen, Fehler und Elementzahlen.
-- `refresh_scheduler_ticks`: Eigentum an Deployment/Weckruf und Schutz vor doppelten Nachrichten.
 - `source_artifacts`: inhaltsadressierte Rohantworten, Satellitenvorschauen, ausgeschnittene Rasterarrays, Radardaten, Bildprodukte und Prognosen.
 - `flight_import_runs`: Buchführung für idempotente Wiederherstellung und Importe von Flugverläufen.
 - `flight_observations`: exakte, deduplizierte Empfängerpositionen.
@@ -542,11 +541,7 @@ Abschluss-Fingerabdrücke verhindern, dass das System für dieselbe Wiederherste
 
 ### Kontinuierlicher Scheduler
 
-Der primäre Weckruf ist eine Vercel-Queue-Nachricht in den Minuten 02/07/12/... jeder Stunde. Der private Consumer plant die nächste verzögerte Nachricht, bevor er die gesperrten Quellen aktualisiert. Die Queue darf die Zustellung wiederholen, ohne Quellen doppelt abzurufen.
-
-Eine GitHub Action läuft alle 15 Minuten als Ausfallsicherung und Deployment-Start. Sie wartet zuerst, bis der Produktionsalias den vorgesehenen Commit ausliefert, und führt dann genau einen Aktualisierungsaufruf aus. Ein täglicher Vercel Cron bietet einen weiteren Wiederanlaufpfad innerhalb der aktuellen Tarifgrenzen.
-
-Der Scheduler ist an das aktive Deployment gebunden. Sobald eine neue Veröffentlichung übernimmt, stoppt die alte Queue-Kette. Deshalb muss ein Workflow während des Deployment-Wartens den ausgelieferten Git-SHA vergleichen, bevor er die Verantwortung für die Aktualisierung übernimmt.
+Der lokale Node-Server aktualisiert die Quellen in den Minuten 02/07/12/... jeder Stunde. Datenbanksperren schützen die Anbieter-Kontingente. Manuelle Aktualisierungen erfolgen über `scripts/refresh-once.mjs`; `REFRESH_ENABLED=false` deaktiviert den internen Timer, wenn ein eigener Scheduler verwendet wird.
 
 ## Was die Website nicht feststellen kann
 
@@ -621,7 +616,7 @@ Eine zeitgestempelte amtliche operative Brandgrenze wäre die wichtigste Verbess
 
 ## Quellen und Projektdokumentation
 
-- [Produktionswebsite](https://venn-fire.vercel.app)
+- [Produktionswebsite](https://venn.apyos.com)
 - [Projekt-README](../README.md)
 - [Methodik der Sentinel-2-Analyse](sentinel2-analysis.md)
 - [Internes Inventar synchronisierter Quellenlimits](known-source-limits.md)

@@ -10,7 +10,7 @@ This is the short version of the [full interview guide](interview-guide.md). Lea
 >
 > The key is that it does not pretend all those sources mean the same thing. The reported area is what authorities published. The Best estimate is our conservative 50 m evidence union. EFFIS is a broader daily algorithmic product. FIRMS points are heat detections, and aircraft paths are receiver positions—not an official perimeter or proof of water drops.
 >
-> Vercel Functions refresh each source at a sensible cadence, PostgreSQL retains current and historical data plus raw audit artifacts, and the browser reads only that database. The site is useful for situational awareness and reconstructing what was known at a given time, but official authorities remain the source for safety, access, and evacuation decisions.
+> The local Node server refreshes each source at a sensible cadence, PostgreSQL retains current and historical data plus raw audit artifacts, and the browser reads only that database. The site is useful for situational awareness and reconstructing what was known at a given time, but official authorities remain the source for safety, access, and evacuation decisions.
 
 If you can say that naturally, you already have the main story.
 
@@ -64,16 +64,16 @@ CAMS can revise already valid hourly fields when its daily forecast cycle change
 ## Architecture in 20 seconds
 
 ```text
-Vercel Queue every five minutes
+Local timer every five minutes
   → refresh function
   → per-source database lease
   → upstream provider
   → PostgreSQL current + history + raw artifact
-  → compact no-store API
+  → compact database-backed API
   → React/Leaflet browser
 ```
 
-There is no CDN cache and no bundled static incident-data fallback. The database acts as the durable synchronized source, while leases protect limited upstream API allowances. The page is client rendered: it loads the small core view first and aircraft history asynchronously.
+The data API supports ETags and a short shared cache; there is no bundled static incident-data fallback. The database acts as the durable synchronized source, while leases protect limited upstream API allowances. The page is client rendered: it loads the small core view first and aircraft history asynchronously.
 
 The weather panel keeps selected-time observations separate from the latest Open-Meteo outlook. The latter exposes every model hour for the next 48 hours, including rain, cloud, visibility, temperature, wind, and gusts.
 

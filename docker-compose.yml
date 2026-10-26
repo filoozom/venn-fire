@@ -32,7 +32,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-venn-fire}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-venn-fire}
       # The server creates and migrates its own schema on start.
       RUN_MIGRATIONS: ${RUN_MIGRATIONS:-true}
-      # Internal five-minute source refresh, replacing the Vercel queue chain.
+      # Internal five-minute source refresh.
       REFRESH_ENABLED: ${REFRESH_ENABLED:-true}
       REFRESH_ON_BOOT: ${REFRESH_ON_BOOT:-false}
       # Optional upstream credentials. Sources needing a key are skipped without.

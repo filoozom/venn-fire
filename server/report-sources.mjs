@@ -56,7 +56,7 @@ export async function backfillLegacyReportHistory({ requestedAtMs, query }) {
   const response = await fetch(LEGACY_REPORT_SOURCE_URL, {
     headers: {
       Accept: 'text/plain',
-      'User-Agent': 'Venn-Fire-Watch/1.0 (+https://venn-fire.vercel.app/)',
+      'User-Agent': 'Venn-Fire-Watch/1.0 (+https://venn.apyos.com/)',
     },
     signal: AbortSignal.timeout(15_000),
   })

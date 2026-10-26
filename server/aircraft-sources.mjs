@@ -236,7 +236,7 @@ async function fetchTrace(provider, aircraft, date) {
     const response = await fetch(originalPath, {
       headers: {
         Accept: 'application/json',
-        'User-Agent': 'Venn-Fire-Watch/1.0 (+https://venn-fire.vercel.app/)',
+        'User-Agent': 'Venn-Fire-Watch/1.0 (+https://venn.apyos.com/)',
       },
       redirect: 'follow',
       signal: AbortSignal.timeout(15_000),
@@ -342,7 +342,7 @@ export async function backfillLegacyFlightHistory({
   const response = await fetch(LEGACY_FLIGHT_SNAPSHOT_URL, {
     headers: {
       Accept: 'application/json',
-      'User-Agent': 'Venn-Fire-Watch/1.0 (+https://venn-fire.vercel.app/)',
+      'User-Agent': 'Venn-Fire-Watch/1.0 (+https://venn.apyos.com/)',
     },
     signal: AbortSignal.timeout(15_000),
   })

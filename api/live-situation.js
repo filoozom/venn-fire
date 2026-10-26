@@ -649,7 +649,7 @@ export default async function handler(request, response) {
       database,
       interpretation: [
         'This endpoint reads Postgres only; provider polling is performed by the leased five-minute refresh function.',
-        'Responses are not stored in the browser or Vercel CDN cache.',
+        'Responses are not stored in the browser or shared cache.',
       ],
     })
   } catch (error) {

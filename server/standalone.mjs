@@ -1,10 +1,6 @@
 #!/usr/bin/env node
-// Self-hosted entry point. On Vercel each api/*.js file is its own function and
-// the platform serves the built client, runs the cron and drives the refresh
-// chain through a queue. Off-platform there is one long-lived process, so this
-// server does the same four jobs directly: serve dist/, route the read API
-// through the same handler files, keep the schema current, and refresh sources
-// on the shared cadence instead of a deployment-pinned queue chain.
+// Serve the built client and read API, keep the schema current, and refresh
+// sources on a five-minute cadence in one long-lived process.
 import { createServer } from 'node:http'
 import { createHash } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
@@ -13,7 +9,6 @@ import process from 'node:process'
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib'
 
 import dataHandler from '../api/data.js'
-import deploymentHandler from '../api/deployment.js'
 import firmsSituationHandler from '../api/firms-situation.js'
 import liveReportsHandler from '../api/live-reports.js'
 import liveSituationHandler from '../api/live-situation.js'
@@ -23,7 +18,7 @@ import { databaseQuery, databaseUrl, ensureDatabaseSchema } from './database.mjs
 import { ensureFlightHistorySchema } from './flight-history.mjs'
 import { closePostgresPools } from './postgres.mjs'
 import { REFRESH_INTERVAL_MS, nextRefreshWakeAt } from './refresh-cadence.mjs'
-import { withVercelRuntime } from './vercel-adapter.mjs'
+import { withHttpHelpers } from './http-adapter.mjs'
 
 const PORT = Number.parseInt(process.env.PORT ?? '3000', 10)
 const HOST = process.env.HOST?.trim() || '0.0.0.0'
@@ -54,13 +49,12 @@ const COMPRESSIBLE = /^(?:text\/|application\/(?:json|manifest\+json)|image\/svg
 
 const ROUTES = new Map(Object.entries({
   '/api/data': dataHandler,
-  '/api/deployment': deploymentHandler,
   '/api/firms-situation': firmsSituationHandler,
   '/api/live-reports': liveReportsHandler,
   '/api/live-situation': liveSituationHandler,
   '/api/sentinel-quicklook': sentinelQuicklookHandler,
   '/api/source-image': sourceImageHandler,
-}).map(([route, handler]) => [route, withVercelRuntime(handler)]))
+}).map(([route, handler]) => [route, withHttpHelpers(handler)]))
 
 // dist/ is immutable for the lifetime of a container, so a file is read and
 // compressed at most once per encoding.
@@ -227,8 +221,6 @@ async function runRefresh(reason) {
   refreshing = true
   const startedAt = Date.now()
   try {
-    // Imported lazily so the queue-backed scheduler, which requires Vercel
-    // deployment variables, is never loaded here.
     const { refreshAllSources } = await import('./refresh-sources.mjs')
     const sources = await refreshAllSources({ requestedAtMs: startedAt })
     const failed = sources.filter((source) => source.status === 'failed')

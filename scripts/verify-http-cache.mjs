@@ -1,7 +1,4 @@
-// Verifies the response layer that keeps Fast Origin Transfer down: the function
-// must compress its own body (the edge meters what the function hands it), the
-// entity tag must survive a changing generatedAt so revalidation can return 304,
-// and content-addressed images must be cacheable forever.
+// Verify response compression, stable entity tags and cache headers.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { brotliDecompressSync, gunzipSync } from 'node:zlib'
@@ -124,13 +121,12 @@ assert.match(shared.headers['cache-control'], /s-maxage=60/)
 assert.match(shared.headers['cache-control'], /stale-while-revalidate=300/)
 assert.match(shared.headers['cache-control'], /max-age=0/, 'browser must revalidate its own copy')
 assert.match(shared.headers['cdn-cache-control'], /s-maxage=60/)
-assert.match(shared.headers['vercel-cdn-cache-control'], /s-maxage=60/)
 assert.equal(shared.headers.pragma, undefined, 'a stale Pragma: no-cache must be cleared')
 
 const immutable = fakeResponse()
 immutable.setHeader('Pragma', 'no-cache')
 setImmutableCacheHeaders(immutable)
-for (const header of ['cache-control', 'cdn-cache-control', 'vercel-cdn-cache-control']) {
+for (const header of ['cache-control', 'cdn-cache-control']) {
   assert.match(immutable.headers[header], /max-age=31536000/, header)
   assert.match(immutable.headers[header], /immutable/, header)
 }

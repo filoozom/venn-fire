@@ -1,46 +1,39 @@
 # Venn Fire Watch
 
-Five-minute incident viewer for the High Fens wildfire near Drossart. The production site is [venn-fire.vercel.app](https://venn-fire.vercel.app).
+Five-minute incident viewer for the High Fens wildfire near Drossart. The production site is [venn.apyos.com](https://venn.apyos.com).
 
 ## Data architecture
 
-The browser is database-only. It paints the viewer shell immediately, loads `/api/data?scope=core`, and renders the incident before asynchronously loading the larger retained aircraft projection from `/api/data?scope=aircraft`. It repeats both reads every five minutes with `cache: 'no-store'`; it never contacts a provider and has no bundled JSON fallback. The unscoped route remains the complete compatibility response. All API routes also emit browser, CDN and Vercel-CDN `no-store` headers.
+The browser is database-only. It paints the viewer shell immediately, loads `/api/data?scope=core`, and renders the incident before asynchronously loading the larger retained aircraft projection from `/api/data?scope=aircraft`. It repeats both reads every five minutes with `cache: 'no-store'`; it never contacts a provider and has no bundled JSON fallback. The unscoped route remains the complete compatibility response. `/api/data` supports ETag revalidation and a short shared-cache lifetime; content-addressed images are immutable, and the other read APIs emit `no-store` headers.
 
 The production flow is:
 
 ```text
-Vercel Queue delayed wake-up (every 5 min)
-  → private /api/refresh-queue Vercel Function
+Local Node server timer (every 5 min, at minute 02/07/12/...)
   → per-source Postgres lease
   → fixed upstream provider
   → current dataset + historical version + refresh-run record
   → /api/data
   → five-minute browser timeline
-
-GitHub fallback schedule / deployment push
-  → zero-database /api/deployment revision probe
-  → one public /api/refresh bootstrap/fallback call
-  → the same leased refresh + next Vercel Queue wake-up
 ```
 
-The PostgreSQL database is addressed through `DATABASE_URL`/`POSTGRES_URL` or the certificate-verified `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `PG_CA_PEM` and `PGSSL_SERVERNAME` parameter form. The latter takes precedence when `PG_CA_PEM` is present. The runtime uses the standard PostgreSQL protocol, SCRAM channel binding and Vercel's database-pool lifecycle integration, and works with a TLS-enabled self-hosted server, PgBouncer endpoint or managed provider. Tables are created idempotently by the functions:
+The PostgreSQL database is addressed through `DATABASE_URL`/`POSTGRES_URL` or the certificate-verified `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `PG_CA_PEM` and `PGSSL_SERVERNAME` parameter form. The latter takes precedence when `PG_CA_PEM` is present. The runtime uses the standard PostgreSQL protocol, SCRAM channel binding and a process-wide connection pool, and works with a TLS-enabled self-hosted server, PgBouncer endpoint or managed provider. Tables are created idempotently on server startup:
 
 - `app_datasets`: latest normalized payload for each dataset.
 - `app_dataset_versions`: immutable, content-addressed history when source content changes. Retrieval timestamps are excluded from the content hash.
 - `app_public_datasets`: compact current projections for the viewer. Canonical rows remain complete; repeated aircraft provider strings and reproducible FIRMS footprint coordinates are omitted only from this delivery copy to reduce database transfer.
 - `source_refresh_runs`: one status record for every claimed source/time bucket, including unchanged polls and errors.
-- `refresh_scheduler_ticks`: one leased status row per deployment/wake-up slot, preventing duplicate queue messages from branching the refresh chain.
 - `source_artifacts`: the content-addressed raw audit archive, including source API/feed responses, retained Sentinel quicklook bytes, exact clipped Sentinel multispectral arrays, decoded RMI radar frames, NASA GIBS crops and CAMS forecast images/point responses. Current counts and original-byte totals are reported by the database overview.
 - `flight_import_runs` and `flight_observations`: exact, deduplicated receiver fixes retained for the incident lifetime.
 
-The repository contains no data snapshots, raw-response directory or local refresh daemon. The deleted aircraft snapshot is recovered once from its immutable Git revision, validated as 51 exact observations, archived and idempotently inserted into Postgres. The five timestamped area rows from the same pre-database revision are likewise checksum-validated and migrated once, which protects historical report steps that changed on their live article pages before the database cutover. Migration records prevent repeat upstream requests after either succeeds.
+The repository contains no data snapshots, raw-response directory or separate refresh daemon. The deleted aircraft snapshot is recovered once from its immutable Git revision, validated as 51 exact observations, archived and idempotently inserted into Postgres. The five timestamped area rows from the same pre-database revision are likewise checksum-validated and migrated once, which protects historical report steps that changed on their live article pages before the database cutover. Migration records prevent repeat upstream requests after either succeeds.
 
 ### Retained public-alert lookup
 
 `/api/live-reports` returns the accumulated affected-area reports and BE-Alert CAP records, including alerts that have expired and disappeared from the live feed. Its optional `q` parameter searches the retained title, description, headline and area fields without changing the source data:
 
 ```bash
-curl -fsSL 'https://venn-fire.vercel.app/api/live-reports?q=Ovifat' \
+curl -fsSL 'https://venn.apyos.com/api/live-reports?q=Ovifat' \
   | jq '.publicAlerts | {databaseRefreshedAt, currentlyInForce, totalAlertCount, matchCount, alerts}'
 ```
 
@@ -91,7 +84,7 @@ The scheduler has five-minute granularity. A database lease makes repeated calls
 | Copernicus EFFIS WFS | Daily algorithmic VIIRS geometry nearest the incident | 6 h |
 | Copernicus EFFIS historical-day recovery | Checksum-validated one-time recovery of the two pre-database daily products from the immutable project revision | 6 h |
 
-FIRMS is checked by every scheduler run, but its provider lease is 15 minutes to conserve the limited NASA MAP_KEY allowance. Each successful poll merges exact detections into retained history instead of replacing the previous window and archives five raw product CSV responses in Postgres. The dataset reports both `generatedAt` (when FIRMS was queried) and `latestAcquiredAt` (the newest satellite scan or overpass returned), so a current successful poll is distinguishable from a new heat observation. Raw polar footprints fade linearly and leave the current map after 24 hours; the coarse instantaneous Meteosat product uses a 15-minute window. Historical rows remain in PostgreSQL and remain available on their original timeline frames. The separate Best estimate can still use qualifying retained evidence inside its documented 30-day window. Corroboration is recalculated only from observations available by the selected timeline time, preventing later satellite observations from leaking backward. GOES_NRT is capped to a two-day request and returns Met12/Met10/Met9 over Belgium. Its `scan`/`track` columns are not physical kilometre dimensions: Met12 supplies zeroes while the MSG rows carry image-grid coordinates. The raw values are retained for provenance and ignored for footprint sizing. The map instead computes an explicitly approximate local ground footprint from the spacecraft generation, its EUMETSAT service longitude during this incident and the viewing geometry. Met12 and Met10 are at 0°; Met9 is at 45.5°E and therefore has a much larger, rotated footprint here. These rectangles communicate detection uncertainty and are never used for hectares. Configure `FIRMS_MAP_KEY` as a sensitive Vercel production environment variable; stored request URLs replace it with `MAP_KEY`, and the secret is never returned to the browser or written to the database.
+FIRMS is checked by every scheduler run, but its provider lease is 15 minutes to conserve the limited NASA MAP_KEY allowance. Each successful poll merges exact detections into retained history instead of replacing the previous window and archives five raw product CSV responses in Postgres. The dataset reports both `generatedAt` (when FIRMS was queried) and `latestAcquiredAt` (the newest satellite scan or overpass returned), so a current successful poll is distinguishable from a new heat observation. Raw polar footprints fade linearly and leave the current map after 24 hours; the coarse instantaneous Meteosat product uses a 15-minute window. Historical rows remain in PostgreSQL and remain available on their original timeline frames. The separate Best estimate can still use qualifying retained evidence inside its documented 30-day window. Corroboration is recalculated only from observations available by the selected timeline time, preventing later satellite observations from leaking backward. GOES_NRT is capped to a two-day request and returns Met12/Met10/Met9 over Belgium. Its `scan`/`track` columns are not physical kilometre dimensions: Met12 supplies zeroes while the MSG rows carry image-grid coordinates. The raw values are retained for provenance and ignored for footprint sizing. The map instead computes an explicitly approximate local ground footprint from the spacecraft generation, its EUMETSAT service longitude during this incident and the viewing geometry. Met12 and Met10 are at 0°; Met9 is at 45.5°E and therefore has a much larger, rotated footprint here. These rectangles communicate detection uncertainty and are never used for hectares. Configure `FIRMS_MAP_KEY` in the app container environment; stored request URLs replace it with `MAP_KEY`, and the secret is never returned to the browser or written to the database.
 
 The environmental additions remain evidence-specific. The precipitation layer combines RMI's retained live categorical frames with DWD's five-minute, 1 km RADOLAN YW history; the provider and measurement are shown per frame. NASA GIBS is visual imagery, and CAMS is a 0.1° model forecast; none can silently become a fire perimeter. ECMWF replaces overlapping valid hours when a new daily CAMS cycle is published, so the ingest records the cycle timestamp and re-fetches that cycle's already elapsed UTC hours atomically instead of joining two forecast revisions. Superseded images remain archived. CAMS rasters are retained over a regional crop and feathered at the display edge instead of presenting the crop rectangle as a plume boundary. Its published colour style saturates at 500 µg/m³, while exact provider point values remain separately displayed. Sentinel-3 catalogue intersections do not establish a hotspot: the currently connected public feed supplies pass metadata and previews, while its coordinate-level FRP measurement assets require authenticated Copernicus data access. Sentinel-1 acquisitions are paired only across the same spacecraft, relative orbit and direction, and their public catalogue previews remain visual context rather than a change measurement. All source imagery is served from PostgreSQL through `/api/source-image` with no-store headers; the browser never requests the upstream provider or receives raw binary payloads.
 
@@ -99,9 +92,9 @@ Aircraft discovery does not add provider calls: the former fixed-hex request is 
 
 The Best estimate remains one 50 m evidence union and one matching area figure, but its age is now visible. Qualifying ground observed during the previous 30 days is black; qualifying thermal or aircraft-supported evidence from the previous 24 hours is overlaid in red. Sentinel-2 dNBR can support the black burned footprint but never claims current heat. The 30-day cutoff is a display heuristic, not a pixel-level measurement of regrowth, and an absence of red is not proof that the fire is out. The thermal core starts with high-confidence, independently corroborated VIIRS observations available by the selected time. At most one high-confidence Terra/Aqua pass inside the 30-day window may extend the union when its pixels lie within 500 m of the core or aircraft-supported edge; retaining only the newest qualifying pass prevents successive 1 km snapshots from accumulating into an inflated scar. Aircraft support is not a separate outline: repeated sharp `GRZLY##` direction changes must be within 1 km of the thermal edge and within 900 m of another five-minute evidence frame. Each disconnected local cluster bounds its own smallest lobe against the thermal outline. It is red for 24 hours after its latest qualifying observation and then remains black until the 30-day cutoff. Approach, reservoir and disconnected route legs are excluded. Receiver data has no payload or drop-state field, so this remains a conservative inference rather than proof of a water drop or confirmed fire front. The separate touched-zone boundary remains removed.
 
-Bütgenbach's Cloudflare policy blocks requests from the Node.js function network. Its official sitemap and article pages are therefore read through `/api/butgenbach-source`, a no-store Vercel Edge function that accepts only short-lived HMAC-signed requests for allow-listed paths on `butgenbach.be`. It is not an open proxy; the Node.js refresh worker still validates, parses and archives every official response in Postgres.
+The local refresh worker fetches Bütgenbach's official sitemap and article pages directly, validates article URLs against the provider's trusted host, and archives the responses in Postgres.
 
-The project is currently on Vercel Hobby, whose native cron frequency is not sufficient for five-minute work. A Vercel Queue message therefore wakes the private consumer at minute 02/07/12/... and schedules the next delayed message before polling providers. Queue delivery is durable and automatically retried. Push delivery is pinned to a deployment; the `refresh-scheduler` database record names the active deployment so an old chain stops after a release. `.github/workflows/refresh.yml` polls the zero-database `/api/deployment` probe while a release is moving, then calls the mutating refresh endpoint exactly once. Its 15-minute schedule remains a fallback. Push runs wait until the production alias reports their exact commit before taking ownership; a newer push cancels an older release wait that can no longer own the alias. Scheduled and manually dispatched fallback runs accept whichever valid deployment currently owns the production alias and never cancel a release run. A once-daily native Vercel cron provides an additional recovery path allowed by Hobby. Every refresh path activates the current deployment and schedules its next queue wake-up. The endpoint has no user-controlled URL or query target, and Postgres leases enforce the provider limits even if paths fire together.
+The Node server refreshes sources at minute 02/07/12/... of each hour. Per-source Postgres leases enforce provider limits and prevent overlapping operator runs from multiplying requests. To refresh manually, run `docker compose exec app node scripts/refresh-once.mjs` on the host.
 
 ## Local development
 
@@ -110,10 +103,10 @@ pnpm install
 pnpm dev
 ```
 
-Vite proxies only the read-only `/api/data` request to `https://venn-fire.vercel.app` by default, so local UI development works without a production database credential or bundled snapshot. Provider refresh routes are not proxied. To read from another deployed/local API origin instead:
+Run the API server on port 3000 with `pnpm start` and database credentials, or use the Docker stack. Vite proxies `/api/data`, `/api/source-image` and `/api/sentinel-quicklook` to `http://127.0.0.1:3000` by default. To use the running production API instead:
 
 ```bash
-VENN_FIRE_DEV_DATA_ORIGIN=http://127.0.0.1:3000 pnpm dev
+VENN_FIRE_DEV_DATA_ORIGIN=https://venn.apyos.com pnpm dev
 ```
 
 Run the deterministic checks with:
@@ -132,32 +125,28 @@ pnpm build
 Production browser checks can be run with:
 
 ```bash
-pnpm visual-check https://venn-fire.vercel.app
-pnpm verify:timeline https://venn-fire.vercel.app
+pnpm visual-check https://venn.apyos.com
+pnpm verify:timeline https://venn.apyos.com
 ```
 
 ## Deployment
 
-The repository is linked to the Vercel project `venn-fire`. A push to `main` starts the build workflow and Vercel deployment; an explicit production deploy is also available:
+Production runs on this host with Docker Compose and Traefik. From `/srv/fire`, rebuild and restart only the app:
 
 ```bash
-git push origin main
-pnpm dlx vercel@latest --prod --yes
+docker compose -f docker-compose.yaml -f docker-compose.public.yaml up -d --build --no-deps app
 ```
+
+The host Compose files use `./app` as their build context and connect to the existing TLS-enabled PostgreSQL service. `REFRESH_ENABLED=true` enables the local five-minute refresh loop. A push to GitHub runs CI; deployment is performed on the host.
 
 Required production variables:
 
-- `DATABASE_URL`/`POSTGRES_URL`, or `PGHOST` + `PGPASSWORD` + `PG_CA_PEM` (with optional `PGPORT`, `PGUSER`, `PGDATABASE` and `PGSSL_SERVERNAME`)
+- `DATABASE_URL`/`POSTGRES_URL`, or `PGHOST` + `PGPASSWORD` + `PG_CA_PEM` (with optional `PGPORT`, `PGUSER`, `PGDATABASE` and `PGSSL_SERVERNAME`); credentials and CA may also use `_FILE` paths for Docker secrets
 - `FIRMS_MAP_KEY`
-- `INTERNAL_SOURCE_TOKEN` (sensitive; authenticates the fixed-host Bütgenbach Edge fetcher)
 
-For a self-hosted cutover, schema bootstrap, full history/artifact copy and Vercel environment replacement are documented in [`docs/self-hosted-postgres.md`](docs/self-hosted-postgres.md). The source database must allow one final read; the copy cannot bypass a provider-level quota suspension.
+Fresh installations and the required incident-config seeding step are documented in [`docs/self-hosting-docker.md`](docs/self-hosting-docker.md). Database configuration and history/artifact copies are documented in [`docs/self-hosted-postgres.md`](docs/self-hosted-postgres.md).
 
-To run the whole stack off Vercel, `docker compose up -d --build` builds a container that serves the client, routes the read API through the same `api/` handlers and refreshes sources on the shared cadence in place of the queue chain. Setup, the required `incident-config` seeding step and the differences from the Vercel deployment are in [`docs/self-hosting-docker.md`](docs/self-hosting-docker.md).
-
-Internal source and integration limitations are maintained in [`docs/known-source-limits.md`](docs/known-source-limits.md), and the retained raster format and selection rule are documented in [`docs/sentinel2-analysis.md`](docs/sentinel2-analysis.md). Internal limitations are deliberately excluded from the public viewer and its API payloads.
-
-Do not add a CDN cache in front of `/api/data`, `/api/live-reports`, `/api/live-situation`, `/api/firms-situation` or `/api/refresh`.
+The internal source-access and interpretation audit is in [`docs/known-source-limits.md`](docs/known-source-limits.md), and the retained raster format and selection rule are documented in [`docs/sentinel2-analysis.md`](docs/sentinel2-analysis.md). Internal limitations are deliberately excluded from the public viewer and its API payloads.
 
 ## Interpretation limits
 

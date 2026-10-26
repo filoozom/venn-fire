@@ -12,7 +12,7 @@ function assert(condition, message) {
   if (!condition) throw new Error(message)
 }
 
-assert(typeof liveReportsHandler === 'function', 'Vercel /api/live-reports has no default HTTP handler')
+assert(typeof liveReportsHandler === 'function', '/api/live-reports has no default HTTP handler')
 
 const governorFixture = `
   <main>

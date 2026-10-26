@@ -1,6 +1,4 @@
-// Refresh cadence, kept free of any queue or platform dependency so both the
-// Vercel scheduler and the self-hosted server can share one definition of when
-// a refresh is due.
+// Five-minute refresh cadence for the local server.
 export const REFRESH_INTERVAL_MS = 5 * 60_000
 export const REFRESH_OFFSET_MS = 2 * 60_000
 
