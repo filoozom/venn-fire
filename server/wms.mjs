@@ -6,7 +6,7 @@ proj4.defs('EPSG:31370', '+proj=lcc +lat_0=90 +lon_0=4.36748666666667 +lat_1=51.
 proj4.defs('EPSG:3812', '+proj=lcc +lat_0=50.797815 +lon_0=4.35921583333333 +lat_1=49.8333333333333 +lat_2=51.1666666666667 +x_0=649328 +y_0=665262 +ellps=GRS80 +units=m +no_defs')
 
 export const WMS_MAX_SIZE = 2048
-export const WMS_MAX_PIXELS = 2_097_152
+export const WMS_MAX_PIXELS = WMS_MAX_SIZE ** 2
 export const WMS_CRS = ['CRS:84', 'EPSG:4326', 'EPSG:3857', 'EPSG:31370', 'EPSG:3812']
 export const MERCATOR_LIMIT = 20037508.342789244
 

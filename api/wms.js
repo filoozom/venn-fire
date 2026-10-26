@@ -65,6 +65,7 @@ function serviceUrl(request, parameters) {
 
 export function createWmsHandler({ getSnapshot = databaseSnapshot, loadImage = retainedImage } = {}) {
   const cache = new Map(), pending = new Map()
+  const waiting = []
   let cacheBytes = 0, rendering = 0
   return async function handler(request, response) {
     response.setHeader('Access-Control-Allow-Origin', '*')
@@ -95,12 +96,18 @@ export function createWmsHandler({ getSnapshot = databaseSnapshot, loadImage = r
           cache.set(etag, body)
         } else {
           if (!pending.has(etag)) {
+            let ready
             if (rendering >= 2) {
-              response.setHeader('Retry-After', '1')
-              throw wmsError('ServerBusy', 'Two maps are rendering; retry shortly', 503)
+              if (waiting.length >= 6) {
+                response.setHeader('Retry-After', '1')
+                throw wmsError('ServerBusy', 'Map rendering queue is full; retry shortly', 503)
+              }
+              ready = new Promise((resolve) => waiting.push(resolve))
+            } else {
+              rendering += 1
+              ready = Promise.resolve()
             }
-            rendering += 1
-            const work = renderMap(bundle, map, loadImage).then((image) => {
+            const work = ready.then(() => renderMap(bundle, map, loadImage)).then((image) => {
               if (image.length <= CACHE_BYTES) {
                 while ((cacheBytes + image.length > CACHE_BYTES || cache.size >= 128) && cache.size) {
                   const first = cache.keys().next().value
@@ -111,7 +118,12 @@ export function createWmsHandler({ getSnapshot = databaseSnapshot, loadImage = r
                 cacheBytes += image.length
               }
               return image
-            }).finally(() => { rendering -= 1; pending.delete(etag) })
+            }).finally(() => {
+              const next = waiting.shift()
+              if (next) next()
+              else rendering -= 1
+              pending.delete(etag)
+            })
             pending.set(etag, work)
           }
           body = await pending.get(etag)

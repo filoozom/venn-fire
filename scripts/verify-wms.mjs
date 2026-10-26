@@ -95,7 +95,7 @@ for (const [changes, code] of [
   [{ STYLES: 'remote' }, 'StyleNotDefined'],
   [{ FORMAT: 'image/jpeg' }, 'InvalidFormat'],
   [{ WIDTH: '99999' }, 'InvalidParameterValue'],
-  [{ WIDTH: '2048', HEIGHT: '2048' }, 'InvalidParameterValue'],
+  [{ WIDTH: '2048', HEIGHT: '2049' }, 'InvalidParameterValue'],
   [{ BBOX: '6,50,5,51' }, 'InvalidParameterValue'],
   [{ BBOX: '6,,6.1,50.6' }, 'InvalidParameterValue'],
   [{ BBOX: '0,0,Infinity,1' }, 'InvalidParameterValue'],
@@ -128,6 +128,13 @@ assert.equal(high.statusCode, 200)
 assert.equal(high.headers['content-type'], 'image/png')
 assert.equal(high.headers['x-wms-time'], time)
 assert.ok(await visible(high.body))
+// WalOnMap tiles large viewports at the advertised maximum width AND height.
+const fullTile = await invoke(query({ LAYERS: 'firms_viirs_snpp_high', WIDTH: '2048', HEIGHT: '2048' }))
+assert.equal(fullTile.statusCode, 200, String(fullTile.body).slice(0, 200))
+const tileSize = await sharp(fullTile.body).metadata()
+assert.equal(tileSize.width, 2048)
+assert.equal(tileSize.height, 2048)
+assert.ok(await visible(fullTile.body))
 const native = await invoke(query({ LAYERS: 'firms_viirs_snpp_high', CRS: 'EPSG:4326', BBOX: '50.5,6,50.6,6.1' }))
 assert.deepEqual(await raw(native.body), await raw(high.body), 'WMS 1.3 EPSG:4326 must reverse the BBOX axes')
 const low = await invoke(query({ LAYERS: 'firms_viirs_snpp_low' }))
@@ -215,7 +222,7 @@ for (const crs of ['EPSG:31370', 'EPSG:3812']) {
   }
 }
 
-// In-flight duplicates share work; a third distinct render receives a retryable error.
+// Tile bursts queue behind two renders; duplicates share work and excess work is rejected.
 let release
 const barrier = new Promise((resolve) => { release = resolve })
 let blockedReads = 0
@@ -225,13 +232,17 @@ const duplicate = invoke(query({ LAYERS: 'precipitation' }), { target: limited }
 const second = invoke(query({ LAYERS: 'gibs_true_color' }), { target: limited })
 for (let attempt = 0; blockedReads < 2 && attempt < 100; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 5))
 assert.equal(blockedReads, 2)
-const busy = await invoke(query({ LAYERS: 'gibs_false_color' }), { target: limited })
+const queued = Array.from({ length: 6 }, (_, index) => invoke(query({ LAYERS: 'gibs_false_color', WIDTH: String(256 + index) }), { target: limited }))
+const queuedDuplicate = invoke(query({ LAYERS: 'gibs_false_color' }), { target: limited })
+const busy = await invoke(query({ LAYERS: 'gibs_false_color', WIDTH: '262' }), { target: limited })
 assert.equal(busy.statusCode, 503)
 assert.equal(busy.headers['retry-after'], '1')
+assert.equal(blockedReads, 2, 'Queued maps must not start rendering before a slot is released')
 release()
-const completed = await Promise.all([first, duplicate, second])
+const completed = await Promise.all([first, duplicate, second, ...queued, queuedDuplicate])
 assert.ok(completed.every((result) => result.statusCode === 200))
 assert.deepEqual(completed[0].body, completed[1].body)
+assert.equal(blockedReads, 8, 'Duplicates must share queued renders as well as active renders')
 const broken = createWmsHandler({ getSnapshot: async () => bundle, loadImage: async () => { throw new Error('Fixture missing artifact') } })
 const unavailable = await invoke(query({ LAYERS: 'precipitation' }), { target: broken })
 assert.equal(unavailable.statusCode, 503, 'A missing image is an error, not an empty observation')
