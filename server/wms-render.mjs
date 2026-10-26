@@ -53,15 +53,16 @@ export async function reprojectRaster(bytes, overlay, request) {
   const [right, top] = source.forward([east, north])
   if (![left, bottom, right, top].every(Number.isFinite) || right <= left || top <= bottom) throw new Error('Invalid retained image bounds')
   const [minX, minY, maxX, maxY] = request.bbox
-  // All advertised CRSs have separable x/y axes, so each axis needs only one pass.
+  // Lambert couples both axes; geographic/Mercator retain the cheaper axis lookup.
+  const separable = !['EPSG:31370', 'EPSG:3812'].includes(request.crs)
   const columns = new Int32Array(request.width)
   const rows = new Int32Array(request.height)
-  for (let x = 0; x < request.width; x += 1) {
+  for (let x = 0; separable && x < request.width; x += 1) {
     const outputX = minX + (x + 0.5) / request.width * (maxX - minX)
     const longitude = target.inverse([outputX, 0])[0]
     columns[x] = Math.floor((source.forward([longitude, 0])[0] - left) / (right - left) * info.width)
   }
-  for (let y = 0; y < request.height; y += 1) {
+  for (let y = 0; separable && y < request.height; y += 1) {
     const outputY = maxY - (y + 0.5) / request.height * (maxY - minY)
     const latitude = target.inverse([0, outputY])[1]
     const sourceY = source.forward([0, latitude])[1]
@@ -69,11 +70,17 @@ export async function reprojectRaster(bytes, overlay, request) {
   }
   const rgba = Buffer.alloc(request.width * request.height * 4)
   for (let y = 0; y < request.height; y += 1) {
-    const sourceY = rows[y]
-    if (sourceY < 0 || sourceY >= info.height) continue
+    if (separable && (rows[y] < 0 || rows[y] >= info.height)) continue
     for (let x = 0; x < request.width; x += 1) {
-      const sourceX = columns[x]
-      if (sourceX < 0 || sourceX >= info.width) continue
+      let sourceX = columns[x], sourceY = rows[y]
+      if (!separable) {
+        const outputX = minX + (x + 0.5) / request.width * (maxX - minX)
+        const outputY = maxY - (y + 0.5) / request.height * (maxY - minY)
+        const [sx, sy] = source.forward(target.inverse([outputX, outputY]))
+        sourceX = Math.floor((sx - left) / (right - left) * info.width)
+        sourceY = Math.floor((top - sy) / (top - bottom) * info.height)
+      }
+      if (!Number.isFinite(sourceX) || !Number.isFinite(sourceY) || sourceX < 0 || sourceX >= info.width || sourceY < 0 || sourceY >= info.height) continue
       const input = (sourceY * info.width + sourceX) * 4
       const output = (y * request.width + x) * 4
       let alpha = overlay.opacity

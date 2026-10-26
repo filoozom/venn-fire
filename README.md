@@ -42,9 +42,19 @@ curl --fail --get 'https://venn.apyos.com/wms' \
 
 `TIME` selects one advertised five-minute map state in UTC. Omit it or use `current` for the latest timeline frame. Hourly and daily snapshots use the same endpoint with requests spaced by an hour or day. All temporal layers advertise the map timeline, including transparent states when evidence is missing or expired; daily imagery and irregular satellite acquisitions keep their original observation times and fade rules. Full timestamps are required: date-only values, ranges, lists and off-grid times return `InvalidDimensionValue`. No later observation is substituted for an earlier request. `X-WMS-Time` reports the selected time.
 
+### WalOnMap
+
+In [WalOnMap](https://geoportail.wallonie.be/carte), open **Données → Ajouter des données → Autres options → Depuis l'URL d'un service**. Choose **WMS**, enter a service URL with the desired UTC time, then click **Charger**. Click **Tout sélectionner / déselectionner** to clear the initial selection, select **Best estimate outline**, then click **Ajouter**:
+
+```text
+https://venn.apyos.com/wms?TIME=2026-08-17T12:00:00Z
+```
+
+Zoom to Drossart in the High Fens (approximately 50.548° N, 6.058° E). The capabilities preserve the URL's `TIME` for WalOnMap's map requests; change the timestamp and add the service again to choose another snapshot. Its background-map time-travel control does not select this WMS layer's date. Without `TIME`, the service shows the latest frame, so August fire evidence can be completely transparent by October under the normal fade rules.
+
 Historical maps are **reconstructions using currently retained evidence**, rather than immutable reproductions of an old website publication. Backfills and corrections may change an old frame. CAMS selects the newest retained forecast cycle covering the requested valid time. Dataset hashes and rendering-code hashes invalidate cached images after data or calculation/style changes. The in-process data snapshot can lag the database by up to one minute; browser responses revalidate with ETags.
 
-The supported operations are `GetCapabilities` and `GetMap`, version **1.3.0**, with `image/png` output. `CRS:84` uses longitude/latitude BBOX order; `EPSG:4326` uses latitude/longitude; `EPSG:3857` uses easting/northing metres. Raster pixels are reprojected from their retained projection, including RMI's Mercator animation; nearest-neighbour sampling preserves categorical radar colours. Source crops bound the available imagery. Layer order follows `LAYERS`, first at the bottom. Styles are empty/default; `TRANSPARENT=FALSE` and `BGCOLOR=0xRRGGBB` support opaque output.
+The supported operations are `GetCapabilities` and `GetMap`, version **1.3.0**, with `image/png` output. `CRS:84` uses longitude/latitude BBOX order; `EPSG:4326` uses latitude/longitude; `EPSG:3857`, Belgian Lambert 72 (`EPSG:31370`) and Belgian Lambert 2008 (`EPSG:3812`, used by WalOnMap) use easting/northing metres. Raster pixels are reprojected from their retained projection, including RMI's Mercator animation; nearest-neighbour sampling preserves categorical radar colours. Source crops bound the available imagery. Layer order follows `LAYERS`, first at the bottom. Styles are empty/default; `TRANSPARENT=FALSE` and `BGCOLOR=0xRRGGBB` support opaque output.
 
 Requests are limited to 2,048 pixels per side, 2,097,152 pixels total and 32 layers. Two distinct renders may run concurrently; excess work returns a retryable 503. Completed PNGs share a 32 MiB memory cache and identical concurrent requests share one render. Invalid requests return WMS XML exceptions. Missing archived images return an error rather than a misleading blank observation. Requests never fetch providers or accept arbitrary image/style URLs.
 

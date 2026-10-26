@@ -1,9 +1,13 @@
 import { FIVE_MINUTES_MS } from '../src/data.js'
 import { FIRMS_SENSORS } from '../src/firmsDetections.js'
+import proj4 from 'proj4'
+
+proj4.defs('EPSG:31370', '+proj=lcc +lat_0=90 +lon_0=4.36748666666667 +lat_1=51.1666672333333 +lat_2=49.8333339 +x_0=150000.013 +y_0=5400088.438 +ellps=intl +towgs84=-106.8686,52.2978,-103.7239,0.3366,-0.457,1.8422,-1.2747 +units=m +no_defs')
+proj4.defs('EPSG:3812', '+proj=lcc +lat_0=50.797815 +lon_0=4.35921583333333 +lat_1=49.8333333333333 +lat_2=51.1666666666667 +x_0=649328 +y_0=665262 +ellps=GRS80 +units=m +no_defs')
 
 export const WMS_MAX_SIZE = 2048
 export const WMS_MAX_PIXELS = 2_097_152
-export const WMS_CRS = ['CRS:84', 'EPSG:4326', 'EPSG:3857']
+export const WMS_CRS = ['CRS:84', 'EPSG:4326', 'EPSG:3857', 'EPSG:31370', 'EPSG:3812']
 export const MERCATOR_LIMIT = 20037508.342789244
 
 export function xml(value) {
@@ -114,8 +118,9 @@ export function mapRequest(parameters, layers, runtime) {
   // WMS 1.3 EPSG:4326 uses latitude,longitude; internal boxes always use x,y.
   if (crs === 'EPSG:4326') bbox = [bbox[1], bbox[0], bbox[3], bbox[2]]
   const [west, south, east, north] = bbox
-  const maxX = crs === 'EPSG:3857' ? MERCATOR_LIMIT : 180
-  const maxY = crs === 'EPSG:3857' ? MERCATOR_LIMIT : 90
+  const geographic = crs === 'CRS:84' || crs === 'EPSG:4326'
+  const maxX = geographic ? 180 : MERCATOR_LIMIT
+  const maxY = geographic ? 90 : MERCATOR_LIMIT
   if (east <= west || north <= south || west < -maxX || east > maxX || south < -maxY || north > maxY) throw wmsError('InvalidParameterValue', 'BBOX is outside the CRS domain or has non-positive extent')
   const size = (key) => {
     const value = required(key)

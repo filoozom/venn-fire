@@ -68,6 +68,7 @@ const capabilitiesText = capabilities.body.toString()
 assert.match(capabilitiesText, /https:\/\/venn.apyos.com\/wms\?/u)
 assert.match(capabilitiesText, /Test &amp; station/u)
 assert.match(capabilitiesText, /PT5M<\/Dimension>/u)
+assert.match(capabilitiesText, /<CRS>EPSG:31370<\/CRS><CRS>EPSG:3812<\/CRS>/u)
 assert.equal(new Set(layers.map((layer) => layer.name)).size, layers.length)
 for (const name of ['best_estimate', 'aircraft', 'sentinel2_change', 'sentinel3_frp', 'precipitation', 'gibs_true_color', 'gibs_false_color', 'cams_pm25', 'cams_wildfire_pm10', 'wind_model', 'wind_mont_rigi', 'wind_dwd_123', 'protected_area', 'firms_viirs_noaa21_low', 'firms_modis_nominal', 'firms_meteosat_high']) {
   assert.ok(capabilitiesText.includes(`<Name>${name}</Name>`), `Missing layer ${name}`)
@@ -89,7 +90,7 @@ assert.notEqual(historicalCapabilities.headers.etag, capabilities.headers.etag)
 
 for (const [changes, code] of [
   [{ LAYERS: '<unknown>' }, 'LayerNotDefined'],
-  [{ CRS: 'EPSG:31370' }, 'InvalidCRS'],
+  [{ CRS: 'EPSG:99999' }, 'InvalidCRS'],
   [{ VERSION: '1.1.1' }, 'InvalidParameterValue'],
   [{ STYLES: 'remote' }, 'StyleNotDefined'],
   [{ FORMAT: 'image/jpeg' }, 'InvalidFormat'],
@@ -182,6 +183,37 @@ const inverse = await raw(await reprojectRaster(latitudeImage, { bounds: [[0, 0]
 assert.equal(inverse[(40 * 10 + 5) * 4 + 2], 255, 'RMI Mercator pixels must be reprojected back into geographic requests')
 const parsed = mapRequest(wmsParameters(query({ CRS: 'EPSG:3857', BBOX: [0, 0, ...projectedNorth].join(',') })).parameters, layers, runtime)
 assert.equal(parsed.crs, 'EPSG:3857')
+
+for (const crs of ['EPSG:31370', 'EPSG:3812']) {
+  const center = proj4('EPSG:4326', crs, [6.05, 50.55])
+  const bbox = [center[0] - 5000, center[1] - 5000, center[0] + 5000, center[1] + 5000]
+  const request = { width: 100, height: 100, bbox, crs }
+  const point = pixelPosition([50.55, 6.05], request)
+  assert.ok(point.every((value) => Math.abs(value - 50) < 0.01), `${crs} marker must land at the map centre`)
+  for (const name of ['firms_viirs_snpp_high', 'precipitation']) {
+    const result = await invoke(query({ LAYERS: name, CRS: crs, BBOX: bbox.join(',') }))
+    assert.equal(result.statusCode, 200)
+    assert.ok(await visible(result.body), `${crs} must render ${name}`)
+  }
+  // A broad checkerboard catches axis-separated warping that looks plausible in a local crop.
+  const checker = await sharp(Buffer.from([
+    255, 0, 0, 255, 0, 255, 0, 255,
+    0, 0, 255, 255, 255, 255, 0, 255,
+  ]), { raw: { width: 2, height: 2, channels: 4 } }).png().toBuffer()
+  const overlay = { bounds: [[49, 2], [52, 8]], crs: 'EPSG:4326', opacity: 1 }
+  const wide = { ...request, bbox: [center[0] - 220000, center[1] - 220000, center[0] + 220000, center[1] + 220000] }
+  const pixels = await raw(await reprojectRaster(checker, overlay, wide))
+  for (let y = 0; y < wide.height; y += 9) {
+    for (let x = 0; x < wide.width; x += 9) {
+      const [lon, lat] = proj4(crs, 'EPSG:4326', [wide.bbox[0] + (x + 0.5) * 4400, wide.bbox[3] - (y + 0.5) * 4400])
+      const expected = lon < 2 || lon >= 8 || lat <= 49 || lat > 52 ? [0, 0, 0, 0]
+        : lat > 50.5 ? lon < 5 ? [255, 0, 0, 255] : [0, 255, 0, 255]
+          : lon < 5 ? [0, 0, 255, 255] : [255, 255, 0, 255]
+      const offset = (y * wide.width + x) * 4
+      assert.deepEqual([...pixels.subarray(offset, offset + 4)], expected, `${crs} raster pixel ${x},${y}`)
+    }
+  }
+}
 
 // In-flight duplicates share work; a third distinct render receives a retryable error.
 let release
