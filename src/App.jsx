@@ -42,12 +42,7 @@ import {
   X,
 } from 'lucide-react'
 import MapView from './MapView'
-import { camsForecastCycleLabel, camsForecastFrameAt } from './camsForecasts'
-import {
-  AIRCRAFT_EDGE_GRID_CELL_M,
-  AIRCRAFT_EDGE_TIME_BUCKET_MS,
-  deriveAircraftSupportedEdge,
-} from './aircraftFireEstimate'
+import { camsForecastCycleLabel } from './camsForecasts'
 import {
   AIRCRAFT_TRACE_LIFETIME_MS,
   aircraftCoverageWindows,
@@ -56,34 +51,21 @@ import {
 import {
   BURNED_AREA_RETENTION_MS,
   RECENT_FIRE_ACTIVITY_WINDOW_MS,
-  deriveFireActivityAreas,
 } from './fireActivityEstimate'
 import {
-  effisAreaForTimestamp,
   effisProductIsCarriedForward,
   FIVE_MINUTES_MS,
   mergeIncidentFlights,
   runtimeDataFromResponse,
 } from './data'
 import {
-  footprintOutlineRings,
   FIRMS_SENSORS,
   corroborateDetections,
-  detectionFootprint,
   estimateFootprintArea,
   firmsDetectionVisibleAt,
 } from './firmsDetections'
-import {
-  MODIS_EXTENT_GRID_CELL_M,
-  MODIS_EXTENT_RULE,
-  MODIS_EXTENT_TIME_BUCKET_MS,
-  deriveRetainedModisSupportedExtent,
-} from './modisFireEstimate'
-import {
-  SOURCE_FADE_WINDOWS_MS,
-  effisGeometryOpacityAt,
-  linearSourceOpacity,
-} from './sourceFreshness'
+import { MODIS_EXTENT_RULE } from './modisFireEstimate'
+import { bestEstimateAt, environmentalStateAt, firmsDetectionsForMap, footprintOriginFor, rasterOverlaysAt } from './mapState.js'
 import { latestReportedFireActivity } from './reportedFireActivity'
 
 const FREEZE_DATABASE_REFRESH = new URLSearchParams(window.location.search).get('freeze-data') === '1'
@@ -159,34 +141,6 @@ const SOURCE_DIRECTORY_COPY = {
 
 function dwdWindLayerKey(stationId) {
   return `dwdWind:${stationId}`
-}
-
-function latestTimedRecord(rows, timeField, timestampMs, predicate = () => true) {
-  return (rows ?? []).filter((row) => (
-    predicate(row)
-    && Number.isFinite(Date.parse(row?.[timeField]))
-    && Date.parse(row[timeField]) <= timestampMs
-  )).at(-1) ?? null
-}
-
-function latestDailyImage(rows, layerKey, timestampMs) {
-  const selectedDate = new Date(timestampMs).toISOString().slice(0, 10)
-  return (rows ?? []).filter((entry) => entry.layerKey === layerKey && entry.date <= selectedDate).at(-1) ?? null
-}
-
-function sourceRecordWithOpacity(record, observedAt, selectedTimestampMs, lifetimeMs) {
-  if (!record) return null
-  return {
-    ...record,
-    displayObservedAt: observedAt,
-    displayOpacity: linearSourceOpacity(observedAt, selectedTimestampMs, lifetimeMs),
-  }
-}
-
-function dailyImageTimestamp(date) {
-  return /^\d{4}-\d{2}-\d{2}$/u.test(String(date ?? ''))
-    ? Date.parse(`${date}T00:00:00.000Z`)
-    : null
 }
 
 function mapFreshnessLabel(record) {
@@ -986,14 +940,7 @@ function FireViewer({ runtime, databaseError }) {
   // database that has not yet completed a full FIRMS cycle stores the dataset
   // without it, and dereferencing it there took the whole viewer down with a
   // blank page. The incident centre is the same reference point, so it stands in.
-  const footprintOrigin = useMemo(() => {
-    const reference = firmsData.locationReference
-    if (Number.isFinite(reference?.latitude) && Number.isFinite(reference?.longitude)) {
-      return { latitude: reference.latitude, longitude: reference.longitude }
-    }
-    const [latitude, longitude] = runtime.incidentCenter ?? []
-    return { latitude: Number(latitude), longitude: Number(longitude) }
-  }, [firmsData.locationReference, runtime.incidentCenter])
+  const footprintOrigin = useMemo(() => footprintOriginFor(runtime), [runtime])
   const latestFirmsAcquiredAt = firmsData.latestAcquiredAt
     ?? firmsData.detections?.at(-1)?.acquiredAt
     ?? null
@@ -1035,80 +982,16 @@ function FireViewer({ runtime, databaseError }) {
     () => latestReportedFireActivity(runtime.events, frame.timestampMs),
     [runtime.events, frame.timestampMs],
   )
-  const selectedEffisArea = effisAreaForTimestamp(runtime.effisProducts, frame.timestampMs)
-  const currentEffisArea = selectedEffisArea ? {
-    ...selectedEffisArea,
-    displayOpacity: effisGeometryOpacityAt(selectedEffisArea, frame.timestampMs),
-  } : null
+  const environmentalState = useMemo(() => environmentalStateAt(runtime, frame.timestampMs), [runtime, frame.timestampMs])
+  const {
+    currentEffisArea, visibleSentinelAnalyses, currentSentinelAnalysis,
+    currentRmiRadar, currentGibsFalseColor, currentGibsTrueColor,
+    currentCamsWildfirePm10, currentCamsPm2p5, visibleSentinel3Detections,
+    sentinelBurnGeometry,
+  } = environmentalState
   const effisVisibleOnMap = currentEffisArea?.displayOpacity > 0
-  // "Carried forward" means the product predates the day being viewed, not that
-  // it happens to be the 14 August one. On 14 August that product is current.
   const effisCarriedForward = effisProductIsCarriedForward(currentEffisArea, frame.timestampMs)
     && frame.timestampMs >= Date.parse('2026-08-15T00:00:00+02:00')
-  const visibleSentinelAnalyses = useMemo(() => (runtime.sentinel2.analyses ?? [])
-    .filter((analysis) => (
-      analysis.status === 'ready' && Date.parse(analysis.acquiredAt) <= frame.timestampMs
-    ))
-    .map((analysis) => sourceRecordWithOpacity(
-      analysis,
-      analysis.acquiredAt,
-      frame.timestampMs,
-      SOURCE_FADE_WINDOWS_MS.sentinel2Change,
-    )), [runtime.sentinel2.analyses, frame.timestampMs])
-  const currentSentinelAnalysis = visibleSentinelAnalyses.at(-1) ?? null
-  const currentRmiRadar = useMemo(() => {
-    const record = latestTimedRecord(runtime.rmiRadar.frames, 'observedAt', frame.timestampMs)
-    return sourceRecordWithOpacity(
-      record,
-      record?.observedAt,
-      frame.timestampMs,
-      SOURCE_FADE_WINDOWS_MS.precipitationRadar,
-    )
-  }, [runtime.rmiRadar.frames, frame.timestampMs])
-  const currentGibsFalseColor = useMemo(() => {
-    const record = latestDailyImage(runtime.nasaGibs.images, 'false-color', frame.timestampMs)
-    return sourceRecordWithOpacity(
-      record,
-      dailyImageTimestamp(record?.date),
-      frame.timestampMs,
-      SOURCE_FADE_WINDOWS_MS.dailyImagery,
-    )
-  }, [runtime.nasaGibs.images, frame.timestampMs])
-  const currentGibsTrueColor = useMemo(() => {
-    const record = latestDailyImage(runtime.nasaGibs.images, 'true-color', frame.timestampMs)
-    return sourceRecordWithOpacity(
-      record,
-      dailyImageTimestamp(record?.date),
-      frame.timestampMs,
-      SOURCE_FADE_WINDOWS_MS.dailyImagery,
-    )
-  }, [runtime.nasaGibs.images, frame.timestampMs])
-  const currentCamsWildfirePm10 = useMemo(() => {
-    const record = camsForecastFrameAt(runtime.cams.frames, 'wildfire-pm10', frame.timestampMs)
-    return sourceRecordWithOpacity(
-      record,
-      record?.validAt,
-      frame.timestampMs,
-      SOURCE_FADE_WINDOWS_MS.camsForecast,
-    )
-  }, [runtime.cams.frames, frame.timestampMs])
-  const currentCamsPm2p5 = useMemo(() => {
-    const record = camsForecastFrameAt(runtime.cams.frames, 'pm2p5', frame.timestampMs)
-    return sourceRecordWithOpacity(
-      record,
-      record?.validAt,
-      frame.timestampMs,
-      SOURCE_FADE_WINDOWS_MS.camsForecast,
-    )
-  }, [runtime.cams.frames, frame.timestampMs])
-  const visibleSentinel3Detections = useMemo(() => (runtime.sentinel3Frp.detections ?? [])
-    .map((detection) => sourceRecordWithOpacity(
-      detection,
-      detection.acquiredAt,
-      frame.timestampMs,
-      SOURCE_FADE_WINDOWS_MS.sentinel3Frp,
-    ))
-    .filter((detection) => detection.displayOpacity > 0), [runtime.sentinel3Frp.detections, frame.timestampMs])
   const sentinel3OverpassCount = useMemo(() => (runtime.sentinel3Frp.scenes ?? []).filter((scene) => (
     Number.isFinite(Date.parse(scene.acquiredAt)) && Date.parse(scene.acquiredAt) <= frame.timestampMs
   )).length, [runtime.sentinel3Frp.scenes, frame.timestampMs])
@@ -1121,24 +1004,6 @@ function FireViewer({ runtime, databaseError }) {
     sentinel3DetectionCount: visibleSentinel3Detections.length,
     sentinel3OverpassCount,
   }), [currentRmiRadar, currentGibsFalseColor, currentGibsTrueColor, currentCamsWildfirePm10, currentCamsPm2p5, visibleSentinel3Detections.length, sentinel3OverpassCount])
-  const sentinelBurnGeometry = useMemo(() => ({
-    type: 'FeatureCollection',
-    features: visibleSentinelAnalyses
-      .filter((analysis) => analysis.displayOpacity > 0 && analysis.geometry?.coordinates?.length)
-      .map((analysis) => ({
-        type: 'Feature',
-        properties: {
-          acquiredAt: analysis.acquiredAt,
-          supportCellCount: analysis.supportCellCount,
-          supportAreaHa: analysis.supportAreaHa,
-          clearFraction: analysis.clearFraction,
-          preSceneId: analysis.preScene?.id,
-          postSceneId: analysis.postScene?.id,
-          displayOpacity: analysis.displayOpacity,
-        },
-        geometry: analysis.geometry,
-      })),
-  }), [visibleSentinelAnalyses])
   const reportedAreaText = frame.reportedAreaText
 
   const displayFlights = useMemo(
@@ -1315,22 +1180,10 @@ function FireViewer({ runtime, databaseError }) {
   // Database-retained FIRMS detections, placed on the five-minute timeline by
   // exact acquisition time. Map visibility fades separately; the longer
   // Best-estimate evidence window still reads this complete retained history.
-  const firmsDetections = useMemo(() => firmsData.detections.map((detection) => {
-    const sensor = FIRMS_SENSORS.find((entry) => entry.key === detection.sensorKey)
-    return {
-      ...detection,
-      sensorName: sensor?.name ?? detection.sensorKey,
-      sensorColor: sensor?.color ?? '#efaa3c',
-      providesArea: sensor?.providesArea === true,
-      displayMode: detection.displayMode ?? sensor?.displayMode ?? 'footprint',
-      pixelSizeLabel: sensor?.pixelSizeLabel ?? detection.pixelSizeLabel ?? `${formatDecimal(detection.scanKm)} × ${formatDecimal(detection.trackKm)} km pixel`,
-      areaExclusionReason: sensor?.areaExclusionReason ?? detection.areaExclusionReason ?? null,
-      footprint: detection.footprint ?? detectionFootprint(detection),
-      position: [detection.latitude, detection.longitude],
-      timestampMs: Date.parse(detection.acquiredAt),
-      frame: Math.max(0, Math.ceil((Date.parse(detection.acquiredAt) - runtime.timelineStartMs) / FIVE_MINUTES_MS)),
-    }
-  }), [firmsData.detections, runtime.timelineStartMs])
+  const firmsDetections = useMemo(
+    () => firmsDetectionsForMap(firmsData.detections, runtime.timelineStartMs),
+    [firmsData.detections, runtime.timelineStartMs],
+  )
 
   const activeConfidenceLevels = useMemo(
     () => FIRMS_CONFIDENCE_LEVELS.filter((entry) => layers[entry.key]).map((entry) => entry.level),
@@ -1355,90 +1208,16 @@ function FireViewer({ runtime, databaseError }) {
     [currentEffisArea, effisCarriedForward, currentFirmsSummaries, frame, runtime.dwdWindStations, currentSentinelAnalysis, environmentalAtTime],
   )
 
-  // The independently corroborated VIIRS core remains the anchor for both the
-  // MODIS and aircraft selection rules. Accepted evidence is retained for one
-  // month; older cells leave the public estimate instead of becoming a
-  // permanent incident scar.
-  const bestEstimateCoreDetections = useMemo(
-    () => corroborateDetections(firmsDetectionsAtTime.filter((detection) => (
-      frame.timestampMs - detection.timestampMs >= 0
-      && frame.timestampMs - detection.timestampMs < BURNED_AREA_RETENTION_MS
-    ))).filter((detection) => detection.isFireCore),
-    [firmsDetectionsAtTime, frame.timestampMs],
-  )
-
-  // One supported MODIS pass may remain in the burned footprint for the same
-  // 30-day window. We deliberately retain only the newest qualifying pass:
-  // accumulating successive 1 km swaths would exaggerate the scar.
-  const seedModisSupportedExtent = useMemo(() => deriveRetainedModisSupportedExtent({
-    detections: firmsDetectionsAtTime,
-    coreDetections: bestEstimateCoreDetections,
-    aircraftEdgeCandidates: [],
-    frameTimestampMs: frame.timestampMs,
-    minimumTimestampMs: frame.timestampMs - BURNED_AREA_RETENTION_MS,
-    origin: footprintOrigin,
-    gridCellM: MODIS_EXTENT_GRID_CELL_M,
-    timeBucketMs: MODIS_EXTENT_TIME_BUCKET_MS,
-  }), [firmsDetectionsAtTime, bestEstimateCoreDetections, frame.timestampMs, footprintOrigin])
-  const aircraftReferenceCoreDetections = useMemo(
-    () => [...bestEstimateCoreDetections, ...seedModisSupportedExtent.detections],
-    [bestEstimateCoreDetections, seedModisSupportedExtent.detections],
-  )
-  const aircraftReferenceOutlineRings = useMemo(
-    () => footprintOutlineRings(aircraftReferenceCoreDetections, {
-      gridCellM: 50,
+  const { bestEstimateCoreDetections, aircraftSupportedEdge, modisSupportedExtent, fireActivityAreas } = useMemo(
+    () => bestEstimateAt({
+      detections: firmsDetectionsAtTime,
+      sentinelAnalyses: visibleSentinelAnalyses,
+      flights: displayFlights,
+      timestampMs: frame.timestampMs,
       origin: footprintOrigin,
     }),
-    [aircraftReferenceCoreDetections, footprintOrigin],
+    [firmsDetectionsAtTime, visibleSentinelAnalyses, displayFlights, frame.timestampMs, footprintOrigin],
   )
-
-  const aircraftEstimateFlights = useMemo(() => displayFlights.map((flight) => ({
-    ...flight,
-    observations: visibleAircraftObservations(
-      flight.observations,
-      frame.timestampMs,
-      BURNED_AREA_RETENTION_MS,
-    )
-      .filter((observation) => observation.routeScope !== 'full-route'),
-  })).filter((flight) => flight.observations.length), [displayFlights, frame.timestampMs])
-
-  const aircraftSupportedEdge = useMemo(() => deriveAircraftSupportedEdge({
-    flights: aircraftEstimateFlights,
-    detections: aircraftReferenceCoreDetections,
-    outlineRings: aircraftReferenceOutlineRings,
-    frameTimestampMs: frame.timestampMs,
-    origin: footprintOrigin,
-    gridCellM: AIRCRAFT_EDGE_GRID_CELL_M,
-    timeBucketMs: AIRCRAFT_EDGE_TIME_BUCKET_MS,
-  }), [aircraftEstimateFlights, aircraftReferenceCoreDetections, aircraftReferenceOutlineRings, frame.timestampMs, footprintOrigin])
-
-  const modisSupportedExtent = useMemo(() => deriveRetainedModisSupportedExtent({
-    detections: firmsDetectionsAtTime,
-    coreDetections: bestEstimateCoreDetections,
-    aircraftEdgeCandidates: aircraftSupportedEdge.candidates,
-    frameTimestampMs: frame.timestampMs,
-    minimumTimestampMs: frame.timestampMs - BURNED_AREA_RETENTION_MS,
-    origin: footprintOrigin,
-    gridCellM: MODIS_EXTENT_GRID_CELL_M,
-    timeBucketMs: MODIS_EXTENT_TIME_BUCKET_MS,
-  }), [firmsDetectionsAtTime, bestEstimateCoreDetections, aircraftSupportedEdge.candidates, frame.timestampMs, footprintOrigin])
-
-  // The underlying estimate is still one 50 m evidence union. Its display is
-  // split by age: the whole retained footprint is black, while only thermal or
-  // aircraft evidence less than 24 hours old is overlaid in red. Sentinel-2
-  // dNBR is a burn-scar observation and therefore never claims current heat.
-  const bestEstimateDetections = useMemo(
-    () => [...bestEstimateCoreDetections, ...modisSupportedExtent.detections],
-    [bestEstimateCoreDetections, modisSupportedExtent.detections],
-  )
-  const fireActivityAreas = useMemo(() => deriveFireActivityAreas({
-    thermalDetections: bestEstimateDetections,
-    sentinelAnalyses: visibleSentinelAnalyses,
-    aircraftSupportFeatures: aircraftSupportedEdge.supportFeatures,
-    frameTimestampMs: frame.timestampMs,
-    origin: footprintOrigin,
-    gridCellM: 50,
-  }), [bestEstimateDetections, visibleSentinelAnalyses, aircraftSupportedEdge.supportFeatures, frame.timestampMs, footprintOrigin])
   const fireOutlineRings = fireActivityAreas.burned.rings
   const activeFireRings = fireActivityAreas.recent.rings
   const visibleFirmsDetections = useMemo(() => firmsDetectionsAtTime.filter((detection) => (
@@ -1447,48 +1226,10 @@ function FireViewer({ runtime, databaseError }) {
       && firmsDetectionVisibleAt(detection, frame.timestampMs)
   )), [firmsDetectionsAtTime, layers, activeConfidenceLevels, frame.timestampMs])
 
-  const rasterOverlays = useMemo(() => [
-    ...(layers[ENVIRONMENT_LAYER_KEYS.gibsFalseColor] && currentGibsFalseColor?.displayOpacity > 0 && currentGibsFalseColor?.image?.databaseUrl ? [{
-      id: `gibs-false-${currentGibsFalseColor.date}`,
-      kind: 'gibs-false-color',
-      url: currentGibsFalseColor.image.databaseUrl,
-      bounds: runtime.nasaGibs.bounds,
-      opacity: 0.72 * currentGibsFalseColor.displayOpacity,
-      attribution: 'NASA EOSDIS GIBS',
-    }] : []),
-    ...(layers[ENVIRONMENT_LAYER_KEYS.gibsTrueColor] && currentGibsTrueColor?.displayOpacity > 0 && currentGibsTrueColor?.image?.databaseUrl ? [{
-      id: `gibs-true-${currentGibsTrueColor.date}`,
-      kind: 'gibs-true-color',
-      url: currentGibsTrueColor.image.databaseUrl,
-      bounds: runtime.nasaGibs.bounds,
-      opacity: 0.72 * currentGibsTrueColor.displayOpacity,
-      attribution: 'NASA EOSDIS GIBS',
-    }] : []),
-    ...(layers[ENVIRONMENT_LAYER_KEYS.camsWildfirePm10] && currentCamsWildfirePm10?.displayOpacity > 0 && currentCamsWildfirePm10?.image?.databaseUrl ? [{
-      id: `cams-wildfire-${currentCamsWildfirePm10.forecastRunAt ?? 'legacy'}-${currentCamsWildfirePm10.validAt}`,
-      kind: 'cams-wildfire-pm10',
-      url: currentCamsWildfirePm10.image.databaseUrl,
-      bounds: currentCamsWildfirePm10.bounds ?? runtime.cams.bounds,
-      opacity: 0.44 * currentCamsWildfirePm10.displayOpacity,
-      attribution: runtime.cams.attribution,
-    }] : []),
-    ...(layers[ENVIRONMENT_LAYER_KEYS.camsPm2p5] && currentCamsPm2p5?.displayOpacity > 0 && currentCamsPm2p5?.image?.databaseUrl ? [{
-      id: `cams-pm2p5-${currentCamsPm2p5.forecastRunAt ?? 'legacy'}-${currentCamsPm2p5.validAt}`,
-      kind: 'cams-pm2p5',
-      url: currentCamsPm2p5.image.databaseUrl,
-      bounds: currentCamsPm2p5.bounds ?? runtime.cams.bounds,
-      opacity: 0.42 * currentCamsPm2p5.displayOpacity,
-      attribution: runtime.cams.attribution,
-    }] : []),
-    ...(layers[ENVIRONMENT_LAYER_KEYS.rmiRadar] && currentRmiRadar?.displayOpacity > 0 && currentRmiRadar?.image?.databaseUrl ? [{
-      id: `rmi-radar-${currentRmiRadar.observedAt}`,
-      kind: 'rmi-radar',
-      url: currentRmiRadar.image.databaseUrl,
-      bounds: currentRmiRadar.bounds ?? runtime.rmiRadar.bounds,
-      opacity: 0.74 * currentRmiRadar.displayOpacity,
-      attribution: currentRmiRadar.attribution ?? 'Royal Meteorological Institute of Belgium',
-    }] : []),
-  ], [layers, currentGibsFalseColor, currentGibsTrueColor, currentCamsWildfirePm10, currentCamsPm2p5, currentRmiRadar, runtime.nasaGibs.bounds, runtime.cams.bounds, runtime.cams.attribution, runtime.rmiRadar.bounds])
+  const rasterOverlays = useMemo(
+    () => rasterOverlaysAt(runtime, environmentalState).filter((overlay) => layers[overlay.key]),
+    [runtime, environmentalState, layers],
+  )
 
   // Both figures come from the exact cells drawn on the map. The headline area
   // remains the full 30-day footprint; recent activity is a subset, not a

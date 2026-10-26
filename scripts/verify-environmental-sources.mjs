@@ -21,6 +21,7 @@ import {
 } from '../server/environmental-sources.mjs'
 import { camsForecastCycleLabel, camsForecastFrameAt } from '../src/camsForecasts.js'
 import { buildFireFrames, mergePrecipitationRadar } from '../src/data.js'
+import { rasterOverlaysAt } from '../src/mapState.js'
 
 const radarBody = Buffer.alloc(6 + 8 + 2)
 radarBody.writeUInt16BE(2, 0)
@@ -248,7 +249,12 @@ const [appSource, mapSource, styles, liveSituationSource, dataSource] = await Pr
 assert.match(appSource, /\[ENVIRONMENT_LAYER_KEYS\.rmiRadar\]: true/u)
 assert.match(appSource, /label: 'Precipitation radar'/u)
 assert.match(appSource, /aria-label=\{measureMode \? 'Stop measuring distance' : 'Measure distance'\}/u)
-assert.match(appSource, /currentCamsWildfirePm10\.bounds \?\? runtime\.cams\.bounds/u)
+const legacyBounds = [[50.3, 5.7], [50.8, 6.4]]
+const regionalBounds = [[49.5, 4.5], [51.5, 7.5]]
+const overlayRuntime = { nasaGibs: {}, rmiRadar: {}, cams: { bounds: legacyBounds } }
+const smokeFrame = { displayOpacity: 1, image: { databaseUrl: '/api/source-image?id=fixture' } }
+assert.deepEqual(rasterOverlaysAt(overlayRuntime, { currentCamsWildfirePm10: { ...smokeFrame, bounds: regionalBounds } })[0].bounds, regionalBounds)
+assert.deepEqual(rasterOverlaysAt(overlayRuntime, { currentCamsWildfirePm10: smokeFrame })[0].bounds, legacyBounds)
 assert.match(mapSource, /map\.distance\(previous\.latlng, latlng\)/u)
 assert.match(mapSource, /clearMeasurement/u)
 assert.match(styles, /environmental-raster--cams-wildfire-pm10/u)

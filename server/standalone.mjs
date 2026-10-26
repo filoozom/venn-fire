@@ -14,6 +14,7 @@ import liveReportsHandler from '../api/live-reports.js'
 import liveSituationHandler from '../api/live-situation.js'
 import sentinelQuicklookHandler from '../api/sentinel-quicklook.js'
 import sourceImageHandler from '../api/source-image.js'
+import wmsHandler from '../api/wms.js'
 import { databaseQuery, databaseUrl, ensureDatabaseSchema } from './database.mjs'
 import { ensureFlightHistorySchema } from './flight-history.mjs'
 import { closePostgresPools } from './postgres.mjs'
@@ -48,6 +49,7 @@ const MIME_TYPES = new Map(Object.entries({
 const COMPRESSIBLE = /^(?:text\/|application\/(?:json|manifest\+json)|image\/svg\+xml)/u
 
 const ROUTES = new Map(Object.entries({
+  '/wms': wmsHandler,
   '/api/data': dataHandler,
   '/api/firms-situation': firmsSituationHandler,
   '/api/live-reports': liveReportsHandler,

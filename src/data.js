@@ -265,6 +265,7 @@ function normalizeRmiWeather(snapshot) {
 export function buildFireFrames({
   timelineStartMs,
   endMs,
+  frameTimestampMs,
   weatherRows,
   reportRows,
   dwdSnapshot,
@@ -285,18 +286,18 @@ export function buildFireFrames({
   ]))
 
   return Array.from(
-    { length: Math.floor((boundedEndMs - timelineStartMs) / FIVE_MINUTES_MS) + 1 },
+    { length: frameTimestampMs == null ? Math.floor((boundedEndMs - timelineStartMs) / FIVE_MINUTES_MS) + 1 : 1 },
     (_, index) => {
-      const timestampMs = timelineStartMs + index * FIVE_MINUTES_MS
+      const timestampMs = frameTimestampMs ?? timelineStartMs + index * FIVE_MINUTES_MS
       const modelWeather = normalizedWeather.findLast((row) => (
         row.sourceKind !== 'station-observation' && row.timestampMs <= timestampMs
-      )) || normalizedWeather.find((row) => row.sourceKind !== 'station-observation')
+      ))
       const stationWeather = normalizedWeather.findLast((row) => (
         row.sourceKind === 'station-observation' && row.timestampMs <= timestampMs
       ))
       const stationAgeMs = stationWeather ? timestampMs - stationWeather.timestampMs : Number.POSITIVE_INFINITY
       const currentStationWeather = stationAgeMs <= RMI_STATION_MAX_AGE_MS ? stationWeather : null
-      const weather = currentStationWeather || modelWeather || normalizedWeather[0]
+      const weather = currentStationWeather || modelWeather
       const dwdWinds = dwdStations.flatMap((station) => {
         const observation = dwdRowsByStation[station.id]
           ?.findLast((row) => row.timestampMs <= timestampMs)
@@ -601,7 +602,7 @@ export function mergePrecipitationRadar(rmiRadar = { frames: [] }, dwdRadarHisto
   }
 }
 
-export function runtimeDataFromResponse(response) {
+export function runtimeDataFromResponse(response, { singleFrame = false } = {}) {
   if (!response?.ok) throw new Error(response?.error || 'Database response is unavailable')
   const datasets = response.datasets ?? {}
   const incident = requiredPayload(datasets, 'incident-config')
@@ -641,12 +642,13 @@ export function runtimeDataFromResponse(response) {
   const frames = buildFireFrames({
     timelineStartMs,
     endMs,
+    frameTimestampMs: singleFrame ? Math.max(timelineStartMs, Math.floor(endMs / FIVE_MINUTES_MS) * FIVE_MINUTES_MS) : undefined,
     weatherRows,
     reportRows,
     dwdSnapshot: dwd,
     center,
   })
-  const events = buildEvents({
+  const events = singleFrame ? [] : buildEvents({
     reportRows,
     baseEvents: [
       ...(incident.events ?? []),
@@ -676,6 +678,7 @@ export function runtimeDataFromResponse(response) {
     dwdWindStations: dwd.stations ?? [],
     weatherModel: openMeteo,
     weatherStation: rmi,
+    weatherDwd: dwd,
     effisProducts: annotateEffisGeometryFreshness(effis.products ?? []),
     firms,
     aircraft,
@@ -691,4 +694,16 @@ export function runtimeDataFromResponse(response) {
     ems,
     sourceRegistry,
   }
+}
+
+export function windFrameAt(runtime, timestampMs) {
+  return runtime.frames.find((frame) => frame.timestampMs === timestampMs) ?? buildFireFrames({
+    timelineStartMs: runtime.timelineStartMs,
+    endMs: timestampMs,
+    frameTimestampMs: timestampMs,
+    weatherRows: [...(runtime.weatherModel.rows ?? []), ...normalizeRmiWeather(runtime.weatherStation)],
+    reportRows: [],
+    dwdSnapshot: runtime.weatherDwd,
+    center: runtime.incidentCenter,
+  })[0]
 }

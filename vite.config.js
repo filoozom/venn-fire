@@ -11,6 +11,11 @@ export default defineConfig({
   // work without production credentials. No mutating route is proxied.
   server: {
     proxy: {
+      '/wms': {
+        target: developmentDataOrigin,
+        changeOrigin: true,
+        secure: true,
+      },
       '/api/data': {
         target: developmentDataOrigin,
         changeOrigin: true,

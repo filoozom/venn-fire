@@ -1,6 +1,54 @@
 # Venn Fire Watch
 
-Five-minute incident viewer for the High Fens wildfire near Drossart. The production site is [venn.apyos.com](https://venn.apyos.com).
+Five-minute incident viewer for the High Fens wildfire near Drossart. The self-hosted production site is [venn.apyos.com](https://venn.apyos.com).
+
+## WMS overlays
+
+The self-hosted Node server exposes **`/wms`**, using the same retained PostgreSQL data and time-selection calculations as the viewer. Rebuilding and restarting the existing app container publishes the route; no database migration, GIS server or extra service is required. Add `https://venn.apyos.com/wms` as a WMS connection in a GIS client, then read `GetCapabilities` to discover the layers and temporal dimension:
+
+```text
+https://venn.apyos.com/wms?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities
+```
+
+Each map resource is independently selectable with `LAYERS`:
+
+| Layer name | Content |
+| --- | --- |
+| `best_estimate` | Black retained footprint and red recent evidence, using the viewer's 30-day / 24-hour rules |
+| `effis_activity` | EFFIS daily activity envelope |
+| `firms_viirs_snpp`, `firms_viirs_noaa20`, `firms_viirs_noaa21`, `firms_modis`, `firms_meteosat` | Individual FIRMS sensors; parent layers include all confidence levels |
+| Each FIRMS name plus `_high`, `_nominal` or `_low` | Independent confidence subsets; combine these instead of their parent to avoid drawing the same observations twice |
+| `sentinel2_change`, `sentinel3_frp` | Sentinel-2 observed change and Sentinel-3 coordinate measurements; the latter is empty while measurements are unavailable |
+| `precipitation` | Retained RMI/DWD radar, using the same provider selection as the viewer |
+| `gibs_true_color`, `gibs_false_color` | Daily NASA VIIRS imagery |
+| `cams_pm25`, `cams_wildfire_pm10` | Regional CAMS forecasts; wildfire PM10 is experimental |
+| `aircraft` | Exact incident-aircraft fixes, fading routes and last observed positions |
+| `wind_model`, `wind_mont_rigi`, `wind_dwd_<station-id>` | Independent model/station wind layers; actual station IDs are listed in capabilities |
+| `protected_area` | Static indicative reserve extent |
+
+For example, retrieve a historical transparent overlay with two layers:
+
+```bash
+curl --fail --get 'https://venn.apyos.com/wms' \
+  --data-urlencode 'SERVICE=WMS' --data-urlencode 'VERSION=1.3.0' \
+  --data-urlencode 'REQUEST=GetMap' \
+  --data-urlencode 'LAYERS=best_estimate,aircraft' --data-urlencode 'STYLES=,' \
+  --data-urlencode 'TIME=2026-08-17T12:00:00Z' \
+  --data-urlencode 'CRS=CRS:84' --data-urlencode 'BBOX=5.975,50.49,6.145,50.575' \
+  --data-urlencode 'WIDTH=1024' --data-urlencode 'HEIGHT=512' \
+  --data-urlencode 'FORMAT=image/png' --data-urlencode 'TRANSPARENT=TRUE' \
+  --output fire-overlay.png
+```
+
+`TIME` selects one advertised five-minute map state in UTC. Omit it or use `current` for the latest timeline frame. Hourly and daily snapshots use the same endpoint with requests spaced by an hour or day. All temporal layers advertise the map timeline, including transparent states when evidence is missing or expired; daily imagery and irregular satellite acquisitions keep their original observation times and fade rules. Full timestamps are required: date-only values, ranges, lists and off-grid times return `InvalidDimensionValue`. No later observation is substituted for an earlier request. `X-WMS-Time` reports the selected time.
+
+Historical maps are **reconstructions using currently retained evidence**, rather than immutable reproductions of an old website publication. Backfills and corrections may change an old frame. CAMS selects the newest retained forecast cycle covering the requested valid time. Dataset hashes and rendering-code hashes invalidate cached images after data or calculation/style changes. The in-process data snapshot can lag the database by up to one minute; browser responses revalidate with ETags.
+
+The supported operations are `GetCapabilities` and `GetMap`, version **1.3.0**, with `image/png` output. `CRS:84` uses longitude/latitude BBOX order; `EPSG:4326` uses latitude/longitude; `EPSG:3857` uses easting/northing metres. Raster pixels are reprojected from their retained projection, including RMI's Mercator animation; nearest-neighbour sampling preserves categorical radar colours. Source crops bound the available imagery. Layer order follows `LAYERS`, first at the bottom. Styles are empty/default; `TRANSPARENT=FALSE` and `BGCOLOR=0xRRGGBB` support opaque output.
+
+Requests are limited to 2,048 pixels per side, 2,097,152 pixels total and 32 layers. Two distinct renders may run concurrently; excess work returns a retryable 503. Completed PNGs share a 32 MiB memory cache and identical concurrent requests share one render. Invalid requests return WMS XML exceptions. Missing archived images return an error rather than a misleading blank observation. Requests never fetch providers or accept arbitrary image/style URLs.
+
+This service publishes rendered overlays. It does not include third-party basemaps, browser-local imported tracks, measurement drawings, feature downloads, `GetFeatureInfo` or custom styling. Source attribution and data terms still apply. Run `pnpm verify:wms` for fixture-based rendering, time, projection, caching and concurrency checks; it writes an example PNG and capabilities XML to `/tmp`. The current implementation has not been OGC-certified.
 
 ## Data architecture
 

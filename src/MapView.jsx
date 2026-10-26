@@ -7,16 +7,7 @@ import {
   visibleAircraftObservations,
 } from './aircraftTracks'
 import { firmsDetectionOpacityAt } from './firmsDetections'
-
-// Detections are shaded by NASA's published confidence rather than by satellite:
-// what matters when reading the map is how sure the observation is, not which
-// spacecraft made it. Lower confidence is paler and more transparent.
-const FIRMS_CONFIDENCE_STYLE = {
-  high: { color: '#c2321f', weight: 0.9, opacity: 0.80, fillOpacity: 0.30 },
-  nominal: { color: '#e07a4b', weight: 0.7, opacity: 0.45, fillOpacity: 0.15 },
-  low: { color: '#e8b48c', weight: 0.6, opacity: 0.28, fillOpacity: 0.07 },
-  unknown: { color: '#c9b8a8', weight: 0.5, opacity: 0.22, fillOpacity: 0.05 },
-}
+import { FIRMS_CONFIDENCE_STYLE } from './mapStyles.js'
 
 const OBSERVATION_RECENCY_MS = 5 * 60 * 1000
 const INCIDENT_MAP_BOUNDS = [[50.49, 5.975], [50.575, 6.145]]

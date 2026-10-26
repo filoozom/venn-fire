@@ -23,6 +23,7 @@
     "verify:live-reports": "node scripts/verify-live-reports.mjs",
     "verify:timeline": "node scripts/verify-timeline.mjs",
     "verify:http-cache": "node scripts/verify-http-cache.mjs",
+    "verify:wms": "node scripts/verify-wms.mjs",
     "verify:news-presentation": "node scripts/verify-news-presentation.mjs",
     "video:timeline": "node scripts/render-timeline-video.mjs",
     "visual-check": "node scripts/visual-check.mjs",
@@ -36,7 +37,8 @@
     "fflate": "^0.8.3",
     "geotiff": "^3.0.5",
     "pg": "^8.23.0",
-    "proj4": "^2.21.0"
+    "proj4": "^2.21.0",
+    "sharp": "^0.35.5"
   },
   "devDependencies": {
     "@playwright/test": "latest",
