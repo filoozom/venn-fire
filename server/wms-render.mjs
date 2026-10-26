@@ -44,7 +44,23 @@ function svgDrawing(request) {
 
 // Inverse-map output pixel centres into the retained crop's actual projection.
 // Nearest-neighbour sampling preserves the discrete radar categories and palette.
-export async function reprojectRaster(bytes, overlay, request) {
+function geographicPixels(request) {
+  const target = projection(request.crs)
+  const [west, south, east, north] = request.bbox
+  const positions = new Float64Array(request.width * request.height * 2)
+  for (let y = 0; y < request.height; y += 1) {
+    const outputY = north - (y + 0.5) / request.height * (north - south)
+    for (let x = 0; x < request.width; x += 1) {
+      const point = target.inverse([west + (x + 0.5) / request.width * (east - west), outputY])
+      const offset = (y * request.width + x) * 2
+      positions[offset] = point[0]
+      positions[offset + 1] = point[1]
+    }
+  }
+  return positions
+}
+
+export async function reprojectRaster(bytes, overlay, request, projectionCache = {}) {
   const { data, info } = await sharp(bytes, { limitInputPixels: 16_777_216 }).toColourspace('srgb').ensureAlpha().raw().toBuffer({ resolveWithObject: true })
   const source = projection(overlay.crs)
   const target = projection(request.crs)
@@ -52,9 +68,15 @@ export async function reprojectRaster(bytes, overlay, request) {
   const [left, bottom] = source.forward([west, south])
   const [right, top] = source.forward([east, north])
   if (![left, bottom, right, top].every(Number.isFinite) || right <= left || top <= bottom) throw new Error('Invalid retained image bounds')
+  const rgba = Buffer.alloc(request.width * request.height * 4)
+  if (!data.some((value, index) => index % 4 === 3 && value > 0)) {
+    return sharp(rgba, { raw: { width: request.width, height: request.height, channels: 4 } }).png().toBuffer()
+  }
   const [minX, minY, maxX, maxY] = request.bbox
   // Lambert couples both axes; geographic/Mercator retain the cheaper axis lookup.
   const separable = !['EPSG:31370', 'EPSG:3812'].includes(request.crs)
+  // A combined map shares this bounded grid across its retained image layers.
+  const positions = separable ? null : (projectionCache.geographic ??= geographicPixels(request))
   const columns = new Int32Array(request.width)
   const rows = new Int32Array(request.height)
   for (let x = 0; separable && x < request.width; x += 1) {
@@ -68,15 +90,14 @@ export async function reprojectRaster(bytes, overlay, request) {
     const sourceY = source.forward([0, latitude])[1]
     rows[y] = Number.isFinite(sourceY) ? Math.floor((top - sourceY) / (top - bottom) * info.height) : -1
   }
-  const rgba = Buffer.alloc(request.width * request.height * 4)
   for (let y = 0; y < request.height; y += 1) {
     if (separable && (rows[y] < 0 || rows[y] >= info.height)) continue
     for (let x = 0; x < request.width; x += 1) {
       let sourceX = columns[x], sourceY = rows[y]
       if (!separable) {
-        const outputX = minX + (x + 0.5) / request.width * (maxX - minX)
-        const outputY = maxY - (y + 0.5) / request.height * (maxY - minY)
-        const [sx, sy] = source.forward(target.inverse([outputX, outputY]))
+        const offset = (y * request.width + x) * 2
+        const point = [positions[offset], positions[offset + 1]]
+        const [sx, sy] = overlay.crs === 'EPSG:4326' ? point : source.forward(point)
         sourceX = Math.floor((sx - left) / (right - left) * info.width)
         sourceY = Math.floor((top - sy) / (top - bottom) * info.height)
       }
@@ -167,6 +188,7 @@ export async function renderMap(bundle, request, loadImage) {
   const overlays = rasterOverlaysAt(bundle.runtime, state)
   const draw = svgDrawing(request)
   const composites = []
+  const projectionCache = {}
   let svg = ''
   const flushVectors = () => {
     if (!svg) return
@@ -182,7 +204,7 @@ export async function renderMap(bundle, request, loadImage) {
     const overlay = overlays.find((entry) => entry.key === layer.key)
     if (!overlay) continue
     const bytes = await loadImage(overlay)
-    composites.push({ input: await reprojectRaster(bytes, overlay, request) })
+    composites.push({ input: await reprojectRaster(bytes, overlay, request, projectionCache) })
   }
   flushVectors()
   const canvas = sharp({ create: {

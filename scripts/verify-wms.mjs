@@ -227,6 +227,8 @@ for (const crs of ['EPSG:31370', 'EPSG:3812']) {
     0, 0, 255, 255, 255, 255, 0, 255,
   ]), { raw: { width: 2, height: 2, channels: 4 } }).png().toBuffer()
   const overlay = { bounds: [[49, 2], [52, 8]], crs: 'EPSG:4326', opacity: 1 }
+  const emptyImage = await sharp({ create: { width: 2, height: 2, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).png().toBuffer()
+  assert.equal(await visible(await reprojectRaster(emptyImage, overlay, request)), false, 'A dry radar image must stay transparent')
   const wide = { ...request, bbox: [center[0] - 220000, center[1] - 220000, center[0] + 220000, center[1] + 220000] }
   const pixels = await raw(await reprojectRaster(checker, overlay, wide))
   for (let y = 0; y < wide.height; y += 9) {
