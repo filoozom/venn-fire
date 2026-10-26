@@ -128,8 +128,12 @@ export function mapRequest(parameters, layers, runtime) {
   if (!['TRUE', 'FALSE'].includes(transparent)) throw wmsError('InvalidParameterValue', 'TRANSPARENT must be TRUE or FALSE')
   const background = parameters.get('BGCOLOR') ?? '0xFFFFFF'
   if (!/^0x[0-9a-f]{6}$/iu.test(background)) throw wmsError('InvalidParameterValue', 'BGCOLOR must be 0xRRGGBB')
+  const timestampMs = snapshotTime(parameters.get('TIME') ?? 'current', runtime)
+  return { layers: selectedLayers, crs, bbox, width, height, timestampMs, transparent: transparent === 'TRUE', background: `#${background.slice(2)}` }
+}
+
+export function snapshotTime(time, runtime) {
   const start = runtime.timelineStartMs, end = runtime.frames.at(-1).timestampMs
-  const time = parameters.get('TIME') ?? 'current'
   let timestampMs = end
   if (time !== 'current') {
     if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(time)) throw wmsError('InvalidDimensionValue', 'TIME must be current or a single full UTC timestamp; ranges and daily aggregates are not supported')
@@ -140,13 +144,14 @@ export function mapRequest(parameters, layers, runtime) {
   if (timestampMs < start || timestampMs > end || (timestampMs - start) % FIVE_MINUTES_MS !== 0) {
     throw wmsError('InvalidDimensionValue', 'TIME must be an advertised five-minute snapshot between the timeline start and latest frame')
   }
-  return { layers: selectedLayers, crs, bbox, width, height, timestampMs, transparent: transparent === 'TRUE', background: `#${background.slice(2)}` }
+  return timestampMs
 }
 
-export function capabilitiesXml(layers, runtime, endpoint) {
+export function capabilitiesXml(layers, runtime, endpoint, defaultTimeMs = runtime.frames.at(-1).timestampMs) {
   const start = new Date(runtime.timelineStartMs).toISOString()
   const end = new Date(runtime.frames.at(-1).timestampMs).toISOString()
-  const online = `<OnlineResource xmlns:xlink="http://www.w3.org/1999/xlink" xlink:type="simple" xlink:href="${xml(endpoint)}?"/>`
+  const defaultTime = new Date(defaultTimeMs).toISOString()
+  const online = `<OnlineResource xmlns:xlink="http://www.w3.org/1999/xlink" xlink:type="simple" xlink:href="${xml(endpoint)}${endpoint.includes('?') ? '&amp;' : '?'}"/>`
   const operation = (name, format) => `<${name}><Format>${format}</Format><DCPType><HTTP><Get>${online}</Get></HTTP></DCPType></${name}>`
   const layerXml = (layer) => {
     const [west, south, east, north] = layer.bounds
@@ -154,7 +159,7 @@ export function capabilitiesXml(layers, runtime, endpoint) {
 <EX_GeographicBoundingBox><westBoundLongitude>${west}</westBoundLongitude><eastBoundLongitude>${east}</eastBoundLongitude><southBoundLatitude>${south}</southBoundLatitude><northBoundLatitude>${north}</northBoundLatitude></EX_GeographicBoundingBox>
 <BoundingBox CRS="CRS:84" minx="${west}" miny="${south}" maxx="${east}" maxy="${north}"/>
 <BoundingBox CRS="EPSG:4326" minx="${south}" miny="${west}" maxx="${north}" maxy="${east}"/>
-${layer.static ? '' : `<Dimension name="time" units="ISO8601" default="${end}" multipleValues="0" nearestValue="0" current="1">${start}/${end}/PT5M</Dimension>`}
+${layer.static ? '' : `<Dimension name="time" units="ISO8601" default="${defaultTime}" multipleValues="0" nearestValue="0" current="1">${start}/${end}/PT5M</Dimension>`}
 <Style><Name>default</Name><Title>Viewer style</Title></Style></Layer>`
   }
   return `<?xml version="1.0" encoding="UTF-8"?>

@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { loadArtifact, loadPublicDatasets } from '../server/database.mjs'
 import { entityTag, respondNotModified, sendBytes } from '../server/http-response.mjs'
-import { capabilitiesXml, exceptionXml, mapRequest, wmsError, wmsLayers, wmsParameters } from '../server/wms.mjs'
+import { capabilitiesXml, exceptionXml, mapRequest, snapshotTime, wmsError, wmsLayers, wmsParameters } from '../server/wms.mjs'
 import { renderMap } from '../server/wms-render.mjs'
 import { mergeIncidentFlights, runtimeDataFromResponse } from '../src/data.js'
 import { firmsDetectionsForMap } from '../src/mapState.js'
@@ -54,10 +54,13 @@ async function retainedImage(overlay) {
   return Buffer.from(artifact.contentBase64, 'base64')
 }
 
-function serviceUrl(request) {
+function serviceUrl(request, parameters) {
   const protocol = request.headers?.['x-forwarded-proto'] === 'https' || request.socket?.encrypted ? 'https' : 'http'
   const origin = new URL(`${protocol}://${request.headers?.host || 'venn.apyos.com'}`)
-  return new URL('/wms', origin).href
+  const endpoint = new URL('/wms', origin)
+  // GIS clients use the advertised URL for GetMap, dropping the original query.
+  if (parameters.has('TIME')) endpoint.searchParams.set('TIME', parameters.get('TIME'))
+  return endpoint.href
 }
 
 export function createWmsHandler({ getSnapshot = databaseSnapshot, loadImage = retainedImage } = {}) {
@@ -75,7 +78,8 @@ export function createWmsHandler({ getSnapshot = databaseSnapshot, loadImage = r
       const bundle = await getSnapshot()
       let body, etag, contentType
       if (operation === 'getcapabilities') {
-        body = Buffer.from(capabilitiesXml(bundle.layers, bundle.runtime, serviceUrl(request)))
+        const timestampMs = snapshotTime(parameters.get('TIME') ?? 'current', bundle.runtime)
+        body = Buffer.from(capabilitiesXml(bundle.layers, bundle.runtime, serviceUrl(request, parameters), timestampMs))
         etag = entityTag(body)
         contentType = 'text/xml; charset=utf-8'
       } else {

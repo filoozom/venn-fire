@@ -74,6 +74,19 @@ for (const name of ['best_estimate', 'aircraft', 'sentinel2_change', 'sentinel3_
 }
 await writeFile('/tmp/fire-wms-capabilities.xml', capabilities.body)
 
+const historicalCapabilities = await invoke(`/wms?SERVICE=WMS&REQUEST=GetCapabilities&TIME=${time}`)
+assert.equal(historicalCapabilities.statusCode, 200)
+const historicalText = historicalCapabilities.body.toString()
+assert.ok(historicalText.includes(`default="${time}"`), 'A dated connection must advertise its selected default')
+const mapUrl = new URL(historicalText.match(/<GetMap>.*?xlink:href="([^"]+)"/u)[1].replaceAll('&amp;', '&'))
+assert.equal(mapUrl.searchParams.get('TIME'), time, 'Capabilities must preserve TIME for clients that discard the connection query')
+for (const [key, value] of Object.entries(defaults)) if (key !== 'TIME') mapUrl.searchParams.set(key, value)
+const historicalMap = await invoke(mapUrl.href)
+assert.equal(historicalMap.statusCode, 200)
+assert.equal(historicalMap.headers['x-wms-time'], time)
+assert.ok(await visible(historicalMap.body))
+assert.notEqual(historicalCapabilities.headers.etag, capabilities.headers.etag)
+
 for (const [changes, code] of [
   [{ LAYERS: '<unknown>' }, 'LayerNotDefined'],
   [{ CRS: 'EPSG:31370' }, 'InvalidCRS'],
@@ -96,6 +109,11 @@ for (const [changes, code] of [
   assert.equal(result.statusCode, 400, JSON.stringify(changes))
   assert.ok(String(result.body).includes(`code="${code}"`), String(result.body))
   assert.equal(result.headers['cache-control'], 'no-store')
+  if (changes.TIME) {
+    const invalidCapabilities = await invoke(`/wms?${new URLSearchParams({ SERVICE: 'WMS', REQUEST: 'GetCapabilities', TIME: changes.TIME })}`)
+    assert.equal(invalidCapabilities.statusCode, 400, 'Capabilities must validate a selected date too')
+    assert.match(String(invalidCapabilities.body), /code="InvalidDimensionValue"/u)
+  }
 }
 assert.match(String((await invoke(query({ LAYERS: '<unknown>' }))).body), /&lt;unknown&gt;/u)
 assert.equal((await invoke(`${query()}&width=12`)).statusCode, 400)
