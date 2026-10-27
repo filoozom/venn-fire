@@ -10,6 +10,8 @@ The self-hosted Node server exposes **`/wms`**, using the same retained PostgreS
 https://venn.apyos.com/wms?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities
 ```
 
+The capabilities organize the resources into **Fire extent and change**, **Thermal detections**, **Satellite imagery**, **Weather**, **Air quality models**, **Aircraft** and **Reference**. Thermal detections contain a subgroup for each FIRMS sensor, with all-confidence and individual confidence layers. These title-only groups organize the client layer tree; requestable layer names and dated service URLs remain unchanged. Refresh the WMS connection to load the hierarchy.
+
 Each map resource is independently selectable with `LAYERS`:
 
 | Layer name | Content |

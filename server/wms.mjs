@@ -159,7 +159,25 @@ export function capabilitiesXml(layers, runtime, endpoint, defaultTimeMs = runti
   const defaultTime = new Date(defaultTimeMs).toISOString()
   const online = `<OnlineResource xmlns:xlink="http://www.w3.org/1999/xlink" xlink:type="simple" xlink:href="${xml(endpoint)}${endpoint.includes('?') ? '&amp;' : '?'}"/>`
   const operation = (name, format) => `<${name}><Format>${format}</Format><DCPType><HTTP><Get>${online}</Get></HTTP></DCPType></${name}>`
+  const groups = [
+    { title: 'Fire extent and change', children: layers.filter((layer) => ['estimate', 'effis', 'sentinel2'].includes(layer.type)) },
+    { title: 'Thermal detections', children: [
+      ...FIRMS_SENSORS.map((sensor) => ({
+        title: sensor.name,
+        children: layers.filter((layer) => layer.sensorKey === sensor.key).map((layer) => ({
+          ...layer, title: layer.confidence ? `${layer.confidence} confidence` : 'All confidence levels',
+        })),
+      })),
+      ...layers.filter((layer) => layer.type === 'sentinel3'),
+    ] },
+    { title: 'Satellite imagery', children: layers.filter((layer) => layer.name.startsWith('gibs_')) },
+    { title: 'Weather', children: layers.filter((layer) => layer.type === 'wind' || layer.name === 'precipitation') },
+    { title: 'Air quality models', children: layers.filter((layer) => layer.name.startsWith('cams_')) },
+    { title: 'Aircraft', children: layers.filter((layer) => layer.type === 'aircraft') },
+    { title: 'Reference', children: layers.filter((layer) => layer.type === 'protected') },
+  ]
   const layerXml = (layer) => {
+    if (layer.children) return `<Layer><Title>${xml(layer.title)}</Title>${layer.children.map(layerXml).join('')}</Layer>`
     const [west, south, east, north] = layer.bounds
     return `<Layer queryable="0" opaque="0"><Name>${xml(layer.name)}</Name><Title>${xml(layer.title)}</Title><Abstract>${xml(layer.abstract)} Snapshot reconstruction from currently retained evidence; missing or expired evidence is transparent.</Abstract>
 <EX_GeographicBoundingBox><westBoundLongitude>${west}</westBoundLongitude><eastBoundLongitude>${east}</eastBoundLongitude><southBoundLatitude>${south}</southBoundLatitude><northBoundLatitude>${north}</northBoundLatitude></EX_GeographicBoundingBox>
@@ -172,5 +190,5 @@ ${layer.static ? '' : `<Dimension name="time" units="ISO8601" default="${default
 <WMS_Capabilities version="1.3.0" xmlns="http://www.opengis.net/wms" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.opengis.net/wms https://schemas.opengis.net/wms/1.3.0/capabilities_1_3_0.xsd">
 <Service><Name>WMS</Name><Title>Venn Fire Watch</Title><Abstract>Independent incident overlays with five-minute historical map states. TIME describes observation/forecast validity, not what was known when the page was first published.</Abstract>${online}<Fees>none</Fees><AccessConstraints>Source attribution and source data terms apply.</AccessConstraints><LayerLimit>${WMS_MAX_LAYERS}</LayerLimit><MaxWidth>${WMS_MAX_SIZE}</MaxWidth><MaxHeight>${WMS_MAX_SIZE}</MaxHeight></Service>
 <Capability><Request>${operation('GetCapabilities', 'text/xml')}${operation('GetMap', 'image/png')}</Request><Exception><Format>XML</Format></Exception>
-<Layer><Title>Venn Fire Watch overlays</Title>${WMS_CRS.map((crs) => `<CRS>${crs}</CRS>`).join('')}${layers.map(layerXml).join('')}</Layer></Capability></WMS_Capabilities>`
+<Layer><Title>Venn Fire Watch overlays</Title>${WMS_CRS.map((crs) => `<CRS>${crs}</CRS>`).join('')}${groups.map(layerXml).join('')}</Layer></Capability></WMS_Capabilities>`
 }

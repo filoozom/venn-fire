@@ -83,6 +83,13 @@ assert.match(capabilitiesText, /Test &amp; station/u)
 assert.match(capabilitiesText, /PT5M<\/Dimension>/u)
 assert.match(capabilitiesText, /<LayerLimit>64<\/LayerLimit>/u)
 assert.match(capabilitiesText, /<CRS>EPSG:31370<\/CRS><CRS>EPSG:3812<\/CRS>/u)
+for (const title of ['Fire extent and change', 'Thermal detections', 'Satellite imagery', 'Weather', 'Air quality models', 'Aircraft', 'Reference']) {
+  assert.ok(capabilitiesText.includes(`<Layer><Title>${title}</Title>`), `Missing organizational group ${title}`)
+}
+assert.match(capabilitiesText, /<Title>Thermal detections<\/Title><Layer><Title>VIIRS Suomi-NPP<\/Title><Layer queryable="0" opaque="0"><Name>firms_viirs_snpp<\/Name><Title>All confidence levels<\/Title>/u)
+const advertisedNames = [...capabilitiesText.matchAll(/<Name>([^<]+)<\/Name>/gu)]
+  .map((match) => match[1]).filter((name) => !['WMS', 'default'].includes(name))
+assert.deepEqual(advertisedNames.sort(), layers.map((layer) => layer.name).sort(), 'Groups must preserve every requestable layer exactly once')
 assert.equal(new Set(layers.map((layer) => layer.name)).size, layers.length)
 for (const name of ['best_estimate', 'aircraft', 'sentinel2_change', 'sentinel3_frp', 'precipitation', 'gibs_true_color', 'gibs_false_color', 'cams_pm25', 'cams_wildfire_pm10', 'wind_model', 'wind_mont_rigi', 'wind_dwd_123', 'protected_area', 'firms_viirs_noaa21_low', 'firms_modis_nominal', 'firms_meteosat_high']) {
   assert.ok(capabilitiesText.includes(`<Name>${name}</Name>`), `Missing layer ${name}`)
