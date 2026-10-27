@@ -16,7 +16,7 @@ let renderingRevision
 function renderRevision() {
   // Calculation/style edits must invalidate conditional responses even when data is unchanged.
   renderingRevision ??= Promise.all([
-    './wms.js', './source-image.js', '../server/wms.mjs', '../server/wms-render.mjs',
+    './wms.js', './source-image.js', '../server/wms.mjs', '../server/wms-render.mjs', '../server/wms-rasters.mjs', '../server/wms-raster-worker.mjs',
     ...['mapState', 'mapStyles', 'data', 'sourceFreshness', 'firmsDetections', 'aircraftTracks', 'aircraftFireEstimate', 'fireActivityEstimate', 'modisFireEstimate', 'camsForecasts'].map((name) => `../src/${name}.js`),
   ].map((path) => readFile(new URL(path, import.meta.url)))).then((parts) => entityTag(Buffer.concat(parts)))
   return renderingRevision

@@ -62,6 +62,8 @@ The supported operations are `GetCapabilities` and `GetMap`, version **1.3.0**, 
 
 Requests are limited to 2,048 pixels per side, 4,194,304 pixels total and 64 layers. The full advertised 2,048 × 2,048 tile size is supported, including WalOnMap's tiled requests on large displays. Two distinct renders may run concurrently and six more may wait for a slot; further work returns a retryable 503. Abandoned tiles are removed from the queue and active renders stop when no clients still need them, so panning does not leave obsolete tiles blocking the new view. Completed PNGs share a 32 MiB memory cache and identical concurrent requests share one render, including queued requests. Invalid requests return WMS XML exceptions. Missing archived images return an error rather than a misleading blank observation. Requests never fetch providers or accept arbitrary image/style URLs.
 
+Raster reprojection runs in workers so both render slots can use separate CPU cores while HTTP requests remain responsive.
+
 This service publishes rendered overlays. It does not include third-party basemaps, browser-local imported tracks, measurement drawings, feature downloads, `GetFeatureInfo` or custom styling. Source attribution and data terms still apply. Run `pnpm verify:wms` for fixture-based rendering, time, projection, caching and concurrency checks; it writes an example PNG and capabilities XML to `/tmp`. The current implementation has not been OGC-certified.
 
 ## Data architecture

@@ -8,6 +8,7 @@ import { mergeIncidentFlights, runtimeDataFromResponse, windFrameAt } from '../s
 import { bestEstimateAt, environmentalStateAt, firmsDetectionsForMap, footprintOriginFor } from '../src/mapState.js'
 import { mapRequest, wmsLayers, wmsParameters } from '../server/wms.mjs'
 import { pixelPosition, reprojectRaster } from '../server/wms-render.mjs'
+import { renderRasters } from '../server/wms-rasters.mjs'
 
 const time = '2026-08-17T12:00:00.000Z'
 const timeMs = Date.parse(time)
@@ -277,6 +278,14 @@ for (const [sourcePixel, expectedAlpha] of [[0, 46], [1, 118], [3, 128]]) {
   assert.equal(camsPixels[(pixel * 64 + pixel) * 4 + 3], expectedAlpha, 'CAMS opacity must retain the centre, middle and edge fade')
 }
 
+const rasterRequest = { width: 64, height: 64, crs: 'CRS:84', bbox: [6, 50.5, 6.1, 50.6] }
+const rasterInput = { overlay: { key: 'cache-fixture', bounds, crs: 'EPSG:4326', opacity: 0.5 }, bytes: red }
+await assert.rejects(renderRasters([{ ...rasterInput, bytes: Buffer.from('broken image') }], rasterRequest))
+const workerAbort = new AbortController()
+const workerAbortTimer = setTimeout(() => workerAbort.abort(), 5)
+await assert.rejects(renderRasters([rasterInput], { ...rasterRequest, width: 2048, height: 2048 }, workerAbort.signal), { name: 'AbortError' })
+clearTimeout(workerAbortTimer)
+
 const abort = new AbortController()
 const abortTimer = setTimeout(() => abort.abort(), 5)
 await assert.rejects(reprojectRaster(red, { bounds, crs: 'EPSG:4326', opacity: 1 }, {
@@ -337,4 +346,4 @@ const unavailable = await invoke(query({ LAYERS: 'precipitation' }), { target: b
 assert.equal(unavailable.statusCode, 503, 'A missing image is an error, not an empty observation')
 assert.equal(unavailable.headers['cache-control'], 'no-store')
 
-console.log(JSON.stringify({ layers: layers.length, imageReads: reads, axisOrder: 'passed', rasterReprojection: 'passed', historicalSelection: 'passed', cacheInvalidation: 'passed', concurrency: 'passed', preview: '/tmp/fire-wms-preview.png' }, null, 2))
+console.log(JSON.stringify({ layers: layers.length, imageReads: reads, axisOrder: 'passed', rasterReprojection: 'passed', historicalSelection: 'passed', cacheInvalidation: 'passed', workerCancellation: 'passed', concurrency: 'passed', preview: '/tmp/fire-wms-preview.png' }, null, 2))

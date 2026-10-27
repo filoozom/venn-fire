@@ -7,6 +7,7 @@ import { firmsDetectionOpacityAt } from '../src/firmsDetections.js'
 import { bestEstimateAt, environmentalStateAt, footprintOriginFor, rasterOverlaysAt } from '../src/mapState.js'
 import { FIRMS_CONFIDENCE_STYLE } from '../src/mapStyles.js'
 import { xml } from './wms.mjs'
+import { renderRasters } from './wms-rasters.mjs'
 
 function projection(crs) {
   return proj4('EPSG:4326', crs === 'CRS:84' ? 'EPSG:4326' : crs)
@@ -243,7 +244,9 @@ export async function renderMap(bundle, request, loadImage, signal) {
   const overlays = rasterOverlaysAt(bundle.runtime, state)
   const draw = svgDrawing(request)
   const composites = []
-  const projectionCache = {}
+  const rasterKeys = new Set(request.layers.filter((layer) => layer.type === 'raster').map((layer) => layer.key))
+  const input = await Promise.all(overlays.filter((overlay) => rasterKeys.has(overlay.key)).map(async (overlay) => ({ overlay, bytes: await loadImage(overlay) })))
+  const rasters = await renderRasters(input, request, signal)
   let svg = ''
   const flushVectors = () => {
     if (!svg) return
@@ -257,10 +260,8 @@ export async function renderMap(bundle, request, loadImage, signal) {
       continue
     }
     flushVectors()
-    const overlay = overlays.find((entry) => entry.key === layer.key)
-    if (!overlay) continue
-    const bytes = await loadImage(overlay)
-    composites.push(await reprojectRaster(bytes, overlay, request, projectionCache, signal))
+    const raster = rasters.get(layer.key)
+    if (raster) composites.push(raster)
   }
   flushVectors()
   signal?.throwIfAborted()
