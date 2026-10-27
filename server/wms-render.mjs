@@ -9,6 +9,8 @@ import { FIRMS_CONFIDENCE_STYLE } from '../src/mapStyles.js'
 import { xml } from './wms.mjs'
 import { renderRasters } from './wms-rasters.mjs'
 
+const frameStates = new WeakMap()
+
 function projection(crs) {
   return proj4('EPSG:4326', crs === 'CRS:84' ? 'EPSG:4326' : crs)
 }
@@ -206,7 +208,7 @@ function vectorLayer(layer, bundle, state, request, draw) {
           return row.displayMode === 'centroid' ? circle(row.position, 4 + Math.max(0, row.confidence.rank ?? 0), style) : path([row.footprint], style)
         }).join('')
     case 'estimate': {
-      const { fireActivityAreas } = bestEstimateAt({
+      const { fireActivityAreas } = state.bestEstimate ??= bestEstimateAt({
         detections: detections.filter((row) => row.timestampMs <= time),
         sentinelAnalyses: state.visibleSentinelAnalyses,
         flights,
@@ -228,7 +230,7 @@ function vectorLayer(layer, bundle, state, request, draw) {
         return tracks + marker(latest.position, symbol, aircraftTraceOpacity(latest.timestampMs, time), latest.trackDegrees ?? 0)
       }).join('')
     case 'wind': {
-      const frame = windFrameAt(runtime, time)
+      const frame = state.windFrame ??= windFrameAt(runtime, time)
       const wind = layer.key === 'wind' ? frame.drossartWind : layer.key === 'rmiWind' ? frame.montRigiWind : frame.dwdWinds.find((row) => row.id === layer.stationId)
       if (!wind || Date.parse(wind.observedAt) > time || !Number.isFinite(wind.windDirection)) return ''
       const color = layer.key === 'wind' ? '#72b7e6' : layer.key === 'rmiWind' ? '#8fd7c7' : '#b9a0e8'
@@ -240,7 +242,14 @@ function vectorLayer(layer, bundle, state, request, draw) {
 
 export async function renderMap(bundle, request, loadImage, signal) {
   signal?.throwIfAborted()
-  const state = environmentalStateAt(bundle.runtime, request.timestampMs)
+  let frames = frameStates.get(bundle)
+  if (!frames) { frames = new Map(); frameStates.set(bundle, frames) }
+  let state = frames.get(request.timestampMs)
+  if (!state) {
+    state = environmentalStateAt(bundle.runtime, request.timestampMs)
+    if (frames.size >= 16) frames.delete(frames.keys().next().value)
+    frames.set(request.timestampMs, state)
+  }
   const overlays = rasterOverlaysAt(bundle.runtime, state)
   const draw = svgDrawing(request)
   const composites = []

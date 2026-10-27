@@ -198,6 +198,17 @@ bundle = { ...bundle, revision: 'fixture-backfill' }
 const revised = await invoke(query({ LAYERS: 'firms_viirs_snpp_high' }), { headers: { 'if-none-match': high.headers.etag } })
 assert.equal(revised.statusCode, 200, 'A backfill must invalidate maps for an unchanged TIME')
 assert.notEqual(revised.headers.etag, high.headers.etag)
+const beforeEvidenceRemoval = await invoke(query({ LAYERS: 'best_estimate', TIME: at(10) }))
+assert.ok(await visible(beforeEvidenceRemoval.body))
+const savedBundle = bundle
+bundle = {
+  ...bundle, revision: 'fixture-evidence-removal', detections: [], flights: [],
+  runtime: { ...runtime, sentinel2: { ...runtime.sentinel2, analyses: [] } },
+}
+const afterEvidenceRemoval = await invoke(query({ LAYERS: 'best_estimate', TIME: at(10) }), { headers: { 'if-none-match': beforeEvidenceRemoval.headers.etag } })
+assert.equal(afterEvidenceRemoval.statusCode, 200)
+assert.equal(await visible(afterEvidenceRemoval.body), false, 'A new retained-data bundle must invalidate cached estimate geometry')
+bundle = savedBundle
 const head = await invoke(query(), { method: 'HEAD' })
 assert.equal(head.statusCode, 200)
 assert.equal(head.body, undefined)
