@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { writeFile } from 'node:fs/promises'
+import { EventEmitter } from 'node:events'
 import sharp from 'sharp'
 import proj4 from 'proj4'
 import { createWmsHandler, retainedImage } from '../api/wms.js'
@@ -58,17 +59,17 @@ let reads = 0
 const handler = createWmsHandler({ getSnapshot: async () => bundle, loadImage: async () => { reads += 1; return red } })
 
 function response() {
-  return {
+  return Object.assign(new EventEmitter(), {
     headers: {}, statusCode: 200,
     setHeader(key, value) { this.headers[key.toLowerCase()] = String(value) },
     status(code) { this.statusCode = code; return this },
     end(body) { this.body = body; return this },
-  }
+    destroy() { this.destroyed = true; this.emit('close') },
+  })
 }
 const defaults = { SERVICE: 'WMS', VERSION: '1.3.0', REQUEST: 'GetMap', LAYERS: 'firms_viirs_snpp', STYLES: '', TIME: time, CRS: 'CRS:84', BBOX: '6,50.5,6.1,50.6', WIDTH: '256', HEIGHT: '256', FORMAT: 'image/png', TRANSPARENT: 'TRUE' }
 const query = (changes = {}) => `/wms?${new URLSearchParams({ ...defaults, ...changes })}`
-async function invoke(url, { target = handler, method = 'GET', headers = {} } = {}) {
-  const result = response()
+async function invoke(url, { target = handler, method = 'GET', headers = {}, result = response() } = {}) {
   await target({ url, method, headers: { host: 'venn.apyos.com', 'x-forwarded-proto': 'https', ...headers } }, result)
   return result
 }
@@ -250,6 +251,13 @@ for (const crs of ['EPSG:31370', 'EPSG:3812']) {
   }
 }
 
+const abort = new AbortController()
+const abortTimer = setTimeout(() => abort.abort(), 5)
+await assert.rejects(reprojectRaster(red, { bounds, crs: 'EPSG:4326', opacity: 1 }, {
+  width: 2048, height: 2048, crs: 'EPSG:3812', bbox: [760000, 630000, 780000, 650000],
+}, {}, abort.signal), { name: 'AbortError' })
+clearTimeout(abortTimer)
+
 // Tile bursts queue behind two renders; duplicates share work and excess work is rejected.
 let release
 const barrier = new Promise((resolve) => { release = resolve })
@@ -271,6 +279,33 @@ const completed = await Promise.all([first, duplicate, second, ...queued, queued
 assert.ok(completed.every((result) => result.statusCode === 200))
 assert.deepEqual(completed[0].body, completed[1].body)
 assert.equal(blockedReads, 8, 'Duplicates must share queued renders as well as active renders')
+
+let releaseCancellation, cancellationReads = 0
+const cancellationGate = new Promise((resolve) => { releaseCancellation = resolve })
+const cancellable = createWmsHandler({ getSnapshot: async () => bundle, loadImage: async () => { cancellationReads += 1; await cancellationGate; return red } })
+const activeResponse = response(), duplicateResponse = response(), cancelledActive = response()
+const activeWork = invoke(query({ LAYERS: 'precipitation' }), { target: cancellable, result: activeResponse })
+const duplicateWork = invoke(query({ LAYERS: 'precipitation' }), { target: cancellable, result: duplicateResponse })
+const cancelledActiveWork = invoke(query({ LAYERS: 'gibs_true_color' }), { target: cancellable, result: cancelledActive })
+for (let attempt = 0; cancellationReads < 2 && attempt < 100; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 5))
+assert.equal(cancellationReads, 2)
+const abandoned = Array.from({ length: 6 }, () => response())
+const abandonedWork = abandoned.map((result, index) => invoke(query({ LAYERS: 'gibs_false_color', WIDTH: String(256 + index) }), { target: cancellable, result }))
+const survivingQueued = response()
+const survivingWork = invoke(query({ LAYERS: 'gibs_false_color' }), { target: cancellable, result: survivingQueued })
+assert.equal((await invoke(query({ LAYERS: 'gibs_false_color', WIDTH: '262' }), { target: cancellable })).statusCode, 503)
+activeResponse.destroy()
+cancelledActive.destroy()
+abandoned.forEach((result) => result.destroy())
+const replacement = invoke(query({ LAYERS: 'gibs_false_color', WIDTH: '262' }), { target: cancellable })
+releaseCancellation()
+const cancelledResults = await Promise.all([activeWork, duplicateWork, cancelledActiveWork, ...abandonedWork, survivingWork, replacement])
+assert.equal(cancellationReads, 4, 'Abandoned queued tiles must not load images; surviving duplicates must still render')
+assert.equal(duplicateResponse.headers['content-type'], 'image/png')
+assert.equal(survivingQueued.headers['content-type'], 'image/png')
+assert.equal(cancelledResults.at(-1).headers['content-type'], 'image/png', 'Cancelling queued tiles must free capacity for a replacement')
+for (const result of [activeResponse, cancelledActive, ...abandoned]) assert.equal(result.body, undefined)
+for (const result of cancelledResults) assert.equal(result.listenerCount('close'), 0)
 const broken = createWmsHandler({ getSnapshot: async () => bundle, loadImage: async () => { throw new Error('Fixture missing artifact') } })
 const unavailable = await invoke(query({ LAYERS: 'precipitation' }), { target: broken })
 assert.equal(unavailable.statusCode, 503, 'A missing image is an error, not an empty observation')

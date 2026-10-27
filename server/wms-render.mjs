@@ -1,5 +1,6 @@
 import sharp from 'sharp'
 import proj4 from 'proj4'
+import { setImmediate as yieldToIo } from 'node:timers/promises'
 import { windFrameAt } from '../src/data.js'
 import { aircraftTraceOpacity, fadingObservationPaths, visibleAircraftObservations } from '../src/aircraftTracks.js'
 import { firmsDetectionOpacityAt } from '../src/firmsDetections.js'
@@ -44,11 +45,12 @@ function svgDrawing(request) {
 
 // Inverse-map output pixel centres into the retained crop's actual projection.
 // Nearest-neighbour sampling preserves the discrete radar categories and palette.
-function geographicPixels(request) {
+async function geographicPixels(request, signal) {
   const target = projection(request.crs)
   const [west, south, east, north] = request.bbox
   const positions = new Float64Array(request.width * request.height * 2)
   for (let y = 0; y < request.height; y += 1) {
+    if (signal && y % 64 === 0) { await yieldToIo(); signal.throwIfAborted() }
     const outputY = north - (y + 0.5) / request.height * (north - south)
     for (let x = 0; x < request.width; x += 1) {
       const point = target.inverse([west + (x + 0.5) / request.width * (east - west), outputY])
@@ -60,7 +62,8 @@ function geographicPixels(request) {
   return positions
 }
 
-export async function reprojectRaster(bytes, overlay, request, projectionCache = {}) {
+export async function reprojectRaster(bytes, overlay, request, projectionCache = {}, signal) {
+  signal?.throwIfAborted()
   const { data, info } = await sharp(bytes, { limitInputPixels: 16_777_216 }).toColourspace('srgb').ensureAlpha().raw().toBuffer({ resolveWithObject: true })
   const source = projection(overlay.crs)
   const target = projection(request.crs)
@@ -76,7 +79,7 @@ export async function reprojectRaster(bytes, overlay, request, projectionCache =
   // Lambert couples both axes; geographic/Mercator retain the cheaper axis lookup.
   const separable = !['EPSG:31370', 'EPSG:3812'].includes(request.crs)
   // A combined map shares this bounded grid across its retained image layers.
-  const positions = separable ? null : (projectionCache.geographic ??= geographicPixels(request))
+  const positions = separable ? null : (projectionCache.geographic ??= await geographicPixels(request, signal))
   const columns = new Int32Array(request.width)
   const rows = new Int32Array(request.height)
   for (let x = 0; separable && x < request.width; x += 1) {
@@ -91,6 +94,7 @@ export async function reprojectRaster(bytes, overlay, request, projectionCache =
     rows[y] = Number.isFinite(sourceY) ? Math.floor((top - sourceY) / (top - bottom) * info.height) : -1
   }
   for (let y = 0; y < request.height; y += 1) {
+    if (signal && y % 64 === 0) { await yieldToIo(); signal.throwIfAborted() }
     if (separable && (rows[y] < 0 || rows[y] >= info.height)) continue
     for (let x = 0; x < request.width; x += 1) {
       let sourceX = columns[x], sourceY = rows[y]
@@ -183,7 +187,8 @@ function vectorLayer(layer, bundle, state, request, draw) {
   }
 }
 
-export async function renderMap(bundle, request, loadImage) {
+export async function renderMap(bundle, request, loadImage, signal) {
+  signal?.throwIfAborted()
   const state = environmentalStateAt(bundle.runtime, request.timestampMs)
   const overlays = rasterOverlaysAt(bundle.runtime, state)
   const draw = svgDrawing(request)
@@ -196,6 +201,7 @@ export async function renderMap(bundle, request, loadImage) {
     svg = ''
   }
   for (const layer of request.layers) {
+    signal?.throwIfAborted()
     if (layer.type !== 'raster') {
       svg += vectorLayer(layer, bundle, state, request, draw)
       continue
@@ -204,9 +210,10 @@ export async function renderMap(bundle, request, loadImage) {
     const overlay = overlays.find((entry) => entry.key === layer.key)
     if (!overlay) continue
     const bytes = await loadImage(overlay)
-    composites.push({ input: await reprojectRaster(bytes, overlay, request, projectionCache) })
+    composites.push({ input: await reprojectRaster(bytes, overlay, request, projectionCache, signal) })
   }
   flushVectors()
+  signal?.throwIfAborted()
   const canvas = sharp({ create: {
     width: request.width, height: request.height, channels: 4,
     background: request.transparent ? { r: 0, g: 0, b: 0, alpha: 0 } : request.background,

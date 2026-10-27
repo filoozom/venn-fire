@@ -79,6 +79,7 @@ export function createWmsHandler({ getSnapshot = databaseSnapshot, loadImage = r
       if (!['GET', 'HEAD'].includes(request.method)) throw wmsError('OperationNotSupported', 'Use GET, HEAD or OPTIONS', 405)
       const { parameters, operation } = wmsParameters(request.url)
       const bundle = await getSnapshot()
+      if (response.destroyed) return
       let body, etag, contentType
       if (operation === 'getcapabilities') {
         const timestampMs = snapshotTime(parameters.get('TIME') ?? 'current', bundle.runtime)
@@ -89,6 +90,7 @@ export function createWmsHandler({ getSnapshot = databaseSnapshot, loadImage = r
         const map = mapRequest(parameters, bundle.layers, bundle.runtime)
         response.setHeader('X-WMS-Time', new Date(map.timestampMs).toISOString())
         etag = entityTag(JSON.stringify([await renderRevision(), bundle.revision, map]))
+        if (response.destroyed) return
         contentType = 'image/png'
         response.setHeader('Cache-Control', 'public, max-age=0, must-revalidate')
         if (respondNotModified(request, response, etag)) return
@@ -98,18 +100,37 @@ export function createWmsHandler({ getSnapshot = databaseSnapshot, loadImage = r
           cache.set(etag, body)
         } else {
           if (!pending.has(etag)) {
-            let ready
+            const job = { clients: new Set(), controller: new AbortController(), started: false }
+            let ready, cancelWaiting
             if (rendering >= 2) {
               if (waiting.length >= 6) {
                 response.setHeader('Retry-After', '1')
                 throw wmsError('ServerBusy', 'Map rendering queue is full; retry shortly', 503)
               }
-              ready = new Promise((resolve) => waiting.push(resolve))
+              ready = new Promise((resolve) => {
+                const resume = () => { job.started = true; resolve() }
+                waiting.push(resume)
+                cancelWaiting = () => {
+                  const index = waiting.indexOf(resume)
+                  if (index >= 0) waiting.splice(index, 1)
+                  resolve()
+                }
+              })
             } else {
               rendering += 1
+              job.started = true
               ready = Promise.resolve()
             }
-            const work = ready.then(() => renderMap(bundle, map, loadImage)).then((image) => {
+            job.cancel = () => {
+              job.controller.abort()
+              cancelWaiting?.()
+              if (pending.get(etag) === job) pending.delete(etag)
+            }
+            job.promise = ready.then(() => {
+              job.controller.signal.throwIfAborted()
+              return renderMap(bundle, map, loadImage, job.controller.signal)
+            }).then((image) => {
+              job.controller.signal.throwIfAborted()
               if (image.length <= CACHE_BYTES) {
                 while ((cacheBytes + image.length > CACHE_BYTES || cache.size >= 128) && cache.size) {
                   const first = cache.keys().next().value
@@ -121,14 +142,29 @@ export function createWmsHandler({ getSnapshot = databaseSnapshot, loadImage = r
               }
               return image
             }).finally(() => {
-              const next = waiting.shift()
-              if (next) next()
-              else rendering -= 1
-              pending.delete(etag)
+              if (job.started) {
+                const next = waiting.shift()
+                if (next) next()
+                else rendering -= 1
+              }
+              if (pending.get(etag) === job) pending.delete(etag)
             })
-            pending.set(etag, work)
+            pending.set(etag, job)
           }
-          body = await pending.get(etag)
+          const job = pending.get(etag)
+          job.clients.add(response)
+          const disconnect = () => {
+            job.clients.delete(response)
+            if (!job.clients.size) job.cancel()
+          }
+          response.once?.('close', disconnect)
+          try {
+            body = await job.promise
+          } finally {
+            response.off?.('close', disconnect)
+            job.clients.delete(response)
+          }
+          if (response.destroyed) return
         }
       }
       response.setHeader('Cache-Control', 'public, max-age=0, must-revalidate')
@@ -141,6 +177,7 @@ export function createWmsHandler({ getSnapshot = databaseSnapshot, loadImage = r
       }
       return sendBytes(request, response, body, { contentType, etag })
     } catch (error) {
+      if (response.destroyed) return
       const publicError = error.status ? error : wmsError('NoApplicableCode', 'Retained data or map rendering is unavailable', 503)
       if (!error.status) console.error('WMS failed:', error.message)
       response.setHeader('Cache-Control', 'no-store')
