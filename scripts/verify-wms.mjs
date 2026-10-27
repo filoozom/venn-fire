@@ -280,6 +280,16 @@ for (const [sourcePixel, expectedAlpha] of [[0, 46], [1, 118], [3, 128]]) {
 
 const rasterRequest = { width: 64, height: 64, crs: 'CRS:84', bbox: [6, 50.5, 6.1, 50.6] }
 const rasterInput = { overlay: { key: 'cache-fixture', bounds, crs: 'EPSG:4326', opacity: 0.5 }, bytes: red }
+const firstRaster = (await renderRasters([rasterInput], rasterRequest)).get('cache-fixture').input
+const reusedRaster = (await renderRasters([rasterInput], { ...rasterRequest, timestampMs: timeMs, layers: [{ name: 'different-selection' }] })).get('cache-fixture').input
+assert.equal(reusedRaster, firstRaster, 'A different selection or date must reuse an unchanged raster')
+const blue = await sharp({ create: { width: 4, height: 4, channels: 4, background: '#0000ff' } }).png().toBuffer()
+const changedRaster = (await renderRasters([{ ...rasterInput, bytes: blue }], rasterRequest)).get('cache-fixture').input
+assert.deepEqual([...(await raw(changedRaster)).subarray(0, 4)], [0, 0, 255, 128], 'Changed image bytes must invalidate the cached layer even under the same reference')
+const opaqueRaster = (await renderRasters([{ ...rasterInput, overlay: { ...rasterInput.overlay, opacity: 1 } }], rasterRequest)).get('cache-fixture').input
+assert.equal((await raw(opaqueRaster))[3], 255, 'Changed opacity must invalidate the cached layer')
+const shiftedRaster = (await renderRasters([rasterInput], { ...rasterRequest, bbox: [7, 50.5, 7.1, 50.6] })).get('cache-fixture').input
+assert.equal(await visible(shiftedRaster), false, 'Panning must invalidate the cached layer')
 await assert.rejects(renderRasters([{ ...rasterInput, bytes: Buffer.from('broken image') }], rasterRequest))
 const workerAbort = new AbortController()
 const workerAbortTimer = setTimeout(() => workerAbort.abort(), 5)
@@ -346,4 +356,4 @@ const unavailable = await invoke(query({ LAYERS: 'precipitation' }), { target: b
 assert.equal(unavailable.statusCode, 503, 'A missing image is an error, not an empty observation')
 assert.equal(unavailable.headers['cache-control'], 'no-store')
 
-console.log(JSON.stringify({ layers: layers.length, imageReads: reads, axisOrder: 'passed', rasterReprojection: 'passed', historicalSelection: 'passed', cacheInvalidation: 'passed', workerCancellation: 'passed', concurrency: 'passed', preview: '/tmp/fire-wms-preview.png' }, null, 2))
+console.log(JSON.stringify({ layers: layers.length, imageReads: reads, axisOrder: 'passed', rasterReprojection: 'passed', historicalSelection: 'passed', cacheInvalidation: 'passed', rasterCache: 'passed', workerCancellation: 'passed', concurrency: 'passed', preview: '/tmp/fire-wms-preview.png' }, null, 2))
