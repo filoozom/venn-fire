@@ -84,6 +84,7 @@ assert.match(capabilitiesText, /https:\/\/venn.apyos.com\/wms\?/u)
 assert.match(capabilitiesText, /Test &amp; station/u)
 assert.match(capabilitiesText, /PT5M<\/Dimension>/u)
 assert.match(capabilitiesText, /<LayerLimit>64<\/LayerLimit>/u)
+assert.match(capabilitiesText, /<MaxWidth>4096<\/MaxWidth><MaxHeight>2048<\/MaxHeight>/u)
 assert.match(capabilitiesText, /<CRS>EPSG:31370<\/CRS><CRS>EPSG:3812<\/CRS>/u)
 for (const title of ['Fire extent and change', 'Thermal detections', 'Satellite imagery', 'Weather', 'Air quality models', 'Aircraft', 'Reference']) {
   assert.ok(capabilitiesText.includes(`<Layer><Title>${title}</Title>`), `Missing organizational group ${title}`)
@@ -119,6 +120,7 @@ for (const [changes, code] of [
   [{ STYLES: 'remote' }, 'StyleNotDefined'],
   [{ FORMAT: 'image/jpeg' }, 'InvalidFormat'],
   [{ WIDTH: '99999' }, 'InvalidParameterValue'],
+  [{ WIDTH: '4097' }, 'InvalidParameterValue'],
   [{ WIDTH: '2048', HEIGHT: '2049' }, 'InvalidParameterValue'],
   [{ BBOX: '6,50,5,51' }, 'InvalidParameterValue'],
   [{ BBOX: '6,,6.1,50.6' }, 'InvalidParameterValue'],
@@ -152,11 +154,11 @@ assert.equal(high.statusCode, 200)
 assert.equal(high.headers['content-type'], 'image/png')
 assert.equal(high.headers['x-wms-time'], time)
 assert.ok(await visible(high.body))
-// WalOnMap tiles large viewports at the advertised maximum width AND height.
-const fullTile = await invoke(query({ LAYERS: 'firms_viirs_snpp_high', WIDTH: '2048', HEIGHT: '2048' }))
+// The entire advertised rectangle must render; wide screens should not split at 2048.
+const fullTile = await invoke(query({ LAYERS: 'firms_viirs_snpp_high', WIDTH: '4096', HEIGHT: '2048' }))
 assert.equal(fullTile.statusCode, 200, String(fullTile.body).slice(0, 200))
 const tileSize = await sharp(fullTile.body).metadata()
-assert.equal(tileSize.width, 2048)
+assert.equal(tileSize.width, 4096)
 assert.equal(tileSize.height, 2048)
 assert.ok(await visible(fullTile.body))
 const native = await invoke(query({ LAYERS: 'firms_viirs_snpp_high', CRS: 'EPSG:4326', BBOX: '50.5,6,50.6,6.1' }))
@@ -190,6 +192,16 @@ const allLayers = await invoke(query({ LAYERS: layers.map((layer) => layer.name)
 assert.ok(layers.length > 32, 'The regression must cover selecting more than 32 advertised layers')
 assert.equal(allLayers.statusCode, 200)
 assert.ok(await visible(allLayers.body))
+const wideViewport = await invoke(query({
+  LAYERS: layers.map((layer) => layer.name).join(','), TIME: at(10),
+  WIDTH: '2560', HEIGHT: '1367', CRS: 'EPSG:3812',
+  BBOX: '744285.4456263728,625244.833547416,795085.547226576,652371.2940503369',
+}))
+assert.equal(wideViewport.statusCode, 200, 'The real WalOnMap viewport must fit in one full-resolution map')
+const viewportSize = await sharp(wideViewport.body).metadata()
+assert.equal(viewportSize.width, 2560)
+assert.equal(viewportSize.height, 1367)
+assert.ok(await visible(wideViewport.body))
 
 const cached = await invoke(query({ LAYERS: 'firms_viirs_snpp_high' }), { headers: { 'if-none-match': high.headers.etag } })
 assert.equal(cached.statusCode, 304)

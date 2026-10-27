@@ -5,8 +5,9 @@ import proj4 from 'proj4'
 proj4.defs('EPSG:31370', '+proj=lcc +lat_0=90 +lon_0=4.36748666666667 +lat_1=51.1666672333333 +lat_2=49.8333339 +x_0=150000.013 +y_0=5400088.438 +ellps=intl +towgs84=-106.8686,52.2978,-103.7239,0.3366,-0.457,1.8422,-1.2747 +units=m +no_defs')
 proj4.defs('EPSG:3812', '+proj=lcc +lat_0=50.797815 +lon_0=4.35921583333333 +lat_1=49.8333333333333 +lat_2=51.1666666666667 +x_0=649328 +y_0=665262 +ellps=GRS80 +units=m +no_defs')
 
-export const WMS_MAX_SIZE = 2048
-export const WMS_MAX_PIXELS = WMS_MAX_SIZE ** 2
+export const WMS_MAX_WIDTH = 4096
+export const WMS_MAX_HEIGHT = 2048
+export const WMS_MAX_PIXELS = WMS_MAX_WIDTH * WMS_MAX_HEIGHT
 export const WMS_MAX_LAYERS = 64
 export const WMS_CRS = ['CRS:84', 'EPSG:4326', 'EPSG:3857', 'EPSG:31370', 'EPSG:3812']
 export const MERCATOR_LIMIT = 20037508.342789244
@@ -123,12 +124,12 @@ export function mapRequest(parameters, layers, runtime) {
   const maxX = geographic ? 180 : MERCATOR_LIMIT
   const maxY = geographic ? 90 : MERCATOR_LIMIT
   if (east <= west || north <= south || west < -maxX || east > maxX || south < -maxY || north > maxY) throw wmsError('InvalidParameterValue', 'BBOX is outside the CRS domain or has non-positive extent')
-  const size = (key) => {
+  const size = (key, maximum) => {
     const value = required(key)
-    if (!/^\d+$/u.test(value) || Number(value) < 1 || Number(value) > WMS_MAX_SIZE) throw wmsError('InvalidParameterValue', `${key} must be between 1 and ${WMS_MAX_SIZE}`)
+    if (!/^\d+$/u.test(value) || Number(value) < 1 || Number(value) > maximum) throw wmsError('InvalidParameterValue', `${key} must be between 1 and ${maximum}`)
     return Number(value)
   }
-  const width = size('WIDTH'), height = size('HEIGHT')
+  const width = size('WIDTH', WMS_MAX_WIDTH), height = size('HEIGHT', WMS_MAX_HEIGHT)
   if (width * height > WMS_MAX_PIXELS) throw wmsError('InvalidParameterValue', `Map exceeds ${WMS_MAX_PIXELS} pixels`)
   const transparent = (parameters.get('TRANSPARENT') ?? 'FALSE').toUpperCase()
   if (!['TRUE', 'FALSE'].includes(transparent)) throw wmsError('InvalidParameterValue', 'TRANSPARENT must be TRUE or FALSE')
@@ -188,7 +189,7 @@ ${layer.static ? '' : `<Dimension name="time" units="ISO8601" default="${default
   }
   return `<?xml version="1.0" encoding="UTF-8"?>
 <WMS_Capabilities version="1.3.0" xmlns="http://www.opengis.net/wms" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.opengis.net/wms https://schemas.opengis.net/wms/1.3.0/capabilities_1_3_0.xsd">
-<Service><Name>WMS</Name><Title>Venn Fire Watch</Title><Abstract>Independent incident overlays with five-minute historical map states. TIME describes observation/forecast validity, not what was known when the page was first published.</Abstract>${online}<Fees>none</Fees><AccessConstraints>Source attribution and source data terms apply.</AccessConstraints><LayerLimit>${WMS_MAX_LAYERS}</LayerLimit><MaxWidth>${WMS_MAX_SIZE}</MaxWidth><MaxHeight>${WMS_MAX_SIZE}</MaxHeight></Service>
+<Service><Name>WMS</Name><Title>Venn Fire Watch</Title><Abstract>Independent incident overlays with five-minute historical map states. TIME describes observation/forecast validity, not what was known when the page was first published.</Abstract>${online}<Fees>none</Fees><AccessConstraints>Source attribution and source data terms apply.</AccessConstraints><LayerLimit>${WMS_MAX_LAYERS}</LayerLimit><MaxWidth>${WMS_MAX_WIDTH}</MaxWidth><MaxHeight>${WMS_MAX_HEIGHT}</MaxHeight></Service>
 <Capability><Request>${operation('GetCapabilities', 'text/xml')}${operation('GetMap', 'image/png')}</Request><Exception><Format>XML</Format></Exception>
 <Layer><Title>Venn Fire Watch overlays</Title>${WMS_CRS.map((crs) => `<CRS>${crs}</CRS>`).join('')}${groups.map(layerXml).join('')}</Layer></Capability></WMS_Capabilities>`
 }
