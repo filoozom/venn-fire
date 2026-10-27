@@ -73,7 +73,7 @@ async function invoke(url, { target = handler, method = 'GET', headers = {}, res
   await target({ url, method, headers: { host: 'venn.apyos.com', 'x-forwarded-proto': 'https', ...headers } }, result)
   return result
 }
-const raw = async (bytes) => sharp(bytes).ensureAlpha().raw().toBuffer()
+const raw = async (image) => (image.raw ? sharp(image.input, { raw: image.raw }) : sharp(image)).ensureAlpha().raw().toBuffer()
 const visible = async (bytes) => (await raw(bytes)).some((value, index) => index % 4 === 3 && value > 0)
 
 const capabilities = await invoke('/wms?service=WMS&request=GetCapabilities')
@@ -238,17 +238,43 @@ for (const crs of ['EPSG:31370', 'EPSG:3812']) {
   const emptyImage = await sharp({ create: { width: 2, height: 2, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).png().toBuffer()
   assert.equal(await visible(await reprojectRaster(emptyImage, overlay, request)), false, 'A dry radar image must stay transparent')
   const wide = { ...request, bbox: [center[0] - 220000, center[1] - 220000, center[0] + 220000, center[1] + 220000] }
-  const pixels = await raw(await reprojectRaster(checker, overlay, wide))
-  for (let y = 0; y < wide.height; y += 9) {
-    for (let x = 0; x < wide.width; x += 9) {
-      const [lon, lat] = proj4(crs, 'EPSG:4326', [wide.bbox[0] + (x + 0.5) * 4400, wide.bbox[3] - (y + 0.5) * 4400])
-      const expected = lon < 2 || lon >= 8 || lat <= 49 || lat > 52 ? [0, 0, 0, 0]
-        : lat > 50.5 ? lon < 5 ? [255, 0, 0, 255] : [0, 255, 0, 255]
-          : lon < 5 ? [0, 0, 255, 255] : [255, 255, 0, 255]
-      const offset = (y * wide.width + x) * 4
-      assert.deepEqual([...pixels.subarray(offset, offset + 4)], expected, `${crs} raster pixel ${x},${y}`)
+  for (const sourceCrs of ['EPSG:4326', 'EPSG:3857']) {
+    const pixels = await raw(await reprojectRaster(checker, { ...overlay, crs: sourceCrs }, wide))
+    const bottom = proj4('EPSG:4326', sourceCrs, [2, 49])[1]
+    const top = proj4('EPSG:4326', sourceCrs, [8, 52])[1]
+    for (let y = 0; y < wide.height; y += 9) {
+      for (let x = 0; x < wide.width; x += 9) {
+        const [lon, lat] = proj4(crs, 'EPSG:4326', [wide.bbox[0] + (x + 0.5) * 4400, wide.bbox[3] - (y + 0.5) * 4400])
+        const sourceY = proj4('EPSG:4326', sourceCrs, [lon, lat])[1]
+        const expected = lon < 2 || lon >= 8 || lat <= 49 || lat > 52 ? [0, 0, 0, 0]
+          : sourceY > (bottom + top) / 2 ? lon < 5 ? [255, 0, 0, 255] : [0, 255, 0, 255]
+            : lon < 5 ? [0, 0, 255, 255] : [255, 255, 0, 255]
+        const offset = (y * wide.width + x) * 4
+        assert.deepEqual([...pixels.subarray(offset, offset + 4)], expected, `${sourceCrs} to ${crs} raster pixel ${x},${y}`)
+      }
     }
   }
+}
+
+// The direct Lambert inverse must agree with the independent iterative transform.
+const domainRequest = { width: 64, height: 64, crs: 'EPSG:3812', bbox: [-20000000, -20000000, 20000000, 20000000] }
+const domainCache = {}
+await reprojectRaster(red, { bounds, crs: 'EPSG:4326', opacity: 1 }, domainRequest, domainCache)
+for (let y = 0; y < 64; y += 1) {
+  for (let x = 0; x < 64; x += 1) {
+    const expected = proj4('EPSG:3812', 'EPSG:4326', [-20000000 + (x + 0.5) * 625000, 20000000 - (y + 0.5) * 625000])
+    const offset = (y * 64 + x) * 2
+    assert.ok(Math.abs(domainCache.geographic[offset] - expected[0]) < 1e-9, 'Lambert longitude must retain submillimetre accuracy')
+    assert.ok(Math.abs(domainCache.geographic[offset + 1] - expected[1]) < 1e-9, 'Lambert latitude must retain submillimetre accuracy')
+  }
+}
+const camsImage = await sharp({ create: { width: 8, height: 8, channels: 4, background: '#ff0000' } }).png().toBuffer()
+const camsPixels = await raw(await reprojectRaster(camsImage, { bounds, crs: 'EPSG:4326', sourceKey: 'cams', opacity: 0.5 }, {
+  width: 64, height: 64, crs: 'CRS:84', bbox: [6, 50.5, 6.1, 50.6],
+}))
+for (const [sourcePixel, expectedAlpha] of [[0, 46], [1, 118], [3, 128]]) {
+  const pixel = sourcePixel * 8 + 4
+  assert.equal(camsPixels[(pixel * 64 + pixel) * 4 + 3], expectedAlpha, 'CAMS opacity must retain the centre, middle and edge fade')
 }
 
 const abort = new AbortController()

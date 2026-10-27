@@ -45,18 +45,49 @@ function svgDrawing(request) {
 
 // Inverse-map output pixel centres into the retained crop's actual projection.
 // Nearest-neighbour sampling preserves the discrete radar categories and palette.
+function lambert2008Inverse() {
+  const p = new proj4.Proj('EPSG:3812')
+  const e2 = p.es, e4 = e2 * e2, e6 = e4 * e2, e8 = e4 * e4
+  // Snyder (USGS PP 1395), equations 3-5 and 7-13, avoids iterative latitude solves.
+  const c2 = e2 / 2 + 5 * e4 / 24 + e6 / 12 + 13 * e8 / 360
+  const c4 = 7 * e4 / 48 + 29 * e6 / 240 + 811 * e8 / 11520
+  const c6 = 7 * e6 / 120 + 81 * e8 / 1120
+  const c8 = 4279 * e8 / 161280
+  return (point) => {
+    const x = (point.x - p.x0) / p.k0, y = p.rh - (point.y - p.y0) / p.k0
+    const t = Math.pow(Math.sqrt(x * x + y * y) / (p.a * p.f0), 1 / p.ns)
+    const chi = Math.PI / 2 - 2 * Math.atan(t)
+    const cosine = Math.cos(2 * chi)
+    const longitude = Math.atan2(x, y) / p.ns + p.long0
+    point.x = longitude > Math.PI ? longitude - 2 * Math.PI : longitude < -Math.PI ? longitude + 2 * Math.PI : longitude
+    point.y = chi + Math.sin(2 * chi) * (c2 + 2 * c4 * cosine + c6 * (4 * cosine * cosine - 1) + c8 * (8 * cosine ** 3 - 4 * cosine))
+  }
+}
+
 async function geographicPixels(request, signal) {
   const target = projection(request.crs)
+  // Lambert 2008 has no datum shift; Lambert 72 keeps the full calibrated transform.
+  const native = request.crs === 'EPSG:3812' ? lambert2008Inverse() : null
+  const point = { x: 0, y: 0 }
   const [west, south, east, north] = request.bbox
   const positions = new Float64Array(request.width * request.height * 2)
   for (let y = 0; y < request.height; y += 1) {
     if (signal && y % 64 === 0) { await yieldToIo(); signal.throwIfAborted() }
     const outputY = north - (y + 0.5) / request.height * (north - south)
     for (let x = 0; x < request.width; x += 1) {
-      const point = target.inverse([west + (x + 0.5) / request.width * (east - west), outputY])
+      const outputX = west + (x + 0.5) / request.width * (east - west)
       const offset = (y * request.width + x) * 2
-      positions[offset] = point[0]
-      positions[offset + 1] = point[1]
+      if (native) {
+        point.x = outputX
+        point.y = outputY
+        native(point)
+        positions[offset] = point.x * (180 / Math.PI)
+        positions[offset + 1] = point.y * (180 / Math.PI)
+      } else {
+        const geographic = target.inverse([outputX, outputY])
+        positions[offset] = geographic[0]
+        positions[offset + 1] = geographic[1]
+      }
     }
   }
   return positions
@@ -72,14 +103,30 @@ export async function reprojectRaster(bytes, overlay, request, projectionCache =
   const [right, top] = source.forward([east, north])
   if (![left, bottom, right, top].every(Number.isFinite) || right <= left || top <= bottom) throw new Error('Invalid retained image bounds')
   const rgba = Buffer.alloc(request.width * request.height * 4)
+  const composite = { input: rgba, raw: { width: request.width, height: request.height, channels: 4 } }
   if (!data.some((value, index) => index % 4 === 3 && value > 0)) {
-    return sharp(rgba, { raw: { width: request.width, height: request.height, channels: 4 } }).png().toBuffer()
+    return composite
+  }
+  // Many output pixels reuse one source pixel, including its opacity and CAMS fade.
+  for (let y = 0; y < info.height; y += 1) {
+    if (signal && y % 64 === 0) { await yieldToIo(); signal.throwIfAborted() }
+    for (let x = 0; x < info.width; x += 1) {
+      const input = (y * info.width + x) * 4
+      let alpha = overlay.opacity
+      if (overlay.sourceKey === 'cams') {
+        const radius = Math.hypot((x + 0.5) / info.width * 2 - 1, (y + 0.5) / info.height * 2 - 1) / Math.SQRT2
+        alpha *= radius <= 0.58 ? 1 : radius <= 0.75 ? 1 - (radius - 0.58) / 0.17 * 0.28 : Math.max(0, (1 - radius) / 0.25 * 0.72)
+      }
+      data[input + 3] = Math.round(data[input + 3] * alpha)
+    }
   }
   const [minX, minY, maxX, maxY] = request.bbox
   // Lambert couples both axes; geographic/Mercator retain the cheaper axis lookup.
   const separable = !['EPSG:31370', 'EPSG:3812'].includes(request.crs)
   // A combined map shares this bounded grid across its retained image layers.
   const positions = separable ? null : (projectionCache.geographic ??= await geographicPixels(request, signal))
+  const mercator = overlay.crs === 'EPSG:3857' ? new proj4.Proj(overlay.crs) : null
+  const point = { x: 0, y: 0 }
   const columns = new Int32Array(request.width)
   const rows = new Int32Array(request.height)
   for (let x = 0; separable && x < request.width; x += 1) {
@@ -100,26 +147,29 @@ export async function reprojectRaster(bytes, overlay, request, projectionCache =
       let sourceX = columns[x], sourceY = rows[y]
       if (!separable) {
         const offset = (y * request.width + x) * 2
-        const point = [positions[offset], positions[offset + 1]]
-        const [sx, sy] = overlay.crs === 'EPSG:4326' ? point : source.forward(point)
+        let sx = positions[offset], sy = positions[offset + 1]
+        if (mercator) {
+          point.x = sx * (Math.PI / 180)
+          point.y = sy * (Math.PI / 180)
+          if (!mercator.forward(point)) throw new Error('Invalid projected point')
+          sx = point.x
+          sy = point.y
+        } else if (overlay.crs !== 'EPSG:4326') {
+          [sx, sy] = source.forward([sx, sy])
+        }
         sourceX = Math.floor((sx - left) / (right - left) * info.width)
         sourceY = Math.floor((top - sy) / (top - bottom) * info.height)
       }
       if (!Number.isFinite(sourceX) || !Number.isFinite(sourceY) || sourceX < 0 || sourceX >= info.width || sourceY < 0 || sourceY >= info.height) continue
       const input = (sourceY * info.width + sourceX) * 4
       const output = (y * request.width + x) * 4
-      let alpha = overlay.opacity
-      if (overlay.sourceKey === 'cams') {
-        const radius = Math.hypot((sourceX + 0.5) / info.width * 2 - 1, (sourceY + 0.5) / info.height * 2 - 1) / Math.SQRT2
-        alpha *= radius <= 0.58 ? 1 : radius <= 0.75 ? 1 - (radius - 0.58) / 0.17 * 0.28 : Math.max(0, (1 - radius) / 0.25 * 0.72)
-      }
       rgba[output] = data[input]
       rgba[output + 1] = data[input + 1]
       rgba[output + 2] = data[input + 2]
-      rgba[output + 3] = Math.round(data[input + 3] * alpha)
+      rgba[output + 3] = data[input + 3]
     }
   }
-  return sharp(rgba, { raw: { width: request.width, height: request.height, channels: 4 } }).png().toBuffer()
+  return composite
 }
 
 function vectorLayer(layer, bundle, state, request, draw) {
@@ -210,7 +260,7 @@ export async function renderMap(bundle, request, loadImage, signal) {
     const overlay = overlays.find((entry) => entry.key === layer.key)
     if (!overlay) continue
     const bytes = await loadImage(overlay)
-    composites.push({ input: await reprojectRaster(bytes, overlay, request, projectionCache, signal) })
+    composites.push(await reprojectRaster(bytes, overlay, request, projectionCache, signal))
   }
   flushVectors()
   signal?.throwIfAborted()
